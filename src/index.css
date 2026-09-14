@@ -1,62 +1,168 @@
+/* IBM Plex Sans 400/500/600/700，woff2 随应用本地加载，离线可用（design.md 4.2）。 */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
 @import "tailwindcss";
 
 /*
- * Design tokens for this project.
- *
- * These are our own values, chosen to follow the visual principles extracted
- * from the reference app (analysis/reports/design-system.md): near-invisible
- * canvas/panel difference carried by 1px hairlines, a single warm accent used
- * only for focus and selection, square corners, no shadows, small uppercase
- * headings. The literal numeric values are ours, not copied.
+ * 设计 token（design.md §4）。两个浅色主题——白底与灰底——通过 <html
+ * data-theme="white|gray"> 切换；组件只消费下面的语义 token 或其 Tailwind
+ * 工具类，不得硬编码色值。数值为本仓库设计基线自有取值，非原应用样式表。
  */
-@theme {
-  /* neutral ramp — canvas to ink */
-  --color-ink-25: #fcfcfc;
-  --color-ink-50: #f6f6f6;
-  --color-ink-100: #e8e8e8;
-  --color-ink-200: #d2d2d2;
-  --color-ink-300: #b1b1b1;
-  --color-ink-400: #898989;
-  --color-ink-500: #6e6e6e;
-  --color-ink-600: #5e5e5e;
-  --color-ink-700: #505050;
-  --color-ink-800: #3f3f3f;
-  --color-ink-900: #2e2e2e;
-  --color-ink-950: #1b1b1b;
-
-  /* the only accent */
-  --color-accent-500: #e85c2a;
-  --color-accent-600: #bd4520;
-
-  /* semantic */
-  --color-danger-50: #fff0ee;
-  --color-danger-500: #d92d20;
-
-  /* type */
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", ui-monospace, Menlo, monospace;
-
-  /* layout */
-  --spacing-header: 40px;
-  --spacing-panel: 424px;
-}
 
 :root {
-  --app-header-height: var(--spacing-header);
+  /* 表面 */
+  --surface-canvas: #ffffff; /* 工作台与窗口栏共用画布（3.4） */
+  --surface-content: #ffffff; /* 计划正文、面板、菜单、弹窗的阅读面 */
+  --surface-subtle: #fafbfc; /* 小范围辅助说明 */
+  --surface-hover: #f5f7f8; /* 仅覆盖正在操作的按钮或条目 */
+
+  /* 文字 */
+  --text-primary: #25292f;
+  --text-secondary: #616974;
+  --text-hint: #6b727b;
+
+  /* 边界 */
+  --border-light: #edf0f2; /* 装饰性分隔，不承担控件识别 */
+  --border-frame: transparent; /* 白底主题计划面只用必要分隔 */
+  --border-control: #858c96; /* 完成框等有操作含义的边界 */
+
+  /* 焦点与导航选中 */
+  --color-focus: #2f62a3;
+  --surface-focus: #eef5ff;
+
+  /* 暖色强调、危险、待确认 */
+  --color-accent: #e85c2a;
+  --color-accent-strong: #bd4520; /* 小字暖色，保对比度 */
+  --color-danger: #d92d20;
+  --surface-danger: #fff0ee;
+  --surface-proposal: #fdf3ec;
+
+  /* 布局（3.3/3.4）：统一窗口栏 52px、辅助面板 424px、计划内容面 512px */
+  --app-header-height: 52px;
 }
 
-html,
-body,
-#root {
-  height: 100%;
+/* 灰底主题只覆盖画布、轻量表面、hover、提示文字与边界；内容面、文字主色、
+ * 控件边界、焦点与暖色不变，保证切换时内容几何不动（4.4）。 */
+:root[data-theme="gray"] {
+  --surface-canvas: #f6f6f6;
+  --surface-subtle: #f0f0f0;
+  --surface-hover: #e8e8e8;
+  --text-hint: #666e78;
+  --border-light: #e2e2e2;
+  --border-frame: #e3e3e3; /* 灰底用白色内容面四边细框承托 */
 }
 
-body {
-  margin: 0;
-  background: var(--color-ink-25);
-  color: var(--color-ink-950);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 20px;
-  -webkit-font-smoothing: antialiased;
+/* 静态主题：字体、字号、间距节奏与动画命名。 */
+@theme {
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* 字号 / 行高（4.2），行高按中文阅读调整 */
+  --text-caption: 0.75rem; /* 12/16 日期、状态、快捷键 */
+  --text-caption--line-height: 1rem;
+  --text-menu: 0.8125rem; /* 13/20 菜单与次要正文 */
+  --text-menu--line-height: 1.25rem;
+  --text-body: 0.875rem; /* 14/22 任务与会话正文 */
+  --text-body--line-height: 1.375rem;
+  --text-block-title: 0.875rem; /* 14/20 块标题，靠字重区分 */
+  --text-block-title--line-height: 1.25rem;
+  --text-section-title: 1rem; /* 16/20 计划区标题 */
+  --text-section-title--line-height: 1.25rem;
+  --text-timer: 1rem; /* 16/20 运行计时，等宽数字 */
+  --text-timer--line-height: 1.25rem;
+  --text-dialog-title: 1.125rem; /* 18/24 弹窗主标题 */
+  --text-dialog-title--line-height: 1.5rem;
+
+  /* 布局间距：辅助面板与计划内容面默认宽度（3.3） */
+  --spacing-panel: 424px;
+  --spacing-plan: 512px;
+
+  --animate-fade-in: ui-fade-in 160ms ease-out;
+  --animate-pop-in: ui-pop-in 180ms ease-out;
+  --animate-dot-pulse: ui-dot-pulse 1.6s ease-in-out infinite;
+}
+
+/* 语义色映射到运行时 CSS 变量；用 inline 让工具类直接引用变量值，
+ * data-theme 切换即可全局生效，无需重建任何组件。 */
+@theme inline {
+  --color-canvas: var(--surface-canvas);
+  --color-content: var(--surface-content);
+  --color-subtle: var(--surface-subtle);
+  --color-hover: var(--surface-hover);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-hint: var(--text-hint);
+
+  --color-light: var(--border-light);
+  --color-frame: var(--border-frame);
+  --color-control: var(--border-control);
+
+  --color-focus: var(--color-focus);
+  --color-focus-surface: var(--surface-focus);
+
+  --color-accent: var(--color-accent);
+  --color-accent-strong: var(--color-accent-strong);
+
+  --color-danger: var(--color-danger);
+  --color-danger-surface: var(--surface-danger);
+  --color-proposal: var(--surface-proposal);
+}
+
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes ui-dot-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--surface-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 22px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 全局键盘焦点轮廓（4.1 焦点色）；组件不另行降低它的可见性 */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 1px;
+  }
+
+  /* 减少动效：去掉位移、脉冲与重复动画（design.md 10） */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }

@@ -48,15 +48,15 @@
 
 ## 7. 前端
 
-- [ ] 7.1 设计 token：按 `analysis/reports/design-system.md` 的原则定义我们自己的颜色/字阶/间距/描边（**重新取值，不复制原样式表**）
-- [ ] 7.2 `lib/ipc.ts` 与 `lib/events.ts`：命令封装与事件订阅 → 失效 react-query
-- [ ] 7.3 `ui/`：Button（primary/secondary/ghost）、Input、Checkbox、Dialog、Popover、EmptyState（虚线框 + 图标 + 大写标题 + 一句解释 + 主按钮）、ProgressDot
-- [ ] 7.4 `features/planner/`：横向可滚的周期列；列为空时显示 EmptyState 与唯一主按钮；列头显示剩余时间与选项菜单
-- [ ] 7.5 长周期时长选择弹窗：1/3/6 月三选一，右侧实时显示推导出的时间线（设置日 → 推进期 → 复盘日）
-- [ ] 7.6 `features/later/`：Do Later 侧栏，含一次性说明卡（关闭状态持久化）
-- [ ] 7.7 `features/proposals/`：待确认改动的视觉区分（高亮底色）与底栏 `You have N pending edits by agent` + Revert/Keep
-- [ ] 7.8 键盘：`⌘⇧L` 打开 Do Later；拖拽排序用乐观更新
-- [ ] 7.9 前端测试：EmptyState 分支、待确认计数、时长选择后的时间线推导
+- [x] 7.1 设计 token：按 `analysis/reports/design-system.md` 的原则定义我们自己的颜色/字阶/间距/描边（**重新取值，不复制原样式表**）
+- [x] 7.2 `lib/ipc.ts` 与 `lib/events.ts`：命令封装与事件订阅 → 失效 react-query
+- [x] 7.3 `ui/`：Button（primary/secondary/ghost）、Input、Checkbox、Dialog、Popover、EmptyState（虚线框 + 图标 + 大写标题 + 一句解释 + 主按钮）、ProgressDot
+- [x] 7.4 `features/planner/`：横向可滚的周期列；列为空时显示 EmptyState 与唯一主按钮；列头显示剩余时间与选项菜单
+- [x] 7.5 长周期时长选择弹窗：1/3/6 月三选一，右侧实时显示推导出的时间线（设置日 → 推进期 → 复盘日）
+- [x] 7.6 `features/later/`：Do Later 侧栏，含一次性说明卡（关闭状态持久化）
+- [x] 7.7 `features/proposals/`：待确认改动的视觉区分（高亮底色）与底栏 `You have N pending edits by agent` + Revert/Keep
+- [x] 7.8 键盘：`⌘⇧L` 打开 Do Later；拖拽排序用乐观更新
+- [x] 7.9 前端测试：EmptyState 分支、待确认计数、时长选择后的时间线推导
 
 ## 8. 重复日程
 
@@ -77,11 +77,11 @@
 
 对应规范：`openspec/specs/local-logging/spec.md`
 
-- [ ] 9.1 `logging` 统一日志桩：全部模块经它写日志；级别 error/warn/info/debug 可调；每条带模块标识与级别
-- [ ] 9.2 文件 sink：应用数据目录下的日志文件，按大小滚动淘汰（上限与保留份数为固定常量）；写入失败静默，不阻塞业务、不向用户报错
-- [ ] 9.3 敏感边界：凭据（API Key、令牌）绝不入日志（含错误链路）；完整计划内容只允许 debug 级别
-- [ ] 9.4 命令 `get_debug_log_dir`：返回日志目录路径（前端设置页提供「打开日志目录」入口）
-- [ ] 9.5 测试：级别过滤；滚动淘汰；写失败不 panic；以包含敏感串的凭据断言日志文件无明文
+- [x] 9.1 `logging` 统一日志桩：全部模块经它写日志；级别 error/warn/info/debug 可调；每条带模块标识与级别
+- [x] 9.2 文件 sink：应用数据目录下的日志文件，按大小滚动淘汰（上限与保留份数为固定常量）；写入失败静默，不阻塞业务、不向用户报错
+- [x] 9.3 敏感边界：凭据（API Key、令牌）绝不入日志（含错误链路）；完整计划内容只允许 debug 级别
+- [x] 9.4 命令 `get_debug_log_dir`：返回日志目录路径（前端设置页提供「打开日志目录」入口）
+- [x] 9.5 测试：级别过滤；滚动淘汰；写失败不 panic；以包含敏感串的凭据断言日志文件无明文
 
 ## 10. 编辑态后端契约
 

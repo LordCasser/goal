@@ -12,7 +12,9 @@ pub mod domain;
 pub mod error;
 pub mod events;
 pub mod logging;
+pub mod providers;
 pub mod repository;
+pub mod sampling;
 pub mod service;
 
 use tauri::Manager;
@@ -20,6 +22,7 @@ use tauri::Manager;
 /// Boots the Tauri application.
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let state = db::init(&handle)?;
@@ -34,6 +37,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // cycles
             commands::cycles::get_planner_state,
+            commands::cycles::list_sessions,
             commands::cycles::create_planning_cycle,
             commands::cycles::update_cycle,
             commands::cycles::get_cycle_deletion_preview,

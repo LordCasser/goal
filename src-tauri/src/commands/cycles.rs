@@ -16,6 +16,12 @@ pub fn get_planner_state(db: State<'_, Db>) -> AppResult<cycles::PlannerState> {
     cycles::get_planner_state(&db)
 }
 
+/// Focus blocks of one day; empty when the cycle is not a day (or missing).
+#[tauri::command]
+pub fn list_sessions(db: State<'_, Db>, day_cycle_id: String) -> AppResult<Vec<crate::domain::cycle::Cycle>> {
+    cycles::list_sessions(&db, &day_cycle_id)
+}
+
 #[tauri::command]
 pub fn create_planning_cycle(
     app: tauri::AppHandle<tauri::Wry>,

@@ -1,0 +1,104 @@
+/**
+ * Contract tests for the IPC wrappers: the command names and the argument
+ * keys must match the Rust side exactly (Tauri 2 does no case conversion),
+ * and the AppError guard must recognize the serialized `{code, message}` shape.
+ * The real invoke is mocked — these tests pin the wire contract, not Tauri.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+}));
+
+import {
+  commands,
+  createPlanningCycle,
+  isAppError,
+  moveTask,
+  reorderTasks,
+  updateCycle,
+  updateTask,
+} from "./ipc";
+
+beforeEach(() => {
+  invokeMock.mockReset();
+});
+
+describe("command name registry", () => {
+  it("declares the registered Rust command names verbatim", () => {
+    expect(commands.createPlanningCycle).toBe("create_planning_cycle");
+    expect(commands.moveTask).toBe("move_task");
+    expect(commands.reorderTasks).toBe("reorder_tasks");
+    expect(commands.getPlannerState).toBe("get_planner_state");
+  });
+});
+
+describe("argument key contract", () => {
+  it("nests struct parameters under the Rust parameter name `args`", async () => {
+    invokeMock.mockResolvedValue({});
+    await createPlanningCycle({ cycle_type: "month", duration_months: 3 });
+    expect(invokeMock).toHaveBeenCalledWith(commands.createPlanningCycle, {
+      args: { cycle_type: "month", duration_months: 3 },
+    });
+  });
+
+  it("keeps snake_case parameter keys for scalar parameters", async () => {
+    invokeMock.mockResolvedValue({});
+
+    await moveTask("t1", "c2", 3);
+    expect(invokeMock).toHaveBeenCalledWith(commands.moveTask, {
+      task_id: "t1",
+      target_cycle_id: "c2",
+      position: 3,
+    });
+
+    await reorderTasks("c1", null, ["a", "b"]);
+    expect(invokeMock).toHaveBeenLastCalledWith(commands.reorderTasks, {
+      cycle_id: "c1",
+      parent_id: null,
+      ordered_ids: ["a", "b"],
+    });
+
+    await updateCycle("s1", "Deep work", null);
+    expect(invokeMock).toHaveBeenLastCalledWith(commands.updateCycle, {
+      cycle_id: "s1",
+      title: "Deep work",
+      duration_ms: null,
+    });
+  });
+
+  it("passes the patch struct under its own parameter name", async () => {
+    invokeMock.mockResolvedValue({});
+    await updateTask("t1", "Ship it", { completed: true });
+    expect(invokeMock).toHaveBeenCalledWith(commands.updateTask, {
+      task_id: "t1",
+      title: "Ship it",
+      patch: { completed: true },
+    });
+  });
+});
+
+describe("AppError guard", () => {
+  it("rejects with the serialized error so isAppError can narrow it", async () => {
+    const rejection = { code: "past_cycle", message: "Past cycles can't be deleted." };
+    invokeMock.mockRejectedValue(rejection);
+
+    const caught = await updateCycle("s1", "x", null).catch((e: unknown) => e);
+    expect(caught).toEqual(rejection);
+    expect(isAppError(caught)).toBe(true);
+    if (isAppError(caught)) {
+      expect(caught.code).toBe("past_cycle");
+      expect(caught.message).toContain("Past cycles");
+    }
+  });
+
+  it("rejects shapes that are not the serialized AppError", () => {
+    expect(isAppError(new Error("plain"))).toBe(false);
+    expect(isAppError(null)).toBe(false);
+    expect(isAppError("code")).toBe(false);
+    expect(isAppError({ code: 404, message: "numeric" })).toBe(false);
+    expect(isAppError({ code: "not_found", message: "cycle not found: x" })).toBe(true);
+  });
+});

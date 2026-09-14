@@ -43,6 +43,14 @@ pub fn get_planner_state(db: &Db) -> AppResult<PlannerState> {
     Ok(PlannerState { cycles, later })
 }
 
+/// Focus blocks of one day cycle, in column order. Read-only listing; every
+/// mutation (`add_session`, start/finish, repeats) still emits `cycles:changed`
+/// for the day, which is what keeps this query fresh on the frontend.
+pub fn list_sessions(db: &Db, day_cycle_id: &str) -> AppResult<Vec<Cycle>> {
+    let conn = db.pool().get()?;
+    repo::list_sessions_by_day(&conn, day_cycle_id)
+}
+
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct CreateCycleArgs {
     /// `month` (Long-term) | `week` | `day`. Sessions go through `add_session`.
@@ -643,7 +651,12 @@ pub fn copy_uncompleted_from_previous(
         None => return Ok(Mutation::new(Vec::new()).touching_tasks(cycle_id)),
     };
     let source = tasks_repo::list_visible_by_cycle(&tx, &previous.id)?;
-    let to_copy: Vec<&Task> = source.iter().filter(|t| !t.completed).collect();
+    // The trailing empty input row is a typing affordance, not content: it is
+    // excluded from copy scope (design.md §5.1 空行不计入任务数量与复制范围).
+    let to_copy: Vec<&Task> = source
+        .iter()
+        .filter(|t| !t.completed && !t.title.trim().is_empty())
+        .collect();
     if to_copy.is_empty() {
         return Ok(Mutation::new(Vec::new()).touching_tasks(cycle_id));
     }

@@ -128,6 +128,25 @@ pub fn list_planner_cycles(conn: &Connection) -> AppResult<Vec<Cycle>> {
     Ok(rows)
 }
 
+/// Focus blocks of one day, in column order. Sessions are excluded from
+/// `list_planner_cycles` so the planner payload stays column-shaped; the day
+/// workspace fetches its own sessions through this query instead.
+pub fn list_sessions_by_day(conn: &Connection, day_cycle_id: &str) -> AppResult<Vec<Cycle>> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {CYCLE_COLUMNS} FROM cycles \
+             WHERE archived = 0 AND type = 'session' AND parent_id = ?1 \
+             ORDER BY position ASC, created_at ASC"
+        ))
+        .map_err(from_rusqlite)?;
+    let rows = stmt
+        .query_map(params![day_cycle_id], row_to_cycle)
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
 /// Ids of the cycle and all its descendants (the subtree a delete removes).
 pub fn subtree_ids(conn: &Connection, id: &str) -> AppResult<Vec<String>> {
     let mut stmt = conn
