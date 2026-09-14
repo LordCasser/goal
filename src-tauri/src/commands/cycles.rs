@@ -4,8 +4,8 @@ use chrono::NaiveDate;
 use tauri::State;
 
 use crate::db::Db;
-use crate::domain::task::Task;
 use crate::domain::calendar;
+use crate::domain::task::Task;
 use crate::error::AppResult;
 use crate::service::cycles::{self, AddSessionArgs, CreateCycleArgs};
 
@@ -140,6 +140,7 @@ pub fn ensure_day(
 /// Parsed local date, exposed for tests of command-layer date validation.
 #[allow(dead_code)]
 pub(crate) fn parse_command_date(raw: &str) -> AppResult<NaiveDate> {
-    calendar::parse_date(raw)
-        .ok_or_else(|| crate::error::AppError::validation("invalid_date", "date must be YYYY-MM-DD"))
+    calendar::parse_date(raw).ok_or_else(|| {
+        crate::error::AppError::validation("invalid_date", "date must be YYYY-MM-DD")
+    })
 }

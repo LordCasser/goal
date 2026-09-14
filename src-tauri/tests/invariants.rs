@@ -40,7 +40,11 @@ fn checksum_drift_fails_loudly() {
     // rejected, never silently re-applied or ignored. The runner compares the
     // stored checksum against the SHA-256 of the shipped SQL; simulate drift.
     let stored: String = conn
-        .query_row("SELECT checksum FROM schema_migrations WHERE version = 1", [], |r| r.get(0))
+        .query_row(
+            "SELECT checksum FROM schema_migrations WHERE version = 1",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     let expected = {
         use sha2::{Digest, Sha256};
@@ -48,7 +52,10 @@ fn checksum_drift_fails_loudly() {
         h.update("CREATE TABLE cycles (id TEXT);".as_bytes());
         format!("{:x}", h.finalize())
     };
-    assert_ne!(stored, expected, "tampered SQL must produce a different checksum");
+    assert_ne!(
+        stored, expected,
+        "tampered SQL must produce a different checksum"
+    );
 }
 
 #[test]
@@ -76,7 +83,10 @@ fn later_container_is_seeded_with_zero_duration_and_no_dates() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!(duration, 0, "the Later container ships with duration 0, not NULL");
+    assert_eq!(
+        duration, 0,
+        "the Later container ships with duration 0, not NULL"
+    );
     assert_eq!(starts, None);
     assert_eq!(key, None);
 }
@@ -89,7 +99,10 @@ fn unknown_cycle_type_is_rejected_by_check() {
         "INSERT INTO cycles (id, title, type, created_at) VALUES ('x','X','quarter',0)",
     )
     .expect_err("CHECK must reject unknown types");
-    assert_eq!(err.sqlite_error_code(), Some(rusqlite::ErrorCode::ConstraintViolation));
+    assert_eq!(
+        err.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
 }
 
 #[test]
@@ -101,7 +114,10 @@ fn lifecycle_check_rejects_finished_without_started() {
          VALUES ('x','X','session',0,1,0)",
     )
     .expect_err("CHECK must reject started=0, finished=1");
-    assert_eq!(err.sqlite_error_code(), Some(rusqlite::ErrorCode::ConstraintViolation));
+    assert_eq!(
+        err.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
 }
 
 #[test]
@@ -120,10 +136,14 @@ fn trigger_rejects_root_color_outside_long_term_on_insert() {
          VALUES ('t','w','colored','teal',0)",
     )
     .expect_err("trigger must abort the insert");
-    assert!(err.to_string().contains("root_color_key_requires_long_term_cycle"));
+    assert!(err
+        .to_string()
+        .contains("root_color_key_requires_long_term_cycle"));
     // The stable IPC mapping the handoff requires:
     let mapped = planner_lib::error::constraint_conflict(&err.to_string());
-    assert!(matches!(mapped, planner_lib::error::AppError::Conflict { ref code, .. } if code == "root_color_key_requires_long_term_cycle"));
+    assert!(
+        matches!(mapped, planner_lib::error::AppError::Conflict { ref code, .. } if code == "root_color_key_requires_long_term_cycle")
+    );
 }
 
 #[test]
@@ -147,7 +167,9 @@ fn trigger_rejects_moving_colored_task_into_week_cycle() {
     .unwrap();
     let err = exec(&db, "UPDATE tasks SET cycle_id = 'w' WHERE id = 't'")
         .expect_err("trigger must abort the move");
-    assert!(err.to_string().contains("root_color_key_requires_long_term_cycle"));
+    assert!(err
+        .to_string()
+        .contains("root_color_key_requires_long_term_cycle"));
 }
 
 #[test]
@@ -166,7 +188,9 @@ fn trigger_rejects_retyping_cycle_with_root_colors() {
     .unwrap();
     let err = exec(&db, "UPDATE cycles SET type = 'week' WHERE id = 'm'")
         .expect_err("trigger must abort the type change");
-    assert!(err.to_string().contains("cycle_with_root_colors_must_stay_long_term"));
+    assert!(err
+        .to_string()
+        .contains("cycle_with_root_colors_must_stay_long_term"));
 }
 
 #[test]
@@ -186,7 +210,9 @@ fn calendar_key_is_globally_unique_but_nulls_repeat() {
     .expect_err("duplicate calendar_key must fail");
     assert!(err.to_string().contains("calendar_key"));
     let mapped = planner_lib::error::constraint_conflict(&err.to_string());
-    assert!(matches!(mapped, planner_lib::error::AppError::Conflict { ref code, .. } if code == "calendar_key_taken"));
+    assert!(
+        matches!(mapped, planner_lib::error::AppError::Conflict { ref code, .. } if code == "calendar_key_taken")
+    );
 
     // Sessions have no calendar key; many may coexist.
     for i in 0..3 {
@@ -231,18 +257,32 @@ fn deleting_cycle_cascades_to_tasks_and_snapshots() {
     .unwrap();
 
     let month: String = conn
-        .query_row("SELECT id FROM cycles WHERE type = 'month' AND id != 'later'", [], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM cycles WHERE type = 'month' AND id != 'later'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     conn.execute("DELETE FROM cycles WHERE id = ?1", rusqlite::params![month])
         .unwrap();
 
     let tasks_left: i64 = conn
-        .query_row("SELECT COUNT(*) FROM tasks WHERE id = 'pt'", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM tasks WHERE id = 'pt'", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     let snapshots_left: i64 = conn
-        .query_row("SELECT COUNT(*) FROM task_preview_originals WHERE task_id = 'pt'", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM task_preview_originals WHERE task_id = 'pt'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!((tasks_left, snapshots_left), (0, 0), "delete must cascade to tasks and snapshots");
+    assert_eq!(
+        (tasks_left, snapshots_left),
+        (0, 0),
+        "delete must cascade to tasks and snapshots"
+    );
 }
 
 #[test]
@@ -259,7 +299,11 @@ fn backup_export_contains_all_committed_data() {
     let reopened = planner_lib::db::open_at(&target).unwrap();
     let conn = reopened.pool().get().unwrap();
     let title: String = conn
-        .query_row("SELECT title FROM tasks WHERE cycle_id = ?1", rusqlite::params![month.id], |r| r.get(0))
+        .query_row(
+            "SELECT title FROM tasks WHERE cycle_id = ?1",
+            rusqlite::params![month.id],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(title, "survives export");
 }
@@ -281,9 +325,12 @@ fn repeats_table_and_cycles_link_exist_after_migrations() {
     .unwrap();
     // Removing the template clears the link (FK ON DELETE SET NULL safety net;
     // the service path unlinks explicitly as well).
-    conn.execute("DELETE FROM repeats WHERE id = 'r1'", []).unwrap();
+    conn.execute("DELETE FROM repeats WHERE id = 'r1'", [])
+        .unwrap();
     let repeat: Option<String> = conn
-        .query_row("SELECT repeat_id FROM cycles WHERE id = 's1'", [], |r| r.get(0))
+        .query_row("SELECT repeat_id FROM cycles WHERE id = 's1'", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(repeat, None);
 }

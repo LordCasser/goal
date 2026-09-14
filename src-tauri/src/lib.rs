@@ -11,6 +11,7 @@ pub mod db;
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod logging;
 pub mod repository;
 pub mod service;
 
@@ -22,7 +23,12 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = db::init(&handle)?;
+            let log_dir = db::data_dir(&handle)?.join("logs");
+            let initial_level = persisted_log_level(&state);
             app.manage(state);
+
+            logging::init(log_dir, initial_level);
+            logging::info("app", "app started");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -66,10 +72,26 @@ pub fn run() {
             // settings
             commands::settings::get_settings,
             commands::settings::set_week_start_day,
+            commands::settings::set_theme,
+            commands::settings::set_log_level,
+            commands::settings::get_app_flag,
+            commands::settings::set_app_flag,
             // maintenance
             commands::maintenance::get_schema_version,
             commands::maintenance::export_backup,
+            commands::maintenance::get_debug_log_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Reads the persisted `log_level` setting, if present and valid, so the
+/// logger can restore the user's chosen verbosity at startup. A read failure
+/// just falls back to the default level.
+fn persisted_log_level(db: &db::Db) -> Option<logging::Level> {
+    let conn = db.pool().get().ok()?;
+    let raw = crate::repository::settings::get(&conn, crate::repository::settings::KEY_LOG_LEVEL)
+        .ok()
+        .flatten()?;
+    logging::Level::parse(&raw)
 }

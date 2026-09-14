@@ -36,7 +36,9 @@ fn clarity_defaults(cycle_type: CycleType) -> (Option<bool>, Option<bool>) {
 
 pub fn add_task(db: &Db, args: &AddTaskArgs, now: i64) -> AppResult<Mutation<Task>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let cycle = cycles_repo::require(&tx, &args.cycle_id)?;
     if cycle.cycle_type == CycleType::Session {
         return Err(AppError::validation(
@@ -94,7 +96,10 @@ pub struct TaskPatch {
 fn validate_patch(patch: &TaskPatch) -> AppResult<()> {
     if let Some(title) = &patch.title {
         if title.trim().is_empty() {
-            return Err(AppError::validation("invalid_title", "Title cannot be empty"));
+            return Err(AppError::validation(
+                "invalid_title",
+                "Title cannot be empty",
+            ));
         }
     }
     Ok(())
@@ -115,7 +120,9 @@ fn apply_patch(conn: &Connection, task_id: &str, patch: &TaskPatch) -> AppResult
 pub fn patch_task(db: &Db, task_id: &str, patch: &TaskPatch) -> AppResult<Mutation<Task>> {
     validate_patch(patch)?;
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let existing = repo::require(&tx, task_id)?;
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
     let task = apply_patch(&tx, task_id, patch)?;
@@ -139,7 +146,9 @@ pub fn update_task(
 
 pub fn delete_task(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let existing = repo::require(&tx, task_id)?;
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
     // Children rows and preview snapshots go with the row (FK cascades).
@@ -155,7 +164,9 @@ pub fn move_task(
     position: Option<i64>,
 ) -> AppResult<Mutation<Task>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let existing = repo::require(&tx, task_id)?;
     crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
     let target = cycles_repo::require(&tx, target_cycle_id)?;
@@ -178,9 +189,7 @@ pub fn move_task(
     let parent_for_position = existing.parent_id.clone();
     let new_position = match position {
         Some(p) => p,
-        None => {
-            repo::max_position(&tx, target_cycle_id, parent_for_position.as_deref())? + 1
-        }
+        None => repo::max_position(&tx, target_cycle_id, parent_for_position.as_deref())? + 1,
     };
 
     // The move carries same-cycle descendant rows along so a goal keeps its
@@ -230,7 +239,9 @@ pub fn reorder_tasks(
     ordered_ids: &[String],
 ) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     crate::service::cycles::ensure_content_mutable(&tx, cycle_id)?;
     for id in ordered_ids {
         let task = repo::require(&tx, id)?;
@@ -255,7 +266,9 @@ pub fn set_task_parent_link(
     parent_id: Option<&str>,
 ) -> AppResult<Mutation<Task>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let task = repo::require(&tx, task_id)?;
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &task.cycle_id)?;
 
@@ -318,7 +331,9 @@ pub fn set_task_root_color(
     color_key: Option<&str>,
 ) -> AppResult<Mutation<Task>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let task = repo::require(&tx, task_id)?;
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &task.cycle_id)?;
     if let Some(color) = color_key {

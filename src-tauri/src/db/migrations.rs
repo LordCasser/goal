@@ -20,10 +20,26 @@ pub struct Migration {
 
 /// Ordered migration list. Append only; never edit an applied migration's SQL.
 pub const MIGRATIONS: &[Migration] = &[
-    Migration { version: 1, description: "init", sql: M0001_INIT },
-    Migration { version: 2, description: "invariants", sql: M0002_INVARIANTS },
-    Migration { version: 3, description: "seed later container", sql: M0003_SEED_LATER },
-    Migration { version: 4, description: "repeats", sql: M0004_REPEATS },
+    Migration {
+        version: 1,
+        description: "init",
+        sql: M0001_INIT,
+    },
+    Migration {
+        version: 2,
+        description: "invariants",
+        sql: M0002_INVARIANTS,
+    },
+    Migration {
+        version: 3,
+        description: "seed later container",
+        sql: M0003_SEED_LATER,
+    },
+    Migration {
+        version: 4,
+        description: "repeats",
+        sql: M0004_REPEATS,
+    },
 ];
 
 fn checksum(sql: &str) -> String {
@@ -47,8 +63,12 @@ fn ensure_ledger(conn: &Connection) -> AppResult<()> {
 /// Highest applied migration version, or 0 for an empty database.
 pub fn current_version(conn: &Connection) -> AppResult<i64> {
     ensure_ledger(conn)?;
-    conn.query_row("SELECT COALESCE(MAX(version), 0) FROM schema_migrations", [], |r| r.get(0))
-        .map_err(|e| AppError::Db(e.to_string()))
+    conn.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(|e| AppError::Db(e.to_string()))
 }
 
 /// Applies every pending migration. Idempotent.
@@ -62,7 +82,12 @@ pub fn apply(conn: &mut Connection) -> AppResult<()> {
         .collect::<Result<_, _>>()
         .map_err(|e| AppError::Db(e.to_string()))?;
 
-    for Migration { version, description, sql } in MIGRATIONS {
+    for Migration {
+        version,
+        description,
+        sql,
+    } in MIGRATIONS
+    {
         let expected = checksum(sql);
         if let Some((_, found)) = applied.iter().find(|(v, _)| v == version) {
             if found != &expected {
@@ -74,7 +99,9 @@ pub fn apply(conn: &mut Connection) -> AppResult<()> {
             continue;
         }
 
-        let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Db(e.to_string()))?;
         tx.execute_batch(sql).map_err(|e| {
             AppError::Db(format!("migration {version} ({description}) failed: {e}"))
         })?;

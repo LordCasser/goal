@@ -21,10 +21,18 @@ fn workspace_for(conn: &rusqlite::Connection, cycle_id: &str) -> AppResult<Edito
     let cycle = cycles_repo::get(conn, cycle_id)?;
     let cycle = match cycle {
         Some(cycle) if !cycle.archived => cycle,
-        _ => return Ok(EditorWorkspace { cycle: None, tasks: Vec::new() }),
+        _ => {
+            return Ok(EditorWorkspace {
+                cycle: None,
+                tasks: Vec::new(),
+            })
+        }
     };
     let tasks = tasks_repo::list_visible_by_cycle(conn, cycle_id)?;
-    Ok(EditorWorkspace { cycle: Some(cycle), tasks: build_tree(tasks) })
+    Ok(EditorWorkspace {
+        cycle: Some(cycle),
+        tasks: build_tree(tasks),
+    })
 }
 
 pub fn get_editor_workspace(db: &Db, cycle_id: &str) -> AppResult<EditorWorkspace> {

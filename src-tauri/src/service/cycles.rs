@@ -14,8 +14,8 @@ use crate::domain::calendar::{
     week_key,
 };
 use crate::domain::cycle::{
-    Cycle, CycleType, LifecycleAction, LifecycleState, LONG_TERM_DURATIONS_MONTHS,
-    LATER_CYCLE_ID, WEEK_DURATION_MS,
+    Cycle, CycleType, LifecycleAction, LifecycleState, LATER_CYCLE_ID, LONG_TERM_DURATIONS_MONTHS,
+    WEEK_DURATION_MS,
 };
 use crate::domain::task::Task;
 use crate::error::{AppError, AppResult};
@@ -66,7 +66,9 @@ pub fn create_planning_cycle(
     now: i64,
 ) -> AppResult<Mutation<Cycle>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let week_start_day = settings_service::week_start_day_or_default(&tx)?;
 
     let kind = match args.cycle_type.as_str() {
@@ -233,19 +235,22 @@ fn next_root_position(conn: &Connection) -> AppResult<i64> {
 /// templates into the day (spec: 模板自动出现).
 pub fn get_or_create_day(db: &Db, date: NaiveDate, now: i64) -> AppResult<Mutation<Cycle>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let week_start_day = settings_service::week_start_day_or_default(&tx)?;
     let date_str = format_date(date);
 
     let week = match find_covering_cycle(&tx, CycleType::Week, &date_str)? {
         Some(week) => week,
         None => {
-            let month = find_covering_cycle(&tx, CycleType::Month, &date_str)?.ok_or_else(|| {
-                AppError::validation(
-                    "no_covering_long_term_cycle",
-                    "No active long-term cycle covers this date",
-                )
-            })?;
+            let month =
+                find_covering_cycle(&tx, CycleType::Month, &date_str)?.ok_or_else(|| {
+                    AppError::validation(
+                        "no_covering_long_term_cycle",
+                        "No active long-term cycle covers this date",
+                    )
+                })?;
             let (starts_on, ends_on) =
                 dated_cycle_bounds(date, CycleType::Week, week_start_day as u32, 0)
                     .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
@@ -304,11 +309,7 @@ pub fn get_or_create_day(db: &Db, date: NaiveDate, now: i64) -> AppResult<Mutati
     Ok(mutation)
 }
 
-fn find_covering_cycle(
-    conn: &Connection,
-    kind: CycleType,
-    date: &str,
-) -> AppResult<Option<Cycle>> {
+fn find_covering_cycle(conn: &Connection, kind: CycleType, date: &str) -> AppResult<Option<Cycle>> {
     if !matches!(kind, CycleType::Week | CycleType::Month) {
         return Ok(None);
     }
@@ -338,7 +339,9 @@ pub struct AddSessionArgs {
 
 pub fn add_session(db: &Db, args: &AddSessionArgs, now: i64) -> AppResult<Mutation<Cycle>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let day = repo::require(&tx, &args.day_cycle_id)?;
     if day.cycle_type != CycleType::Day {
         return Err(AppError::validation(
@@ -393,7 +396,9 @@ pub fn update_session(
     duration_ms: Option<i64>,
 ) -> AppResult<Mutation<Cycle>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let target = repo::require(&tx, cycle_id)?;
     if target.cycle_type != CycleType::Session {
         return Err(AppError::validation(
@@ -402,7 +407,10 @@ pub fn update_session(
         ));
     }
     if title.trim().is_empty() {
-        return Err(AppError::validation("invalid_title", "Title cannot be empty"));
+        return Err(AppError::validation(
+            "invalid_title",
+            "Title cannot be empty",
+        ));
     }
     if target.started && duration_ms.is_some() && duration_ms != target.duration {
         return Err(AppError::validation(
@@ -415,15 +423,20 @@ pub fn update_session(
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let mut mutation = Mutation::new(updated);
     mutation.cycles.push(cycle_id.to_string());
-    mutation
-        .cycles
-        .push(target.parent_id.clone().unwrap_or_else(|| cycle_id.to_string()));
+    mutation.cycles.push(
+        target
+            .parent_id
+            .clone()
+            .unwrap_or_else(|| cycle_id.to_string()),
+    );
     Ok(mutation)
 }
 
 pub fn start_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cycle>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let target = repo::require(&tx, cycle_id)?;
     // A cycle without a set duration cannot enter the lifecycle at all
     // (spec: 启动周期前必须有时长). The Later container's duration of 0
@@ -444,15 +457,20 @@ pub fn start_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cycl
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let mut mutation = Mutation::new(updated);
     mutation.cycles.push(cycle_id.to_string());
-    mutation
-        .cycles
-        .push(target.parent_id.clone().unwrap_or_else(|| cycle_id.to_string()));
+    mutation.cycles.push(
+        target
+            .parent_id
+            .clone()
+            .unwrap_or_else(|| cycle_id.to_string()),
+    );
     Ok(mutation)
 }
 
 pub fn finish_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cycle>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let target = repo::require(&tx, cycle_id)?;
     let state = target
         .lifecycle()
@@ -518,8 +536,10 @@ fn deletion_guard(conn: &Connection, target: &Cycle) -> AppResult<Option<(String
             "This cycle contains started focus blocks.".into(),
         )));
     }
-    if matches!(target.cycle_type, CycleType::Month | CycleType::Week | CycleType::Day)
-        && repo::count_newer_same_type(conn, target)? >= DELETABLE_LATEST_N
+    if matches!(
+        target.cycle_type,
+        CycleType::Month | CycleType::Week | CycleType::Day
+    ) && repo::count_newer_same_type(conn, target)? >= DELETABLE_LATEST_N
     {
         return Ok(Some((
             "not_latest_n".into(),
@@ -545,7 +565,9 @@ pub fn get_cycle_deletion_preview(db: &Db, cycle_id: &str) -> AppResult<CycleDel
 
 pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let target = repo::require(&tx, cycle_id)?;
     if let Some((code, message)) = deletion_guard(&tx, &target)? {
         return Err(AppError::conflict(code, message));
@@ -572,7 +594,9 @@ pub fn reorder_sessions(
     session_ids: &[String],
 ) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let day = repo::require(&tx, day_cycle_id)?;
     if day.cycle_type != CycleType::Day {
         return Err(AppError::validation(
@@ -604,7 +628,9 @@ pub fn copy_uncompleted_from_previous(
     now: i64,
 ) -> AppResult<Mutation<Vec<Task>>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let target = repo::require(&tx, cycle_id)?;
     if target.starts_on.is_none() {
         return Err(AppError::validation(

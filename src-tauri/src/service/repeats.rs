@@ -22,7 +22,9 @@ pub struct AddRepeatArgs {
 pub fn add_repeat(db: &Db, args: &AddRepeatArgs, now: i64) -> AppResult<Mutation<Repeat>> {
     let _ = now;
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let session = cycles_repo::require(&tx, &args.session_id)?;
     if session.cycle_type != CycleType::Session {
         return Err(AppError::validation(
@@ -61,7 +63,10 @@ pub struct RepeatPatch {
 /// future" undecidable (spec: 无法判定未来实例 → 明确失败).
 pub fn update_repeat(db: &Db, repeat_id: &str, patch: &RepeatPatch) -> AppResult<Repeat> {
     if patch.title.as_deref().map(str::trim).map(str::is_empty) == Some(true) {
-        return Err(AppError::validation("invalid_title", "Title cannot be empty"));
+        return Err(AppError::validation(
+            "invalid_title",
+            "Title cannot be empty",
+        ));
     }
     if let Some(duration) = patch.duration {
         if duration < 0 {
@@ -72,7 +77,9 @@ pub fn update_repeat(db: &Db, repeat_id: &str, patch: &RepeatPatch) -> AppResult
         }
     }
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     repo::require(&tx, repeat_id)?;
 
     let instances = cycles_repo::list_by_repeat(&tx, repeat_id)?;
@@ -107,7 +114,9 @@ pub fn update_repeat(db: &Db, repeat_id: &str, patch: &RepeatPatch) -> AppResult
 /// focus blocks and their focused time stay exactly as they are.
 pub fn stop_repeat(db: &Db, repeat_id: &str) -> AppResult<Mutation<Repeat>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     repo::require(&tx, repeat_id)?;
     let instances = cycles_repo::list_by_repeat(&tx, repeat_id)?;
     for instance in &instances {
@@ -127,7 +136,9 @@ pub fn stop_repeat(db: &Db, repeat_id: &str) -> AppResult<Mutation<Repeat>> {
 /// link cleared — unlink first, delete second (spec: 模板被删除).
 pub fn remove_repeat(db: &Db, repeat_id: &str) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     repo::require(&tx, repeat_id)?;
     let instances = cycles_repo::list_by_repeat(&tx, repeat_id)?;
     for instance in &instances {
@@ -145,9 +156,15 @@ pub fn remove_repeat(db: &Db, repeat_id: &str) -> AppResult<Mutation<()>> {
 /// Materializes every active template into the day, idempotently: a template
 /// that already produced a session for this day is skipped. New sessions keep
 /// the template's order and can diverge freely afterwards.
-pub fn generate_day_instances(db: &Db, day_cycle_id: &str, now: i64) -> AppResult<Mutation<Vec<String>>> {
+pub fn generate_day_instances(
+    db: &Db,
+    day_cycle_id: &str,
+    now: i64,
+) -> AppResult<Mutation<Vec<String>>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let created = generate_for_day_in_tx(&tx, day_cycle_id, now)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let mut mutation = Mutation::new(created.clone());

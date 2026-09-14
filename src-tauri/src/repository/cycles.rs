@@ -206,10 +206,7 @@ pub fn count_newer_same_type(conn: &Connection, cycle: &Cycle) -> AppResult<i64>
 }
 
 /// The closest earlier dated sibling (same type, same parent) — "上一周期".
-pub fn previous_dated_sibling(
-    conn: &Connection,
-    cycle: &Cycle,
-) -> AppResult<Option<Cycle>> {
+pub fn previous_dated_sibling(conn: &Connection, cycle: &Cycle) -> AppResult<Option<Cycle>> {
     let parent = cycle.parent_id.as_deref().unwrap_or("");
     let starts_on = cycle.starts_on.as_deref().unwrap_or("");
     conn.query_row(
@@ -319,6 +316,7 @@ pub fn list_by_repeat(conn: &Connection, repeat_id: &str) -> AppResult<Vec<Cycle
 }
 
 pub fn delete(conn: &Connection, id: &str) -> AppResult<()> {
-    conn.execute("DELETE FROM cycles WHERE id = ?1", params![id]).map_err(from_rusqlite)?;
+    conn.execute("DELETE FROM cycles WHERE id = ?1", params![id])
+        .map_err(from_rusqlite)?;
     Ok(())
 }

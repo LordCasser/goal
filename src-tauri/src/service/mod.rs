@@ -38,7 +38,12 @@ pub struct Mutation<T> {
 
 impl<T> Mutation<T> {
     pub fn new(value: T) -> Self {
-        Self { value, cycles: CycleIdSet::new(), tasks: CycleIdSet::new(), proposal_cycle: None }
+        Self {
+            value,
+            cycles: CycleIdSet::new(),
+            tasks: CycleIdSet::new(),
+            proposal_cycle: None,
+        }
     }
     pub fn touching_cycle(mut self, cycle_id: impl Into<String>) -> Self {
         self.cycles.push(cycle_id);

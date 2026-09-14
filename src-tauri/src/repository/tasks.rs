@@ -18,19 +18,24 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         cycle_id: row.get("cycle_id")?,
         parent_id: row.get("parent_id")?,
         title: row.get("title")?,
-        subtasks: serde_json::from_str(&subtasks_json)
-            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+        subtasks: serde_json::from_str(&subtasks_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
                 4, // ordinal of `subtasks` in TASK_COLUMNS
                 rusqlite::types::Type::Text,
                 Box::new(e),
-            ))?,
+            )
+        })?,
         position: row.get("position")?,
         completed: row.get::<_, i64>("completed")? != 0,
         goal_breakdown: row
             .get::<_, Option<String>>("goal_breakdown")?
             .and_then(|s| serde_json::from_str(&s).ok()),
-        needs_refinement: row.get::<_, Option<i64>>("needs_refinement")?.map(|v| v != 0),
-        needs_breakdown: row.get::<_, Option<i64>>("needs_breakdown")?.map(|v| v != 0),
+        needs_refinement: row
+            .get::<_, Option<i64>>("needs_refinement")?
+            .map(|v| v != 0),
+        needs_breakdown: row
+            .get::<_, Option<i64>>("needs_breakdown")?
+            .map(|v| v != 0),
         root_color_key: row.get("root_color_key")?,
         copied_from_task_id: row.get("copied_from_task_id")?,
         proposal: proposal_str.as_deref().and_then(ProposalKind::parse),
@@ -108,11 +113,7 @@ pub fn list_with_proposals_by_cycle(conn: &Connection, cycle_id: &str) -> AppRes
     list_by_cycle_filtered(conn, cycle_id, "")
 }
 
-fn list_by_cycle_filtered(
-    conn: &Connection,
-    cycle_id: &str,
-    extra: &str,
-) -> AppResult<Vec<Task>> {
+fn list_by_cycle_filtered(conn: &Connection, cycle_id: &str, extra: &str) -> AppResult<Vec<Task>> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {TASK_COLUMNS} FROM tasks WHERE cycle_id = ?1 {extra} \
@@ -274,7 +275,10 @@ pub fn update(conn: &Connection, id: &str, update: &TaskUpdate) -> AppResult<()>
         push("position", Box::new(v));
     }
     if let Some(v) = update.proposal {
-        push("proposal", Box::new(v.map(|kind| kind.as_str().to_string())));
+        push(
+            "proposal",
+            Box::new(v.map(|kind| kind.as_str().to_string())),
+        );
     }
     if let Some(v) = &update.copied_from_task_id {
         let v = v.clone();
@@ -298,7 +302,8 @@ pub fn update(conn: &Connection, id: &str, update: &TaskUpdate) -> AppResult<()>
         args.iter().map(|b| b.as_ref()).collect();
     let id_param = id.to_string();
     params_ref.push(&id_param);
-    conn.execute(&sql, params_ref.as_slice()).map_err(from_rusqlite)?;
+    conn.execute(&sql, params_ref.as_slice())
+        .map_err(from_rusqlite)?;
     Ok(())
 }
 
@@ -314,6 +319,7 @@ pub fn reorder(conn: &Connection, ordered_ids: &[String]) -> AppResult<()> {
 }
 
 pub fn delete(conn: &Connection, id: &str) -> AppResult<()> {
-    conn.execute("DELETE FROM tasks WHERE id = ?1", params![id]).map_err(from_rusqlite)?;
+    conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])
+        .map_err(from_rusqlite)?;
     Ok(())
 }

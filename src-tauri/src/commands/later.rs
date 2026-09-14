@@ -17,9 +17,16 @@ pub fn add_later_goal(
     title: String,
 ) -> AppResult<Task> {
     if title.trim().is_empty() {
-        return Err(AppError::validation("invalid_title", "A goal needs a title"));
+        return Err(AppError::validation(
+            "invalid_title",
+            "A goal needs a title",
+        ));
     }
-    let args = AddTaskArgs { cycle_id: LATER_CYCLE_ID.to_string(), title, ..Default::default() };
+    let args = AddTaskArgs {
+        cycle_id: LATER_CYCLE_ID.to_string(),
+        title,
+        ..Default::default()
+    };
     let mutation = tasks::add_task(&db, &args, crate::service::now_ms())?;
     emit_mutation(&app, &mutation);
     Ok(mutation.value)

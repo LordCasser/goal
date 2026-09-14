@@ -29,15 +29,24 @@ pub enum AppError {
 
 impl AppError {
     pub fn validation(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::Validation { code: code.into(), message: message.into() }
+        Self::Validation {
+            code: code.into(),
+            message: message.into(),
+        }
     }
 
     pub fn conflict(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::Conflict { code: code.into(), message: message.into() }
+        Self::Conflict {
+            code: code.into(),
+            message: message.into(),
+        }
     }
 
     pub fn not_found(entity: impl Into<String>, id: impl Into<String>) -> Self {
-        Self::NotFound { entity: entity.into(), id: id.into() }
+        Self::NotFound {
+            entity: entity.into(),
+            id: id.into(),
+        }
     }
 }
 
@@ -115,7 +124,8 @@ pub fn from_rusqlite(err: rusqlite::Error) -> AppError {
     if let rusqlite::Error::SqliteFailure(ffi_err, msg) = &err {
         if matches!(
             ffi_err.code,
-            rusqlite::ffi::ErrorCode::ConstraintViolation | rusqlite::ffi::ErrorCode::OperationAborted
+            rusqlite::ffi::ErrorCode::ConstraintViolation
+                | rusqlite::ffi::ErrorCode::OperationAborted
         ) {
             let text = msg.clone().unwrap_or_else(|| err.to_string());
             return constraint_conflict(&text);

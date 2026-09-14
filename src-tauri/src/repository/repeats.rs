@@ -77,11 +77,9 @@ pub fn list_all(conn: &Connection) -> AppResult<Vec<Repeat>> {
 }
 
 pub fn max_position(conn: &Connection) -> AppResult<i64> {
-    conn.query_row(
-        "SELECT COALESCE(MAX(position), -1) FROM repeats",
-        [],
-        |r| r.get(0),
-    )
+    conn.query_row("SELECT COALESCE(MAX(position), -1) FROM repeats", [], |r| {
+        r.get(0)
+    })
     .map_err(from_rusqlite)
 }
 
@@ -126,17 +124,15 @@ pub fn update(conn: &Connection, id: &str, update: &RepeatUpdate) -> AppResult<(
 
 /// "Stop repeating": the template is archived, not deleted.
 pub fn archive(conn: &Connection, id: &str) -> AppResult<()> {
-    conn.execute(
-        "UPDATE repeats SET archived = 1 WHERE id = ?1",
-        params![id],
-    )
-    .map_err(from_rusqlite)?;
+    conn.execute("UPDATE repeats SET archived = 1 WHERE id = ?1", params![id])
+        .map_err(from_rusqlite)?;
     Ok(())
 }
 
 /// Removes the template row. Callers must unlink instances first; the FK's
 /// ON DELETE SET NULL is only a safety net.
 pub fn delete(conn: &Connection, id: &str) -> AppResult<()> {
-    conn.execute("DELETE FROM repeats WHERE id = ?1", params![id]).map_err(from_rusqlite)?;
+    conn.execute("DELETE FROM repeats WHERE id = ?1", params![id])
+        .map_err(from_rusqlite)?;
     Ok(())
 }

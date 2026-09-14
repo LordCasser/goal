@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{create_day, create_long_term, create_week, add_task, TestDb, NOW, TODAY};
+use common::{add_task, create_day, create_long_term, create_week, TestDb, NOW, TODAY};
 use planner_lib::domain::cycle::CycleType;
 use planner_lib::error::AppError;
 use planner_lib::service::cycles::{self, CreateCycleArgs};
@@ -14,15 +14,18 @@ use planner_lib::service::tasks::{self};
 
 fn err_code(err: &AppError) -> String {
     match err {
-        AppError::Validation { code, .. }
-        | AppError::Conflict { code, .. } => code.clone(),
+        AppError::Validation { code, .. } | AppError::Conflict { code, .. } => code.clone(),
         AppError::NotFound { .. } => "not_found".into(),
         other => format!("{other:?}"),
     }
 }
 
 fn long_term_args(months: i64) -> CreateCycleArgs {
-    CreateCycleArgs { cycle_type: "month".into(), duration_months: Some(months), ..Default::default() }
+    CreateCycleArgs {
+        cycle_type: "month".into(),
+        duration_months: Some(months),
+        ..Default::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -32,19 +35,22 @@ fn long_term_args(months: i64) -> CreateCycleArgs {
 #[test]
 fn long_term_durations_use_28_day_months() {
     let db = TestDb::open();
-    for (months, expected_ms, days) in [(1, 2_419_200_000i64, 28i64), (3, 7_257_600_000, 84), (6, 14_515_200_000, 168)] {
+    for (months, expected_ms, days) in [
+        (1, 2_419_200_000i64, 28i64),
+        (3, 7_257_600_000, 84),
+        (6, 14_515_200_000, 168),
+    ] {
         let cycle = create_long_term(&db.db, TODAY, months);
         assert_eq!(cycle.cycle_type, CycleType::Month);
         assert_eq!(cycle.duration, Some(expected_ms));
         let starts = cycle.starts_on.clone().unwrap();
         let ends = cycle.ends_on.clone().unwrap();
         assert_eq!(starts, TODAY);
-        let expected_end = planner_lib::domain::calendar::format_date(
-            planner_lib::domain::calendar::add_days(
+        let expected_end =
+            planner_lib::domain::calendar::format_date(planner_lib::domain::calendar::add_days(
                 planner_lib::domain::calendar::parse_date(TODAY).unwrap(),
                 days,
-            ),
-        );
+            ));
         assert_eq!(ends, expected_end, "ends_on = starts_on + N x 28 days");
         // Calendar identity carries both bounds (spec: 长周期的键体现起止).
         assert_eq!(
@@ -58,8 +64,9 @@ fn long_term_durations_use_28_day_months() {
 fn long_term_rejects_durations_outside_allowed_set() {
     let db = TestDb::open();
     for months in [0i64, 2, 4, 12] {
-        let err = cycles::create_planning_cycle(&db.db, &long_term_args(months), common::today(), NOW)
-            .expect_err("only 1/3/6 product months are allowed");
+        let err =
+            cycles::create_planning_cycle(&db.db, &long_term_args(months), common::today(), NOW)
+                .expect_err("only 1/3/6 product months are allowed");
         assert!(
             matches!(err, AppError::Validation { .. }),
             "months={months} must be a validation error"
@@ -77,7 +84,12 @@ fn start_requires_duration() {
     let day = create_day(&db.db, &week.id, TODAY, NOW);
     let session = planner_lib::service::cycles::add_session(
         &db.db,
-        &cycles::AddSessionArgs { day_cycle_id: day.id.clone(), title: "Focus".into(), duration_ms: None, position: None },
+        &cycles::AddSessionArgs {
+            day_cycle_id: day.id.clone(),
+            title: "Focus".into(),
+            duration_ms: None,
+            position: None,
+        },
         NOW,
     )
     .unwrap()
@@ -95,7 +107,10 @@ fn week_requires_parent() {
     let db = TestDb::open();
     let err = cycles::create_planning_cycle(
         &db.db,
-        &CreateCycleArgs { cycle_type: "week".into(), ..Default::default() },
+        &CreateCycleArgs {
+            cycle_type: "week".into(),
+            ..Default::default()
+        },
         common::today(),
         NOW,
     )
@@ -171,7 +186,12 @@ fn deletion_guard_blocks_cycles_with_started_sessions() {
     let day = create_day(&db.db, &week.id, TODAY, NOW);
     let session = cycles::add_session(
         &db.db,
-        &cycles::AddSessionArgs { day_cycle_id: day.id.clone(), title: "running".into(), duration_ms: Some(900_000), position: None },
+        &cycles::AddSessionArgs {
+            day_cycle_id: day.id.clone(),
+            title: "running".into(),
+            duration_ms: Some(900_000),
+            position: None,
+        },
         NOW,
     )
     .unwrap()
@@ -242,13 +262,20 @@ fn finishing_a_session_accrues_focused_time_up_the_chain() {
     let day = create_day(&db.db, &week.id, TODAY, NOW);
     let session = cycles::add_session(
         &db.db,
-        &cycles::AddSessionArgs { day_cycle_id: day.id.clone(), title: "deep work".into(), duration_ms: Some(3_600_000), position: None },
+        &cycles::AddSessionArgs {
+            day_cycle_id: day.id.clone(),
+            title: "deep work".into(),
+            duration_ms: Some(3_600_000),
+            position: None,
+        },
         NOW,
     )
     .unwrap()
     .value;
     cycles::start_cycle(&db.db, &session.id, NOW + 1000).unwrap();
-    let finished = cycles::finish_cycle(&db.db, &session.id, NOW + 1000 + 25 * 60 * 1000).unwrap().value;
+    let finished = cycles::finish_cycle(&db.db, &session.id, NOW + 1000 + 25 * 60 * 1000)
+        .unwrap()
+        .value;
 
     assert!(finished.finished);
     assert_eq!(finished.focused_time, 25 * 60 * 1000);
@@ -274,16 +301,14 @@ fn copy_uncompleted_records_lineage_and_skips_completed() {
     tasks::patch_task(
         &db.db,
         &done.id,
-        &tasks::TaskPatch { completed: Some(true), ..Default::default() },
+        &tasks::TaskPatch {
+            completed: Some(true),
+            ..Default::default()
+        },
     )
     .unwrap();
     let open = add_task(&db.db, &prev.id, "carry me over", NOW + 1);
-    let child = add_task(
-        &db.db,
-        &prev.id,
-        "sub of carry",
-        NOW + 2,
-    );
+    let child = add_task(&db.db, &prev.id, "sub of carry", NOW + 2);
     // Link child under the open task (same-cycle subtask row).
     tasks::set_task_parent_link(&db.db, &child.id, Some(&open.id)).unwrap();
 
@@ -292,7 +317,10 @@ fn copy_uncompleted_records_lineage_and_skips_completed() {
         .value;
     assert_eq!(copied.len(), 2, "only uncompleted tasks are copied");
     let copy_of_open = copied.iter().find(|t| t.title == "carry me over").unwrap();
-    assert_eq!(copy_of_open.copied_from_task_id.as_deref(), Some(open.id.as_str()));
+    assert_eq!(
+        copy_of_open.copied_from_task_id.as_deref(),
+        Some(open.id.as_str())
+    );
     assert!(!copy_of_open.completed);
     let copy_of_child = copied.iter().find(|t| t.title == "sub of carry").unwrap();
     assert_eq!(
@@ -309,10 +337,22 @@ fn copy_from_completed_week_returns_empty() {
     let prev = create_week(&db.db, &month.id, "2026-09-09");
     let curr = create_week(&db.db, &month.id, TODAY);
     let task = add_task(&db.db, &prev.id, "done already", NOW);
-    tasks::patch_task(&db.db, &task.id, &tasks::TaskPatch { completed: Some(true), ..Default::default() })
-        .unwrap();
-    let copied = cycles::copy_uncompleted_from_previous(&db.db, &curr.id, NOW + 1).unwrap().value;
-    assert!(copied.is_empty(), "nothing uncompleted -> empty result, not an error");
+    tasks::patch_task(
+        &db.db,
+        &task.id,
+        &tasks::TaskPatch {
+            completed: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let copied = cycles::copy_uncompleted_from_previous(&db.db, &curr.id, NOW + 1)
+        .unwrap()
+        .value;
+    assert!(
+        copied.is_empty(),
+        "nothing uncompleted -> empty result, not an error"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +381,9 @@ fn cross_level_links_allow_only_adjacent_levels_in_branch() {
     let daily = add_task(&db.db, &day.id, "daily task", NOW);
 
     // weekly -> long-term goal, inside the same branch.
-    let linked = tasks::set_task_parent_link(&db.db, &weekly.id, Some(&goal.id)).unwrap().value;
+    let linked = tasks::set_task_parent_link(&db.db, &weekly.id, Some(&goal.id))
+        .unwrap()
+        .value;
     assert_eq!(linked.parent_id.as_deref(), Some(goal.id.as_str()));
 
     // daily -> weekly item.
@@ -356,7 +398,9 @@ fn cross_level_links_allow_only_adjacent_levels_in_branch() {
     assert_eq!(err_code(&err), "link_to_self");
 
     // unlink restores a root.
-    let unlinked = tasks::set_task_parent_link(&db.db, &weekly.id, None).unwrap().value;
+    let unlinked = tasks::set_task_parent_link(&db.db, &weekly.id, None)
+        .unwrap()
+        .value;
     assert_eq!(unlinked.parent_id, None);
 }
 
@@ -383,7 +427,9 @@ fn root_color_on_week_task_is_rejected() {
 
     // Long-term goals can be colored, and unknown keys are refused.
     let goal = add_task(&db.db, &month.id, "goal", NOW);
-    let colored = tasks::set_task_root_color(&db.db, &goal.id, Some("indigo")).unwrap().value;
+    let colored = tasks::set_task_root_color(&db.db, &goal.id, Some("indigo"))
+        .unwrap()
+        .value;
     assert_eq!(colored.root_color_key.as_deref(), Some("indigo"));
     let err = tasks::set_task_root_color(&db.db, &goal.id, Some("hot-pink")).unwrap_err();
     assert_eq!(err_code(&err), "unknown_color_key");
@@ -405,10 +451,17 @@ fn moving_into_ended_cycle_is_rejected() {
     let week_c = create_week(&db.db, &month.id, "2026-09-23");
     let child = add_task(&db.db, &week_a.id, "child row", NOW + 1);
     tasks::set_task_parent_link(&db.db, &child.id, Some(&task.id)).unwrap();
-    let moved = tasks::move_task(&db.db, &task.id, &week_c.id, Some(0)).unwrap().value;
+    let moved = tasks::move_task(&db.db, &task.id, &week_c.id, Some(0))
+        .unwrap()
+        .value;
     assert_eq!(moved.cycle_id, week_c.id);
-    let child_after = planner_lib::repository::tasks::get(&db.conn(), &child.id).unwrap().unwrap();
-    assert_eq!(child_after.cycle_id, week_c.id, "subtree rows follow the move");
+    let child_after = planner_lib::repository::tasks::get(&db.conn(), &child.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        child_after.cycle_id, week_c.id,
+        "subtree rows follow the move"
+    );
 }
 
 #[test]
@@ -424,7 +477,10 @@ fn planning_cycles_cannot_be_renamed_or_resized() {
 // ---------------------------------------------------------------------------
 
 fn input(title: &str) -> TaskInput {
-    TaskInput { title: title.into(), ..Default::default() }
+    TaskInput {
+        title: title.into(),
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -433,12 +489,15 @@ fn agent_upsert_lands_in_preview_and_is_hidden_from_visible_queries() {
     let month = create_long_term(&db.db, TODAY, 1);
     proposals::apply_upsert_preview(&db.db, &month.id, &input("Agent goal"), NOW + 1000).unwrap();
 
-    let visible = planner_lib::repository::tasks::list_visible_by_cycle(&db.conn(), &month.id)
-        .unwrap();
+    let visible =
+        planner_lib::repository::tasks::list_visible_by_cycle(&db.conn(), &month.id).unwrap();
     assert!(visible.is_empty(), "preview rows are not committed data");
     let summary = proposals::get_preview_summary(&db.db, &month.id).unwrap();
     assert_eq!(summary.count, 1, "底栏计数为 1");
-    assert_eq!(summary.tasks[0].proposal, Some(planner_lib::domain::proposal::ProposalKind::Upsert));
+    assert_eq!(
+        summary.tasks[0].proposal,
+        Some(planner_lib::domain::proposal::ProposalKind::Upsert)
+    );
 }
 
 #[test]
@@ -448,7 +507,9 @@ fn keep_clears_snapshot_and_commits_the_row() {
     let staged = proposals::apply_upsert_preview(&db.db, &month.id, &input("Agent goal"), NOW)
         .unwrap()
         .value;
-    let kept = proposals::keep_task_preview(&db.db, &staged.id).unwrap().value;
+    let kept = proposals::keep_task_preview(&db.db, &staged.id)
+        .unwrap()
+        .value;
     assert_eq!(kept.proposal, None);
     assert_eq!(kept.title, "Agent goal");
     let conn = db.conn();
@@ -470,7 +531,9 @@ fn undo_removes_rows_that_never_existed_and_restores_rows_that_did() {
         .unwrap()
         .value;
     proposals::undo_task_preview(&db.db, &fresh.id).unwrap();
-    assert!(planner_lib::repository::tasks::get(&db.conn(), &fresh.id).unwrap().is_none());
+    assert!(planner_lib::repository::tasks::get(&db.conn(), &fresh.id)
+        .unwrap()
+        .is_none());
 
     // Existing goal: undo restores the exact original content.
     let original = add_task(&db.db, &month.id, "original", NOW + 1);
@@ -490,7 +553,10 @@ fn delete_preview_keeps_row_revertible_then_keep_removes_it() {
 
     // Still visible, marked as a delete proposal.
     let staged = planner_lib::repository::tasks::require(&db.conn(), &goal.id).unwrap();
-    assert_eq!(staged.proposal, Some(planner_lib::domain::proposal::ProposalKind::Delete));
+    assert_eq!(
+        staged.proposal,
+        Some(planner_lib::domain::proposal::ProposalKind::Delete)
+    );
 
     // Undo restores the original row exactly.
     proposals::undo_task_preview(&db.db, &goal.id).unwrap();
@@ -502,7 +568,9 @@ fn delete_preview_keeps_row_revertible_then_keep_removes_it() {
     // (已确认的删除不留墓碑).
     proposals::apply_delete_preview(&db.db, &goal.id).unwrap();
     proposals::keep_task_preview(&db.db, &goal.id).unwrap();
-    assert!(planner_lib::repository::tasks::get(&db.conn(), &goal.id).unwrap().is_none());
+    assert!(planner_lib::repository::tasks::get(&db.conn(), &goal.id)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -511,9 +579,16 @@ fn batch_keep_and_undo_cover_whole_cycle() {
     let month = create_long_term(&db.db, TODAY, 1);
     proposals::apply_upsert_preview(&db.db, &month.id, &input("one"), NOW).unwrap();
     proposals::apply_upsert_preview(&db.db, &month.id, &input("two"), NOW + 1).unwrap();
-    let kept = proposals::keep_all_previews(&db.db, &month.id).unwrap().value;
+    let kept = proposals::keep_all_previews(&db.db, &month.id)
+        .unwrap()
+        .value;
     assert_eq!(kept, 2);
-    assert_eq!(proposals::get_preview_summary(&db.db, &month.id).unwrap().count, 0);
+    assert_eq!(
+        proposals::get_preview_summary(&db.db, &month.id)
+            .unwrap()
+            .count,
+        0
+    );
 
     let delete_target: String = {
         let conn = db.conn();
@@ -521,9 +596,16 @@ fn batch_keep_and_undo_cover_whole_cycle() {
             .unwrap()
     };
     proposals::apply_delete_preview(&db.db, &delete_target).unwrap();
-    let undone = proposals::undo_all_previews(&db.db, &month.id).unwrap().value;
+    let undone = proposals::undo_all_previews(&db.db, &month.id)
+        .unwrap()
+        .value;
     assert_eq!(undone, 1);
-    assert_eq!(proposals::get_preview_summary(&db.db, &month.id).unwrap().count, 0);
+    assert_eq!(
+        proposals::get_preview_summary(&db.db, &month.id)
+            .unwrap()
+            .count,
+        0
+    );
 }
 
 #[test]
@@ -536,7 +618,10 @@ fn creating_a_goal_reuses_trailing_empty_row() {
     let staged = proposals::apply_upsert_preview(&db.db, &month.id, &input("Agent goal"), NOW + 1)
         .unwrap()
         .value;
-    assert_eq!(staged.id, empty.id, "the empty row is replaced, not appended");
+    assert_eq!(
+        staged.id, empty.id,
+        "the empty row is replaced, not appended"
+    );
     assert_eq!(staged.position, empty.position);
     assert_eq!(staged.title, "Agent goal");
 
@@ -548,9 +633,10 @@ fn creating_a_goal_reuses_trailing_empty_row() {
 
     // With no empty row at all, the next goal is appended as a new row.
     tasks::delete_task(&db.db, &empty.id).unwrap();
-    let appended = proposals::apply_upsert_preview(&db.db, &month.id, &input("second goal"), NOW + 2)
-        .unwrap()
-        .value;
+    let appended =
+        proposals::apply_upsert_preview(&db.db, &month.id, &input("second goal"), NOW + 2)
+            .unwrap()
+            .value;
     assert_ne!(appended.id, empty.id);
 }
 
@@ -564,12 +650,7 @@ fn editor_workspace_matches_batch_entry_and_handles_missing_cycles() {
     let month = create_long_term(&db.db, TODAY, 1);
     let goal = add_task(&db.db, &month.id, "goal", NOW);
     // A child row under the goal (same-cycle hierarchy).
-    let child = add_task(
-        &db.db,
-        &month.id,
-        "sub",
-        NOW + 1,
-    );
+    let child = add_task(&db.db, &month.id, "sub", NOW + 1);
     tasks::set_task_parent_link(&db.db, &child.id, Some(&goal.id)).unwrap();
 
     let single = planner_lib::service::editor::get_editor_workspace(&db.db, &month.id).unwrap();
@@ -578,7 +659,11 @@ fn editor_workspace_matches_batch_entry_and_handles_missing_cycles() {
         &[month.id.clone(), "does-not-exist".into()],
     )
     .unwrap();
-    assert_eq!(batch.get(&month.id).unwrap(), &single, "batch and single agree");
+    assert_eq!(
+        batch.get(&month.id).unwrap(),
+        &single,
+        "batch and single agree"
+    );
     assert_eq!(single.tasks.len(), 1, "top-level tree roots only");
     assert_eq!(single.tasks[0].children.len(), 1);
     assert_eq!(single.tasks[0].task.id, goal.id);
@@ -586,8 +671,8 @@ fn editor_workspace_matches_batch_entry_and_handles_missing_cycles() {
     // Unknown or invisible cycles return empty results, not errors.
     let missing = batch.get("does-not-exist").unwrap();
     assert!(missing.cycle.is_none() && missing.tasks.is_empty());
-    let direct = planner_lib::service::editor::get_editor_workspace(&db.db, "does-not-exist")
-        .unwrap();
+    let direct =
+        planner_lib::service::editor::get_editor_workspace(&db.db, "does-not-exist").unwrap();
     assert!(direct.cycle.is_none());
 }
 
@@ -619,7 +704,12 @@ fn editor_workspace_renders_subtasks_markdown() {
 // Repeats
 // ---------------------------------------------------------------------------
 
-fn make_session(db: &TestDb, title: &str, duration_ms: i64, now: i64) -> planner_lib::domain::cycle::Cycle {
+fn make_session(
+    db: &TestDb,
+    title: &str,
+    duration_ms: i64,
+    now: i64,
+) -> planner_lib::domain::cycle::Cycle {
     let month = create_long_term(&db.db, TODAY, 6);
     let week = create_week(&db.db, &month.id, TODAY);
     let day = create_day(&db.db, &week.id, TODAY, now);
@@ -643,7 +733,9 @@ fn save_as_repeat_links_first_instance() {
     let session = make_session(&db, "Morning review", 1_800_000, NOW);
     let mutation = planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: session.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: session.id.clone(),
+        },
         NOW,
     )
     .unwrap();
@@ -652,7 +744,10 @@ fn save_as_repeat_links_first_instance() {
     let linked = planner_lib::repository::cycles::get(&db.conn(), &session.id)
         .unwrap()
         .unwrap();
-    assert_eq!(linked.repeat_id.as_deref(), Some(mutation.value.id.as_str()));
+    assert_eq!(
+        linked.repeat_id.as_deref(),
+        Some(mutation.value.id.as_str())
+    );
 }
 
 #[test]
@@ -661,7 +756,9 @@ fn next_day_generates_instances_in_template_order() {
     let morning = make_session(&db, "Morning review", 1_800_000, NOW);
     let repeat = planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: morning.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: morning.id.clone(),
+        },
         NOW,
     )
     .unwrap()
@@ -669,7 +766,8 @@ fn next_day_generates_instances_in_template_order() {
 
     // "Next day" through the find-or-create path.
     let next_day = planner_lib::domain::calendar::add_days(common::today(), 1);
-    let mutation = planner_lib::service::cycles::get_or_create_day(&db.db, next_day, NOW + 1).unwrap();
+    let mutation =
+        planner_lib::service::cycles::get_or_create_day(&db.db, next_day, NOW + 1).unwrap();
     let day = mutation.value;
 
     let sessions = planner_lib::repository::cycles::list_children(&db.conn(), &day.id).unwrap();
@@ -691,7 +789,9 @@ fn stop_repeat_archives_unlinks_and_preserves_history() {
     let session = make_session(&db, "Morning review", 1_800_000, NOW);
     let repeat = planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: session.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: session.id.clone(),
+        },
         NOW,
     )
     .unwrap()
@@ -727,7 +827,9 @@ fn editing_template_never_touches_existing_instances() {
     let session = make_session(&db, "Morning review", 1_800_000, NOW);
     let repeat = planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: session.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: session.id.clone(),
+        },
         NOW,
     )
     .unwrap()
@@ -761,14 +863,20 @@ fn removing_template_unlinks_but_never_deletes_instances() {
     let session = make_session(&db, "Morning review", 1_800_000, NOW);
     let repeat = planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: session.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: session.id.clone(),
+        },
         NOW,
     )
     .unwrap()
     .value;
 
     planner_lib::service::repeats::remove_repeat(&db.db, &repeat.id).unwrap();
-    assert!(planner_lib::repository::repeats::get(&db.conn(), &repeat.id).unwrap().is_none());
+    assert!(
+        planner_lib::repository::repeats::get(&db.conn(), &repeat.id)
+            .unwrap()
+            .is_none()
+    );
     let original = planner_lib::repository::cycles::get(&db.conn(), &session.id)
         .unwrap()
         .unwrap();
@@ -781,7 +889,9 @@ fn deleting_one_days_instance_leaves_the_template_alone() {
     let session = make_session(&db, "Morning review", 1_800_000, NOW);
     let repeat = planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: session.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: session.id.clone(),
+        },
         NOW,
     )
     .unwrap()
@@ -795,11 +905,15 @@ fn deleting_one_days_instance_leaves_the_template_alone() {
     )
     .unwrap()
     .value;
-    let instance = &planner_lib::repository::cycles::list_children(&db.conn(), &day2.id).unwrap()[0];
+    let instance =
+        &planner_lib::repository::cycles::list_children(&db.conn(), &day2.id).unwrap()[0];
     planner_lib::service::cycles::delete_cycle(&db.db, &instance.id).unwrap();
-    assert!(planner_lib::repository::repeats::get(&db.conn(), &repeat.id)
-        .unwrap()
-        .is_some(), "模板不受影响");
+    assert!(
+        planner_lib::repository::repeats::get(&db.conn(), &repeat.id)
+            .unwrap()
+            .is_some(),
+        "模板不受影响"
+    );
 
     // Day 3 still materializes normally.
     let day3 = planner_lib::service::cycles::get_or_create_day(
@@ -809,9 +923,13 @@ fn deleting_one_days_instance_leaves_the_template_alone() {
     )
     .unwrap()
     .value;
-    let day3_sessions = planner_lib::repository::cycles::list_children(&db.conn(), &day3.id).unwrap();
+    let day3_sessions =
+        planner_lib::repository::cycles::list_children(&db.conn(), &day3.id).unwrap();
     assert_eq!(day3_sessions.len(), 1);
-    assert_eq!(day3_sessions[0].repeat_id.as_deref(), Some(repeat.id.as_str()));
+    assert_eq!(
+        day3_sessions[0].repeat_id.as_deref(),
+        Some(repeat.id.as_str())
+    );
 }
 
 #[test]
@@ -820,7 +938,9 @@ fn editing_template_with_undated_instance_fails_explicitly() {
     let session = make_session(&db, "Morning review", 1_800_000, NOW);
     let repeat = planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: session.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: session.id.clone(),
+        },
         NOW,
     )
     .unwrap()
@@ -832,7 +952,10 @@ fn editing_template_with_undated_instance_fails_explicitly() {
     let err = planner_lib::service::repeats::update_repeat(
         &db.db,
         &repeat.id,
-        &planner_lib::service::repeats::RepeatPatch { duration: Some(60_000), ..Default::default() },
+        &planner_lib::service::repeats::RepeatPatch {
+            duration: Some(60_000),
+            ..Default::default()
+        },
     )
     .unwrap_err();
     assert_eq!(err_code(&err), "repeat_future_unknown");
@@ -849,7 +972,9 @@ fn repeat_instances_obey_the_same_deletion_guards() {
     let session = make_session(&db, "Morning review", 1_800_000, NOW);
     planner_lib::service::repeats::add_repeat(
         &db.db,
-        &planner_lib::service::repeats::AddRepeatArgs { session_id: session.id.clone() },
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: session.id.clone(),
+        },
         NOW,
     )
     .unwrap();

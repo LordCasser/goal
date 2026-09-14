@@ -13,7 +13,8 @@ pub enum CycleType {
     Day,
     Week,
     Month,
-}impl CycleType {
+}
+impl CycleType {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Session => "session",
@@ -164,7 +165,10 @@ pub struct LifecycleError {
 
 /// Pure lifecycle state machine. Illegal transitions are rejected here so the
 /// service layer never writes a state the database CHECK would abort on.
-pub fn transition(state: LifecycleState, action: LifecycleAction) -> Result<LifecycleState, LifecycleError> {
+pub fn transition(
+    state: LifecycleState,
+    action: LifecycleAction,
+) -> Result<LifecycleState, LifecycleError> {
     match (state, action) {
         (LifecycleState::NotStarted, LifecycleAction::Start) => Ok(LifecycleState::Started),
         (LifecycleState::Started, LifecycleAction::Finish) => Ok(LifecycleState::Finished),
@@ -220,26 +224,53 @@ mod tests {
 
     #[test]
     fn state_from_flags() {
-        assert_eq!(LifecycleState::from_flags(false, false), Some(LifecycleState::NotStarted));
-        assert_eq!(LifecycleState::from_flags(true, false), Some(LifecycleState::Started));
-        assert_eq!(LifecycleState::from_flags(true, true), Some(LifecycleState::Finished));
+        assert_eq!(
+            LifecycleState::from_flags(false, false),
+            Some(LifecycleState::NotStarted)
+        );
+        assert_eq!(
+            LifecycleState::from_flags(true, false),
+            Some(LifecycleState::Started)
+        );
+        assert_eq!(
+            LifecycleState::from_flags(true, true),
+            Some(LifecycleState::Finished)
+        );
         assert_eq!(LifecycleState::from_flags(false, true), None);
     }
 
     #[test]
     fn legal_transitions() {
         let s = |a, b| transition(a, b).unwrap();
-        assert_eq!(s(LifecycleState::NotStarted, LifecycleAction::Start), LifecycleState::Started);
-        assert_eq!(s(LifecycleState::Started, LifecycleAction::Finish), LifecycleState::Finished);
+        assert_eq!(
+            s(LifecycleState::NotStarted, LifecycleAction::Start),
+            LifecycleState::Started
+        );
+        assert_eq!(
+            s(LifecycleState::Started, LifecycleAction::Finish),
+            LifecycleState::Finished
+        );
     }
 
     #[test]
     fn illegal_transitions_are_rejected() {
         let err = |a, b| transition(a, b).unwrap_err().code;
         // every illegal move, one case each
-        assert_eq!(err(LifecycleState::Started, LifecycleAction::Start), "cycle_already_started");
-        assert_eq!(err(LifecycleState::Finished, LifecycleAction::Start), "cycle_already_finished");
-        assert_eq!(err(LifecycleState::Finished, LifecycleAction::Finish), "cycle_already_finished");
-        assert_eq!(err(LifecycleState::NotStarted, LifecycleAction::Finish), "cycle_not_started");
+        assert_eq!(
+            err(LifecycleState::Started, LifecycleAction::Start),
+            "cycle_already_started"
+        );
+        assert_eq!(
+            err(LifecycleState::Finished, LifecycleAction::Start),
+            "cycle_already_finished"
+        );
+        assert_eq!(
+            err(LifecycleState::Finished, LifecycleAction::Finish),
+            "cycle_already_finished"
+        );
+        assert_eq!(
+            err(LifecycleState::NotStarted, LifecycleAction::Finish),
+            "cycle_not_started"
+        );
     }
 }

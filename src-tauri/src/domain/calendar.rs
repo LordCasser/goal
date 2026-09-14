@@ -56,7 +56,12 @@ pub fn week_key(week_start: NaiveDate) -> String {
 }
 
 pub fn long_term_key(starts_on: NaiveDate, ends_on: NaiveDate) -> String {
-    format!("{}{}:{}", LONG_TERM_KEY_PREFIX, format_date(starts_on), format_date(ends_on))
+    format!(
+        "{}{}:{}",
+        LONG_TERM_KEY_PREFIX,
+        format_date(starts_on),
+        format_date(ends_on)
+    )
 }
 
 /// First day of the week containing `date`, given `week_start_day`
@@ -148,7 +153,10 @@ mod tests {
     #[test]
     fn week_key_uses_week_start_date() {
         // Monday-start: the week containing Thu 2026-09-10 starts Mon 2026-09-07.
-        assert_eq!(week_key(start_of_week(d("2026-09-10"), 1)), "week:2026-09-07");
+        assert_eq!(
+            week_key(start_of_week(d("2026-09-10"), 1)),
+            "week:2026-09-07"
+        );
     }
 
     #[test]
@@ -234,11 +242,20 @@ mod tests {
     fn dated_bounds_per_type() {
         let today = d("2026-09-16"); // Wednesday
         let (ds, de) = dated_cycle_bounds(today, CycleType::Day, 1, 0).unwrap();
-        assert_eq!((format_date(ds), format_date(de)), ("2026-09-16".to_string(), "2026-09-17".to_string()));
+        assert_eq!(
+            (format_date(ds), format_date(de)),
+            ("2026-09-16".to_string(), "2026-09-17".to_string())
+        );
         let (ws, we) = dated_cycle_bounds(today, CycleType::Week, 1, 0).unwrap();
-        assert_eq!((format_date(ws), format_date(we)), ("2026-09-14".to_string(), "2026-09-21".to_string()));
+        assert_eq!(
+            (format_date(ws), format_date(we)),
+            ("2026-09-14".to_string(), "2026-09-21".to_string())
+        );
         let (ms, me) = dated_cycle_bounds(today, CycleType::Month, 1, 84).unwrap();
-        assert_eq!((format_date(ms), format_date(me)), ("2026-09-16".to_string(), "2026-12-09".to_string()));
+        assert_eq!(
+            (format_date(ms), format_date(me)),
+            ("2026-09-16".to_string(), "2026-12-09".to_string())
+        );
         assert!(dated_cycle_bounds(today, CycleType::Session, 1, 0).is_none());
     }
 

@@ -65,16 +65,26 @@ pub fn apply_upsert_preview(
     now: i64,
 ) -> AppResult<Mutation<Task>> {
     if input.title.trim().is_empty() {
-        return Err(AppError::validation("invalid_title", "A goal needs a title"));
+        return Err(AppError::validation(
+            "invalid_title",
+            "A goal needs a title",
+        ));
     }
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     require_mutable_goal_cycle(&tx, cycle_id)?;
 
     let task_id;
     match tasks_repo::last_empty_visible_row(&tx, cycle_id)? {
         Some(empty_row) if is_empty_input_row(&empty_row) => {
-            repo::save_snapshot(&tx, &empty_row.id, cycle_id, &TaskSnapshot::capture(&empty_row))?;
+            repo::save_snapshot(
+                &tx,
+                &empty_row.id,
+                cycle_id,
+                &TaskSnapshot::capture(&empty_row),
+            )?;
             task_id = empty_row.id;
         }
         _ => {
@@ -113,7 +123,9 @@ pub fn apply_update_preview(
     input: &TaskInput,
 ) -> AppResult<Mutation<Task>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let existing = tasks_repo::require(&tx, task_id)?;
     if existing.proposal == Some(ProposalKind::Delete) {
         return Err(AppError::conflict(
@@ -146,7 +158,9 @@ pub fn apply_update_preview(
 /// (spec: 未确认的删除).
 pub fn apply_delete_preview(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let existing = tasks_repo::require(&tx, task_id)?;
     if existing.proposal.is_none() {
         repo::save_snapshot(
@@ -180,7 +194,11 @@ pub fn get_preview_summary(db: &Db, cycle_id: &str) -> AppResult<PreviewSummary>
         .filter(|t| t.proposal.is_some())
         .collect::<Vec<_>>();
     let count = tasks.len();
-    Ok(PreviewSummary { cycle_id: cycle_id.to_string(), count, tasks })
+    Ok(PreviewSummary {
+        cycle_id: cycle_id.to_string(),
+        count,
+        tasks,
+    })
 }
 
 fn keep_one(conn: &Connection, task_id: &str) -> AppResult<Option<Task>> {
@@ -212,9 +230,10 @@ fn keep_one(conn: &Connection, task_id: &str) -> AppResult<Option<Task>> {
 /// Keep: the staged content becomes committed data and the snapshot is cleared.
 pub fn keep_task_preview(db: &Db, task_id: &str) -> AppResult<Mutation<Task>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
-    let task = keep_one(&tx, task_id)?
-        .ok_or_else(|| AppError::not_found("task", task_id))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
+    let task = keep_one(&tx, task_id)?.ok_or_else(|| AppError::not_found("task", task_id))?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let cycle_id = task.cycle_id.clone();
     Ok(Mutation::new(task)
@@ -254,7 +273,9 @@ fn undo_one(conn: &Connection, task_id: &str) -> AppResult<Option<String>> {
 
 pub fn undo_task_preview(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let cycle_id = undo_one(&tx, task_id)?.ok_or_else(|| AppError::not_found("task", task_id))?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     Ok(Mutation::new(())
@@ -264,7 +285,9 @@ pub fn undo_task_preview(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
 
 pub fn keep_all_previews(db: &Db, cycle_id: &str) -> AppResult<Mutation<usize>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let entries = repo::list_entries_by_cycle(&tx, cycle_id)?;
     let mut kept = 0;
     for entry in entries {
@@ -281,7 +304,9 @@ pub fn keep_all_previews(db: &Db, cycle_id: &str) -> AppResult<Mutation<usize>> 
 
 pub fn undo_all_previews(db: &Db, cycle_id: &str) -> AppResult<Mutation<usize>> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let entries = repo::list_entries_by_cycle(&tx, cycle_id)?;
     let mut undone = 0;
     for entry in entries {

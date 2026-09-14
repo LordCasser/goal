@@ -27,15 +27,18 @@ pub fn get_snapshot(conn: &Connection, task_id: &str) -> AppResult<Option<TaskSn
                 original_exists: original_exists != 0,
                 title,
                 completed: completed.map(|v| v != 0),
-                subtasks: subtasks
-                    .and_then(|s| serde_json::from_str(&s).ok()),
+                subtasks: subtasks.and_then(|s| serde_json::from_str(&s).ok()),
                 position: row.get("position")?,
                 goal_breakdown: goal_breakdown.and_then(|s| serde_json::from_str(&s).ok()),
                 parent_id: row.get("parent_id")?,
                 root_color_key: row.get("root_color_key")?,
                 created_at: row.get("created_at")?,
-                needs_refinement: row.get::<_, Option<i64>>("needs_refinement")?.map(|v| v != 0),
-                needs_breakdown: row.get::<_, Option<i64>>("needs_breakdown")?.map(|v| v != 0),
+                needs_refinement: row
+                    .get::<_, Option<i64>>("needs_refinement")?
+                    .map(|v| v != 0),
+                needs_breakdown: row
+                    .get::<_, Option<i64>>("needs_breakdown")?
+                    .map(|v| v != 0),
             })
         },
     )
@@ -50,8 +53,10 @@ pub fn save_snapshot(
     snapshot: &TaskSnapshot,
 ) -> AppResult<()> {
     let subtasks_json = match &snapshot.subtasks {
-        Some(list) => Some(serde_json::to_string(list)
-            .map_err(|e| crate::error::AppError::Internal(e.to_string()))?),
+        Some(list) => Some(
+            serde_json::to_string(list)
+                .map_err(|e| crate::error::AppError::Internal(e.to_string()))?,
+        ),
         None => None,
     };
     let goal_breakdown_json = snapshot.goal_breakdown.as_ref().map(|v| v.to_string());

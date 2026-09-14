@@ -55,11 +55,7 @@ pub fn create_long_term(db: &Db, start: &str, months: i64) -> planner_lib::domai
 }
 
 /// Creates a week cycle under `parent`, anchored on `anchor`.
-pub fn create_week(
-    db: &Db,
-    parent_id: &str,
-    anchor: &str,
-) -> planner_lib::domain::cycle::Cycle {
+pub fn create_week(db: &Db, parent_id: &str, anchor: &str) -> planner_lib::domain::cycle::Cycle {
     let today = planner_lib::domain::calendar::parse_date(anchor).unwrap();
     let mutation = planner_lib::service::cycles::create_planning_cycle(
         db,

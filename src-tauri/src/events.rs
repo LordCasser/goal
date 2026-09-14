@@ -50,16 +50,31 @@ pub fn emit_cycles_changed<R: Runtime>(app: &tauri::AppHandle<R>, ids: &CycleIdS
     if ids.is_empty() {
         return;
     }
-    let _ = app.emit(CYCLES_CHANGED, CycleIdsPayload { cycle_ids: ids.ids() });
+    let _ = app.emit(
+        CYCLES_CHANGED,
+        CycleIdsPayload {
+            cycle_ids: ids.ids(),
+        },
+    );
 }
 
 pub fn emit_tasks_changed<R: Runtime>(app: &tauri::AppHandle<R>, ids: &CycleIdSet) {
     if ids.is_empty() {
         return;
     }
-    let _ = app.emit(TASKS_CHANGED, CycleIdsPayload { cycle_ids: ids.ids() });
+    let _ = app.emit(
+        TASKS_CHANGED,
+        CycleIdsPayload {
+            cycle_ids: ids.ids(),
+        },
+    );
 }
 
 pub fn emit_proposals_changed<R: Runtime>(app: &tauri::AppHandle<R>, cycle_id: &str) {
-    let _ = app.emit(PROPOSALS_CHANGED, CycleIdPayload { cycle_id: cycle_id.to_string() });
+    let _ = app.emit(
+        PROPOSALS_CHANGED,
+        CycleIdPayload {
+            cycle_id: cycle_id.to_string(),
+        },
+    );
 }

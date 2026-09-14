@@ -8,6 +8,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{from_rusqlite, AppResult};
 
 pub const KEY_WEEK_START_DAY: &str = "week_start_day";
+pub const KEY_LOG_LEVEL: &str = "log_level";
+pub const KEY_THEME: &str = "theme";
 
 pub fn get(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     conn.query_row(

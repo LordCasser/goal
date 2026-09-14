@@ -72,5 +72,8 @@ pub fn open_at(path: &std::path::Path) -> Result<Db, crate::error::AppError> {
         migrations::apply(&mut conn)?;
     }
 
-    Ok(Db { pool, path: path.to_path_buf() })
+    Ok(Db {
+        pool,
+        path: path.to_path_buf(),
+    })
 }

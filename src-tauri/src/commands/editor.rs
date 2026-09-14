@@ -9,10 +9,7 @@ use crate::error::AppResult;
 use crate::service::editor::{self, EditorWorkspace};
 
 #[tauri::command]
-pub fn get_editor_workspace(
-    db: State<'_, Db>,
-    cycle_id: String,
-) -> AppResult<EditorWorkspace> {
+pub fn get_editor_workspace(db: State<'_, Db>, cycle_id: String) -> AppResult<EditorWorkspace> {
     editor::get_editor_workspace(&db, &cycle_id)
 }
 

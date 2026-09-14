@@ -41,7 +41,11 @@ pub struct Subtask {
 
 impl Subtask {
     pub fn new(title: impl Into<String>, completed: bool) -> Self {
-        Self { title: title.into(), completed, children: Vec::new() }
+        Self {
+            title: title.into(),
+            completed,
+            children: Vec::new(),
+        }
     }
 }
 
@@ -99,12 +103,17 @@ pub fn build_tree(tasks: Vec<Task>) -> Vec<TaskNode> {
     ) -> TaskNode {
         let task = sorted[idx].clone();
         let markdown = render_subtasks_markdown(&task.subtasks);
-        let mut node = TaskNode { task, children: Vec::new(), subtasks_markdown: markdown };
+        let mut node = TaskNode {
+            task,
+            children: Vec::new(),
+            subtasks_markdown: markdown,
+        };
         visited.insert(idx);
         if let Some(kids) = children_of.get(sorted[idx].id.as_str()) {
             for &kid in kids {
                 if !visited.contains(&kid) {
-                    node.children.push(attach(kid, sorted, children_of, visited));
+                    node.children
+                        .push(attach(kid, sorted, children_of, visited));
                 }
             }
         }
@@ -137,7 +146,10 @@ pub fn build_tree(tasks: Vec<Task>) -> Vec<TaskNode> {
 pub fn is_empty_input_row(task: &Task) -> bool {
     task.title.trim().is_empty()
         && !task.completed
-        && task.subtasks.iter().all(|s| s.title.trim().is_empty() && s.children.is_empty())
+        && task
+            .subtasks
+            .iter()
+            .all(|s| s.title.trim().is_empty() && s.children.is_empty())
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +267,10 @@ pub fn parse_subtasks_markdown(markdown: &str) -> Vec<Subtask> {
         let mut completed = false;
         if let Some(after) = rest.strip_prefix("[ ] ") {
             rest = after;
-        } else if let Some(after) = rest.strip_prefix("[x] ").or_else(|| rest.strip_prefix("[X] ")) {
+        } else if let Some(after) = rest
+            .strip_prefix("[x] ")
+            .or_else(|| rest.strip_prefix("[X] "))
+        {
             completed = true;
             rest = after;
         } else if rest == "[ ]" {
@@ -265,7 +280,11 @@ pub fn parse_subtasks_markdown(markdown: &str) -> Vec<Subtask> {
             rest = "";
         }
 
-        let item = Subtask { title: unescape_title(rest), completed, children: Vec::new() };
+        let item = Subtask {
+            title: unescape_title(rest),
+            completed,
+            children: Vec::new(),
+        };
 
         if stack.len() > depth + 1 {
             fold_up(&mut stack);
@@ -303,7 +322,11 @@ mod tests {
     }
 
     fn sub(title: &str, completed: bool, children: Vec<Subtask>) -> Subtask {
-        Subtask { title: title.into(), completed, children }
+        Subtask {
+            title: title.into(),
+            completed,
+            children,
+        }
     }
 
     #[test]
@@ -318,7 +341,11 @@ mod tests {
         let tree = build_tree(tasks);
         let root_titles: Vec<&str> = tree.iter().map(|n| n.task.id.as_str()).collect();
         assert_eq!(root_titles, vec!["a", "late-a2", "b"]);
-        let kids: Vec<&str> = tree[2].children.iter().map(|n| n.task.id.as_str()).collect();
+        let kids: Vec<&str> = tree[2]
+            .children
+            .iter()
+            .map(|n| n.task.id.as_str())
+            .collect();
         assert_eq!(kids, vec!["b1", "b2"]);
     }
 
@@ -352,7 +379,11 @@ mod tests {
     #[test]
     fn markdown_renders_levels_and_order() {
         let items = vec![
-            sub("first", false, vec![sub("child", true, vec![]), sub("child2", false, vec![])]),
+            sub(
+                "first",
+                false,
+                vec![sub("child", true, vec![]), sub("child2", false, vec![])],
+            ),
             sub("second", true, vec![]),
         ];
         let md = render_subtasks_markdown(&items);
@@ -366,7 +397,11 @@ mod tests {
 
     #[test]
     fn markdown_round_trips_nested_levels() {
-        let items = vec![sub("a", false, vec![sub("a1", false, vec![sub("deep", true, vec![])])])];
+        let items = vec![sub(
+            "a",
+            false,
+            vec![sub("a1", false, vec![sub("deep", true, vec![])])],
+        )];
         let parsed = parse_subtasks_markdown(&render_subtasks_markdown(&items));
         assert_eq!(parsed, items);
     }
@@ -387,17 +422,23 @@ mod tests {
             "normal title",
             "",
         ];
-        let items: Vec<Subtask> =
-            tricky.iter().map(|t| Subtask::new(*t, false)).collect();
+        let items: Vec<Subtask> = tricky.iter().map(|t| Subtask::new(*t, false)).collect();
         let parsed = parse_subtasks_markdown(&render_subtasks_markdown(&items));
-        assert_eq!(parsed, items, "round trip must preserve meta-character titles");
+        assert_eq!(
+            parsed, items,
+            "round trip must preserve meta-character titles"
+        );
     }
 
     #[test]
     fn markdown_sanitizes_newlines_instead_of_breaking_structure() {
         let items = vec![sub("line one\nline two", false, vec![])];
         let md = render_subtasks_markdown(&items);
-        assert_eq!(md.lines().count(), 1, "a title newline must not become a new list item");
+        assert_eq!(
+            md.lines().count(),
+            1,
+            "a title newline must not become a new list item"
+        );
         let parsed = parse_subtasks_markdown(&md);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].title, "line one line two");
