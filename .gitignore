@@ -1,0 +1,32 @@
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Node
+node_modules/
+dist/
+*.local
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+coverage/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Local database files (never commit user data)
+*.db
+*.db-shm
+*.db-wal
+
+# Editor / AI tooling
+.vscode/
+.idea/
+.agents/
+.atlas/

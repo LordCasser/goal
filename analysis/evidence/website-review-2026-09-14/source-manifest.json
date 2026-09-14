@@ -1,0 +1,89 @@
+{
+  "captured_at": "2026-09-14T07:20:01.657207+00:00",
+  "source": "https://hyperfocus.in/",
+  "html": {
+    "file": "index.html",
+    "bytes": 29635,
+    "sha256": "f89427266e4d945d7fbfd990021e4b0a5662cd266a0afe55d92d07d933745daa"
+  },
+  "assets": [
+    {
+      "url": "https://hyperfocus.in/assets/main-foDo0Cvb.js",
+      "file": "main-foDo0Cvb.js",
+      "bytes": 71892,
+      "sha256": "348015b602a6f59172432693634c29f4eb89916a5ba1eeb3db98159e29f4e29a"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/main-CufOTVcg.css",
+      "file": "main-CufOTVcg.css",
+      "bytes": 49083,
+      "sha256": "d015bb72e2f5926c37617547ca50505a0b5bae30ecedc294fbefa17c4768591f"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/hero-CiQUOv4a.png",
+      "file": "hero-CiQUOv4a.png",
+      "bytes": 436437,
+      "sha256": "09304190ba2c4ca81681fe8b27b29daccab0bd7788d853b7191cf9cf5d0dbec7"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/connected-goals-mobile-CwenwoYD.webp",
+      "file": "connected-goals-mobile-CwenwoYD.webp",
+      "bytes": 88664,
+      "sha256": "2d8bcbd17867313aa9c47996957b9bd8cbc55f173ef8c44e71e4de7011945a6b"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/connected-goals-mobile-C9hfEzqj.png",
+      "file": "connected-goals-mobile-C9hfEzqj.png",
+      "bytes": 254327,
+      "sha256": "286c319bb59b24bad9cc87cee05a74962f1f6e4a6cf92c39aa4a0286169907d2"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/connected-goals-PA5qXU7i.webp",
+      "file": "connected-goals-PA5qXU7i.webp",
+      "bytes": 107290,
+      "sha256": "553b87565915b67576ee97a71becc107c6d983ed28c058af40bdbd6582eafbc7"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/connected-goals-ZoxmkM_E.png",
+      "file": "connected-goals-ZoxmkM_E.png",
+      "bytes": 331703,
+      "sha256": "832f315829f43eef6aac93aa47fb463b98063680e3e513bbb5cd99f6ebf9bdf5"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/second-opinion-BZe0LbSb.webp",
+      "file": "second-opinion-BZe0LbSb.webp",
+      "bytes": 30070,
+      "sha256": "10fa3546f4f758703eb592394c3b55a45ef88f3e8cbc951333bd2f46e0edc0d5"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/second-opinion-CwaH4xDf.png",
+      "file": "second-opinion-CwaH4xDf.png",
+      "bytes": 78632,
+      "sha256": "991001af8fa6b4c690b62f0a988f927de8ba5d48e2264a0492237de4be669bda"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/planning-rituals-Dfmt8WSs.webp",
+      "file": "planning-rituals-Dfmt8WSs.webp",
+      "bytes": 28138,
+      "sha256": "c4ac910c6ddf79a8045cabb532aa5225467d8a3e5d53479663daa7af07f0c786"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/planning-rituals-jSG0Zn2d.png",
+      "file": "planning-rituals-jSG0Zn2d.png",
+      "bytes": 83102,
+      "sha256": "066f8e9efa89b4f597a79be622ca09384a5439928495afb0b85f09990a1e72d2"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/focus-block-progress-CTqJ5kYj.webp",
+      "file": "focus-block-progress-CTqJ5kYj.webp",
+      "bytes": 17560,
+      "sha256": "439af7ebe770e8dcff5d714bea73e35328ada9a5a7634a1323b6d9270aa1cd95"
+    },
+    {
+      "url": "https://hyperfocus.in/assets/focus-block-progress-Zpim63eo.png",
+      "file": "focus-block-progress-Zpim63eo.png",
+      "bytes": 48475,
+      "sha256": "d9917017f112032b158ea593d90dc01d94e40c535310a21195a96a9a643eaac9"
+    }
+  ]
+}

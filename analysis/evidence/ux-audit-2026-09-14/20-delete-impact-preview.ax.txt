@@ -1,0 +1,24 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 standard window Hyperfocus, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: hyperfocus, URL: tauri://localhost
+			3 container DELETE WEEKLY PLAN (W39)?
+				4 heading DELETE WEEKLY PLAN (W39)?, Value: 2
+					5 text DELETE WEEKLY PLAN (W39)?
+				6 container
+					7 text This will delete  weekly plan (W39)  and  1 task . This can't be undone.
+				8 container
+					9 button Cancel
+					10 button Delete
+	11 close button
+	12 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	13 minimize button
+14 menu bar
+	15 hyperfocus
+	16 File
+	17 Edit
+	18 View
+	19 Window
+	20 Help
+
+The focused UI element is 9 button Cancel

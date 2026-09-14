@@ -1,0 +1,1590 @@
+# hyperfocus 0.15.0 — migration SQL (verbatim from binary)
+
+
+==============================================================================
+## 01. initial schema
+==============================================================================
+-- Initial schema migration matching the existing Drizzle schema
+-- This creates all core tables for the Hyperfocus application
+
+CREATE TABLE periods_table (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('session', 'day', 'week', 'month')),
+    started BOOLEAN NOT NULL DEFAULT 0,
+    finished BOOLEAN NOT NULL DEFAULT 0,
+    started_at INTEGER,
+    finished_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    parent_id TEXT REFERENCES periods_table(id),
+    duration INTEGER NOT NULL DEFAULT 0 CHECK (duration >= 0),
+    focused_time REAL,
+    archived BOOLEAN DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0 AND position <= 999),
+    repeat_id TEXT REFERENCES repeats_table(id),
+    plan_reality_rating INTEGER,
+    CHECK (NOT (started = 0 AND finished = 1))
+);
+
+CREATE TABLE tasks_table (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    completed BOOLEAN NOT NULL DEFAULT 0,
+    subtasks TEXT NOT NULL DEFAULT '[]', -- JSON as text
+    period_id TEXT NOT NULL REFERENCES periods_table(id),
+    position INTEGER NOT NULL DEFAULT 0,
+    migrated_from_task_id TEXT REFERENCES tasks_table(id)
+);
+
+CREATE TABLE checkins_table (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pmf TEXT CHECK (pmf IN ('very_disappointed', 'somewhat_disappointed', 'not_disappointed')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+
+CREATE TABLE repeats_table (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    duration INTEGER NOT NULL CHECK (duration >= 0),
+    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0 AND position <= 999),
+    archived BOOLEAN NOT NULL DEFAULT 0
+);
+
+-- Essential indexes for performance
+CREATE INDEX idx_tasks_period ON tasks_table(period_id);
+CREATE INDEX idx_periods_parent ON periods_table(parent_id);
+CREATE INDEX idx_periods_type ON periods_table(type);
+CREATE INDEX idx_periods_archived ON periods_table(archived);
+���x�
+
+==============================================================================
+## 02. onboarding data
+==============================================================================
+-- Onboarding data migration - Creates initial sample data for new users
+-- Uses hardcoded UUID-like identifiers for predictable onboarding experience
+
+-- Insert Month Period
+INSERT INTO periods_table (
+    id,
+    title,
+    type,
+    duration,
+    started,
+    finished,
+    archived,
+    position,
+    created_at
+) VALUES (
+    '58707920-9657-49c6-93f0-3865ce130fab',
+    'Month 1',
+    'month',
+    2592000000, -- 30 days in milliseconds (30 * 24 * 60 * 60 * 1000)
+    0,
+    0,
+    0,
+    0,
+    (unixepoch() * 1000)
+);
+
+-- Insert Month Tasks (exact replication from generateOnboardingData.ts lines 23-52)
+INSERT INTO tasks_table (id, title, completed, subtasks, period_id, position) VALUES
+('f47ac10b-58cc-4372-a567-0e02b2c3d479', 'Write your top goals for the next 30 days 🎯 ', 0, '[]', '58707920-9657-49c6-93f0-3865ce130fab', 0),
+('6ba7b810-9dad-11d1-80b4-00c04fd430c8', 'Type your first goal here...', 0, '[]', '58707920-9657-49c6-93f0-3865ce130fab', 1),
+('6ba7b811-9dad-11d1-80b4-00c04fd430c8', 'Use [Enter] to create new tasks', 0, '[]', '58707920-9657-49c6-93f0-3865ce130fab', 2),
+('6ba7b812-9dad-11d1-80b4-00c04fd430c8', 'Start the month ▶️', 0, '[]', '58707920-9657-49c6-93f0-3865ce130fab', 3);
+
+-- Insert Week Period
+INSERT INTO periods_table (
+    id,
+    title,
+    type,
+    duration,
+    started,
+    finished,
+    archived,
+    position,
+    parent_id,
+    created_at
+) VALUES (
+    'a1b2c3d4-e5f6-789a-bcde-f0123456789a',
+    'Week 1',
+    'week',
+    604800000, -- 7 days in milliseconds (7 * 24 * 60 * 60 * 1000)
+    0,
+    0,
+    0,
+    0,
+    '58707920-9657-49c6-93f0-3865ce130fab',
+    (unixepoch() * 1000)
+);
+
+-- Insert Week Tasks (exact replication from generateOnboardingData.ts lines 70-92)
+-- Note: First task includes subtasks JSON structure
+INSERT INTO tasks_table (id, title, completed, subtasks, period_id, position) VALUES
+('b2c3d4e5-f6a7-890b-cdef-012345678901', 'Set clear and achievable goals for this week', 0, '[{"title":"Break them into smaller tasks using [Tab] and [Shift+Tab]","completed":false,"subtasks":[]}]', 'a1b2c3d4-e5f6-789a-bcde-f0123456789a', 0),
+('c3d4e5f6-a7b8-901c-def0-123456789012', 'Start the week 👏🏻', 0, '[]', 'a1b2c3d4-e5f6-789a-bcde-f0123456789a', 1);
+
+-- Insert Day Period
+INSERT INTO periods_table (
+    id,
+    title,
+    type,
+    duration,
+    started,
+    finished,
+    archived,
+    position,
+    parent_id,
+    created_at
+) VALUES (
+    'd4e5f6a7-b8c9-012d-ef01-23456789012b',
+    'Day 1',
+    'day',
+    72000000, -- 20 hours in milliseconds (20 * 60 * 60 * 1000)
+    0,
+    0,
+    0,
+    0,
+    'a1b2c3d4-e5f6-789a-bcde-f0123456789a',
+    (unixepoch() * 1000)
+);
+
+-- Insert Day Tasks (exact replication from generateOnboardingData.ts lines 109-133)
+INSERT INTO tasks_table (id, title, completed, subtasks, period_id, position) VALUES
+('e5f6a7b8-c9d0-123e-f012-3456789012cd', 'Time to get hands dirty! Write down your goals for today', 0, '[]', 'd4e5f6a7-b8c9-012d-ef01-23456789012b', 0),
+('f6a7b8c9-d0e1-234f-0123-456789012cde', 'Accept that a long to-do list sometimes is unavoidable — just don''t let it pile up', 0, '[]', 'd4e5f6a7-b8c9-012d-ef01-23456789012b', 1),
+('a7b8c9d0-e1f2-345a-1234-56789012cdef', 'Start your first day 🏁', 0, '[]', 'd4e5f6a7-b8c9-012d-ef01-23456789012b', 2);
+
+-- Insert Session Periods (exact replication from generateOnboardingData.ts lines 137-154)
+INSERT INTO periods_table (
+    id,
+    title,
+    type,
+    duration,
+    started,
+    finished,
+    archived,
+    position,
+    parent_id,
+    created_at
+) VALUES
+('b8c9d0e1-f2a3-456b-2345-6789012cdef0', 'Morning focus', 'session', 5400000, 0, 0, 0, 0, 'd4e5f6a7-b8c9-012d-ef01-23456789012b', (unixepoch() * 1000)), -- 90 minutes (90 * 60 * 1000)
+('c9d0e1f2-a3b4-567c-3456-789012cdef01', 'Afternoon cleanup', 'session', 2700000, 0, 0, 0, 1, 'd4e5f6a7-b8c9-012d-ef01-23456789012b', (unixepoch() * 1000)); -- 45 minutes (45 * 60 * 1000)
+
+-- Sessions don't have default tasks (matching original implementation)
+
+==============================================================================
+## 03. drop checkins table
+==============================================================================
+-- Drop checkins_table migration
+-- Removes the checkins table which is no longer needed
+DROP TABLE IF EXISTS checkins_table;
+�!��
+
+==============================================================================
+## 04. drop plan reality rating
+==============================================================================
+-- Drop plan_reality_rating column from periods_table
+-- This column is no longer needed
+ALTER TABLE periods_table DROP COLUMN plan_reality_rating;
+gO����[j��tJ��~
+
+==============================================================================
+## 05. add pro id to periods
+==============================================================================
+-- Add pro_id column to periods_table
+-- This allows week periods to store a reference to their selected Pro benchmark
+
+ALTER TABLE periods_table ADD COLUMN pro_id TEXT;
+
+==============================================================================
+## 06. convert focused time to milliseconds
+==============================================================================
+-- Convert focused_time from seconds (REAL) to milliseconds (INTEGER) for consistency
+-- All other time fields in the schema use milliseconds
+
+-- Step 1: Add new column with INTEGER type
+ALTER TABLE periods_table ADD COLUMN focused_time_ms INTEGER;
+
+-- Step 2: Convert existing data from seconds to milliseconds
+UPDATE periods_table SET focused_time_ms = CAST(focused_time * 1000 AS INTEGER) WHERE focused_time IS NOT NULL;
+
+-- Step 3: Drop old column
+ALTER TABLE periods_table DROP COLUMN focused_time;
+
+-- Step 4: Rename new column to original name
+ALTER TABLE periods_table RENAME COLUMN focused_time_ms TO focused_time;
+���i	��
+
+==============================================================================
+## 07. add scores table
+==============================================================================
+-- Add scores table for tracking daily strategy and execution scores
+-- Each day period gets score rows (one per score_type: strategy, execution)
+
+CREATE TABLE scores_table (
+  id TEXT PRIMARY KEY,
+  period_id TEXT NOT NULL REFERENCES periods_table(id),
+  score_type TEXT NOT NULL CHECK(score_type IN ('strategy', 'execution')),
+  player_score INTEGER NOT NULL,
+  pro_score INTEGER NOT NULL,
+  pro_id TEXT NOT NULL,
+  player_won BOOLEAN NOT NULL,  -- True if player_score >= pro_score
+  score_data TEXT NOT NULL,  -- JSON: ScoreData enum (Strategy or Execution)
+  created_at INTEGER NOT NULL,
+  UNIQUE(period_id, score_type)
+);
+
+CREATE INDEX idx_scores_period_type ON scores_table(period_id, score_type);
+
+==============================================================================
+## 08. add clarity data to tasks
+==============================================================================
+-- Add clarity evaluation fields to tasks_table
+-- clarity_level: Integer score 0-100 for easy querying and aggregation
+-- clarity_breakdown: JSON containing detailed SMART criteria evaluation
+
+ALTER TABLE tasks_table ADD COLUMN clarity_level INTEGER DEFAULT NULL;
+ALTER TABLE tasks_table ADD COLUMN clarity_breakdown TEXT DEFAULT NULL;  -- JSON: SMARTBreakdown structureP-�>ٝ����f�
+
+==============================================================================
+## 09. update pro ids
+==============================================================================
+-- Update pro IDs from string-based to numeric IDs
+-- Replaces old pro identifiers with new simplified numeric format
+
+-- Update periods_table pro_id references
+UPDATE periods_table
+SET pro_id = CASE pro_id
+  WHEN 'sarah_chen' THEN '1'
+  WHEN 'david_lee' THEN '2'
+  WHEN 'marcus_rivera' THEN '3'
+  WHEN 'isabella_rossi' THEN '4'
+  ELSE pro_id
+END
+WHERE pro_id IN ('sarah_chen', 'david_lee', 'marcus_rivera', 'isabella_rossi');
+
+-- Update scores_table pro_id references
+UPDATE scores_table
+SET pro_id = CASE pro_id
+  WHEN 'sarah_chen' THEN '1'
+  WHEN 'david_lee' THEN '2'
+  WHEN 'marcus_rivera' THEN '3'
+  WHEN 'isabella_rossi' THEN '4'
+  ELSE pro_id
+END
+WHERE pro_id IN ('sarah_chen', 'david_lee', 'marcus_rivera', 'isabella_rossi');
+餿j
+
+==============================================================================
+## 10. add parent id and clear clarity
+==============================================================================
+-- Migration: Add parent_id column to tasks and clear existing clarity data
+-- This migration supports the new clarity evaluation system with parent goal linking
+
+-- Add parent_id column to tasks_table
+ALTER TABLE tasks_table ADD COLUMN parent_id TEXT DEFAULT NULL;
+
+-- Clear all existing clarity data (fresh start for new evaluation system)
+UPDATE tasks_table
+SET clarity_level = NULL,
+    clarity_breakdown = NULL;Paˍ�S(��"^z��
+
+==============================================================================
+## 11. onboarding clarity
+==============================================================================
+-- Onboarding clarity defaults - Set all onboarding tasks to maximum clarity
+-- This migration runs after clarity columns are added (migration 008)
+-- and ensures onboarding tasks have perfect clarity scores
+
+UPDATE tasks_table
+SET clarity_level = 100,
+    clarity_breakdown = '{"actionable":true,"achievable":true,"feedback":null,"parent_id":null}'
+WHERE id IN (
+    -- Month tasks (from onboarding data)
+    'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+    '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+    '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+    '6ba7b812-9dad-11d1-80b4-00c04fd430c8',
+    -- Week tasks (from onboarding data)
+    'b2c3d4e5-f6a7-890b-cdef-012345678901',
+    'c3d4e5f6-a7b8-901c-def0-123456789012',
+    -- Day tasks (from onboarding data)
+    'e5f6a7b8-c9d0-123e-f012-3456789012cd',
+    'f6a7b8c9-d0e1-234f-0123-456789012cde',
+    'a7b8c9d0-e1f2-345a-1234-56789012cdef'
+);%��}���6!I�􄄓O�unZ�2;
+
+==============================================================================
+## 12. clarity breakdown migration
+==============================================================================
+-- Migration: Update clarity_breakdown structure from actionable/achievable to clarification_needed
+-- Set all existing clarity_breakdown values to NULL to force re-evaluation with new structure
+-- This includes onboarding data that uses the old {"actionable":true,"achievable":true,...} format
+
+UPDATE tasks_table
+SET clarity_breakdown = NULL
+WHERE clarity_breakdown IS NOT NULL;
+�<��hL�(
+
+==============================================================================
+## 13. goal evaluation schema
+==============================================================================
+-- Migration: Update clarity_breakdown to new GoalEvaluation schema
+-- Clear all existing clarity data to force re-evaluation with new structure
+-- Old schema: { atomicity, verifiability, agency, orientation, ambiguity, primary_issue, feedback, parent_id }
+-- New schema: { goal_singularity, result_verifiability, amount_of_control, result_type, execution_plan_clarity, primary_issue, feedback, parent_id }
+
+UPDATE tasks_table
+SET clarity_breakdown = NULL,
+    clarity_level = NULL
+WHERE clarity_breakdown IS NOT NULL OR clarity_level IS NOT NULL;
+Hҭ�Cr����n��g1ȟ#��X�S��$?
+
+==============================================================================
+## 14. reset clarity breakdown for granular issues
+==============================================================================
+-- Reset clarity_breakdown and clarity_level to trigger re-evaluation with new granular PrimaryIssue variants
+-- This migration supports the transition from ambiguous issue types (e.g., "result_verifiability")
+-- to granular, self-describing variants (e.g., "result_verifiability_none", "result_verifiability_subjective")
+
+UPDATE tasks_table SET clarity_breakdown = NULL;
+UPDATE tasks_table SET clarity_level = NULL;
+��!�/��j�,��U}^&
+
+==============================================================================
+## 15. replace execution clarity with structural type
+==============================================================================
+-- Reset clarity_breakdown and clarity_level to trigger re-evaluation with new structural_type dimension
+-- This migration supports the transition from execution_plan_clarity (ambiguous/needs_discovery/actionable)
+-- to structural_type (task/project) for improved LLM evaluation reliability
+
+UPDATE tasks_table SET clarity_breakdown = NULL;
+UPDATE tasks_table SET clarity_level = NULL;
+@�⹏��
+
+==============================================================================
+## 16. remove pro columns
+==============================================================================
+-- Remove pro-related columns from periods_table and scores_table
+
+-- Drop pro_id from periods_table
+ALTER TABLE periods_table DROP COLUMN pro_id;
+
+-- Drop pro-related columns from scores_table
+ALTER TABLE scores_table DROP COLUMN pro_score;
+ALTER TABLE scores_table DROP COLUMN pro_id;
+ALTER TABLE scores_table DROP COLUMN player_won;
+
+==============================================================================
+## 17. add goal breakdown
+==============================================================================
+-- Add goal_breakdown column to store extraction results (GoalBreakdown JSON)
+-- This becomes the single source of truth for both clarity calculation and Copilot conversations
+-- The cached breakdown eliminates redundant AI calls during Copilot startup
+ALTER TABLE tasks_table ADD COLUMN goal_breakdown TEXT DEFAULT NULL;
+��{
+
+==============================================================================
+## 18. add is refined to tasks
+==============================================================================
+ALTER TABLE tasks_table ADD COLUMN is_refined INTEGER DEFAULT 0;
+�
+
+==============================================================================
+## 19. drop migrated from task id
+==============================================================================
+ALTER TABLE tasks_table DROP COLUMN migrated_from_task_id;
+�у���]�g��
+
+==============================================================================
+## 20. onboarding is refined
+==============================================================================
+-- Onboarding is_refined defaults - Set all onboarding tasks to refined status
+-- This migration runs after is_refined column is added (migration 018)
+-- and ensures onboarding tasks are marked as refined
+
+UPDATE tasks_table
+SET
+    is_refined = 1,
+    clarity_level = 100
+WHERE id IN (
+    -- Month tasks (from onboarding data)
+    'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+    '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+    '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+    '6ba7b812-9dad-11d1-80b4-00c04fd430c8',
+    -- Week tasks (from onboarding data)
+    'b2c3d4e5-f6a7-890b-cdef-012345678901',
+    'c3d4e5f6-a7b8-901c-def0-123456789012',
+    -- Day tasks (from onboarding data)
+    'e5f6a7b8-c9d0-123e-f012-3456789012cd',
+    'f6a7b8c9-d0e1-234f-0123-456789012cde',
+    'a7b8c9d0-e1f2-345a-1234-56789012cdef'
+);
+
+==============================================================================
+## 21. drop clarity breakdown
+==============================================================================
+-- Remove legacy clarity_breakdown column (replaced by goal_breakdown)
+ALTER TABLE tasks_table DROP COLUMN clarity_breakdown;
+
+==============================================================================
+## 22. add active to periods
+==============================================================================
+-- Add active column (defaults to false for all existing periods)
+ALTER TABLE periods_table ADD COLUMN active BOOLEAN NOT NULL DEFAULT 0;
+
+-- Backfill: set active=1 on the current "latest" periods using the same
+-- logic the app currently uses (ORDER BY created_at DESC LIMIT 1 per type chain)
+UPDATE periods_table SET active = 1
+WHERE id = (SELECT id FROM periods_table WHERE type = 'month' ORDER BY created_at DESC LIMIT 1);
+
+UPDATE periods_table SET active = 1
+WHERE id = (
+    SELECT w.id FROM periods_table w
+    INNER JOIN periods_table m ON w.parent_id = m.id AND m.active = 1 AND m.type = 'month'
+    WHERE w.type = 'week'
+    ORDER BY w.created_at DESC LIMIT 1
+);
+
+UPDATE periods_table SET active = 1
+WHERE id = (
+    SELECT d.id FROM periods_table d
+    INNER JOIN periods_table w ON d.parent_id = w.id AND w.active = 1 AND w.type = 'week'
+    WHERE d.type = 'day'
+    ORDER BY d.created_at DESC LIMIT 1
+);
+
+-- Enforce uniqueness: at most one active period per type (excluding sessions)
+CREATE UNIQUE INDEX idx_unique_active_period
+ON periods_table(type) WHERE active = 1 AND type != 'session';
+�e�
+
+==============================================================================
+## 23. seed later periods
+==============================================================================
+-- Seed fixed Later buckets used for deferred task movement.
+-- Idempotent insert by fixed IDs.
+INSERT OR IGNORE INTO periods_table (
+    id,
+    title,
+    type,
+    started,
+    finished,
+    started_at,
+    finished_at,
+    created_at,
+    parent_id,
+    duration,
+    focused_time,
+    archived,
+    position,
+    repeat_id,
+    active
+) VALUES
+(
+    'later-month',
+    'Later Month',
+    'month',
+    0,
+    0,
+    NULL,
+    NULL,
+    0,
+    NULL,
+    0,
+    NULL,
+    0,
+    0,
+    NULL,
+    0
+),
+(
+    'later-week',
+    'Later Week',
+    'week',
+    0,
+    0,
+    NULL,
+    NULL,
+    0,
+    NULL,
+    0,
+    NULL,
+    0,
+    0,
+    NULL,
+    0
+),
+(
+    'later-day',
+    'Later Day',
+    'day',
+    0,
+    0,
+    NULL,
+    NULL,
+    0,
+    NULL,
+    0,
+    NULL,
+    0,
+    0,
+    NULL,
+    0
+);
+�OH���[Y��
+
+==============================================================================
+## 24. drop onboarding tasks for fresh installs
+==============================================================================
+-- Remove only untouched onboarding seed tasks.
+-- Match full seed signatures so we don't delete user-created tasks that happen
+-- to share onboarding titles/periods, and we keep seeded rows users modified.
+
+DELETE FROM tasks_table
+WHERE
+       (id = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' AND period_id = '58707920-9657-49c6-93f0-3865ce130fab' AND title = 'Write your top goals for the next 30 days 🎯 ')
+    OR (id = '6ba7b810-9dad-11d1-80b4-00c04fd430c8' AND period_id = '58707920-9657-49c6-93f0-3865ce130fab' AND title = 'Type your first goal here...')
+    OR (id = '6ba7b811-9dad-11d1-80b4-00c04fd430c8' AND period_id = '58707920-9657-49c6-93f0-3865ce130fab' AND title = 'Use [Enter] to create new tasks')
+    OR (id = '6ba7b812-9dad-11d1-80b4-00c04fd430c8' AND period_id = '58707920-9657-49c6-93f0-3865ce130fab' AND title = 'Start the month ▶️')
+    OR (id = 'b2c3d4e5-f6a7-890b-cdef-012345678901' AND period_id = 'a1b2c3d4-e5f6-789a-bcde-f0123456789a' AND title = 'Set clear and achievable goals for this week')
+    OR (id = 'c3d4e5f6-a7b8-901c-def0-123456789012' AND period_id = 'a1b2c3d4-e5f6-789a-bcde-f0123456789a' AND title = 'Start the week 👏🏻')
+    OR (id = 'e5f6a7b8-c9d0-123e-f012-3456789012cd' AND period_id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b' AND title = 'Time to get hands dirty! Write down your goals for today')
+    OR (id = 'f6a7b8c9-d0e1-234f-0123-456789012cde' AND period_id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b' AND title = 'Accept that a long to-do list sometimes is unavoidable — just don''t let it pile up')
+    OR (id = 'a7b8c9d0-e1f2-345a-1234-56789012cdef' AND period_id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b' AND title = 'Start your first day 🏁');
+2`�k�ũ��x���rY��oFF����y
+
+==============================================================================
+## 25. collapse later periods
+==============================================================================
+-- Collapse three legacy Later buckets (later-month, later-week, later-day)
+-- into a single unified `later` period.
+
+-- 1. Insert the unified Later period (idempotent).
+INSERT OR IGNORE INTO periods_table (
+    id, title, type, started, finished,
+    started_at, finished_at, created_at,
+    parent_id, duration, focused_time,
+    archived, position, repeat_id, active
+) VALUES (
+    'later', 'Later', 'month',
+    0, 0,
+    NULL, NULL, 0,
+    NULL, 0, NULL,
+    0, 0, NULL, 0
+);
+
+-- 2. Move tasks from legacy Later periods into `later`.
+--    Merge order: later-month tasks first, then later-week, then later-day.
+--    Uses a window function to assign contiguous positions.
+UPDATE tasks_table
+SET period_id = 'later',
+    position = (
+        SELECT new_pos FROM (
+            SELECT t2.id,
+                   ROW_NUMBER() OVER (
+                       ORDER BY
+                           CASE t2.period_id
+                               WHEN 'later-month' THEN 0
+                               WHEN 'later-week'  THEN 1
+                               WHEN 'later-day'   THEN 2
+                           END,
+                           t2.position ASC,
+                           t2.rowid ASC
+                   ) - 1 AS new_pos
+            FROM tasks_table t2
+            WHERE t2.period_id IN ('later-month', 'later-week', 'later-day')
+        ) AS ranked
+        WHERE ranked.id = tasks_table.id
+    )
+WHERE period_id IN ('later-month', 'later-week', 'later-day');
+
+-- 3. Delete the legacy Later period rows.
+DELETE FROM periods_table
+WHERE id IN ('later-month', 'later-week', 'later-day');
+ `j��;~Ё�����5
+
+==============================================================================
+## 26. add prioritization breakdown
+==============================================================================
+ALTER TABLE periods_table ADD COLUMN prioritization_breakdown TEXT;
+�v
+
+==============================================================================
+## 27. extend onboarding day to 24 hours
+==============================================================================
+-- Ensure the seeded onboarding day lasts a full 24 hours.
+-- This updates both existing databases and fresh installs as migrations replay.
+
+UPDATE periods_table
+SET duration = 86400000 -- 24 hours in milliseconds
+WHERE id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+  AND type = 'day';
+�;O
+
+==============================================================================
+## 28. add preview and revision metadata
+==============================================================================
+ALTER TABLE periods_table ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE tasks_table ADD COLUMN preview_state TEXT DEFAULT NULL CHECK (
+    preview_state IN ('created', 'updated', 'deleted')
+);
+
+ALTER TABLE tasks_table ADD COLUMN last_modified_revision INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX idx_tasks_period_preview_state
+ON tasks_table(period_id, preview_state);
+
+CREATE INDEX idx_tasks_period_last_modified
+ON tasks_table(period_id, last_modified_revision);
+
+CREATE TABLE task_preview_originals (
+    task_id TEXT PRIMARY KEY REFERENCES tasks_table(id) ON DELETE CASCADE,
+    period_id TEXT NOT NULL REFERENCES periods_table(id) ON DELETE CASCADE,
+    original_exists BOOLEAN NOT NULL,
+    title TEXT,
+    completed BOOLEAN,
+    subtasks TEXT,
+    position INTEGER,
+    clarity_level INTEGER,
+    goal_breakdown TEXT,
+    parent_id TEXT,
+    is_refined BOOLEAN,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+
+CREATE INDEX idx_task_preview_originals_period
+ON task_preview_originals(period_id);
+
+==============================================================================
+## 29. add task tombstones
+==============================================================================
+ALTER TABLE tasks_table ADD COLUMN is_preview INTEGER NOT NULL DEFAULT 0 CHECK (
+    is_preview IN (0, 1)
+);
+
+ALTER TABLE tasks_table ADD COLUMN deleted_at TEXT DEFAULT NULL;
+
+UPDATE tasks_table
+SET
+    is_preview = CASE
+        WHEN preview_state IS NULL THEN 0
+        ELSE 1
+    END,
+    deleted_at = CASE
+        WHEN preview_state = 'deleted' THEN datetime('now')
+        ELSE NULL
+    END;
+
+CREATE INDEX idx_tasks_period_visibility
+ON tasks_table(period_id, deleted_at, is_preview, position);
+C
+
+==============================================================================
+## 30. drop task preview state
+==============================================================================
+DROP INDEX IF EXISTS idx_tasks_period_preview_state;
+
+ALTER TABLE tasks_table DROP COLUMN preview_state;
+9��
+
+==============================================================================
+## 31. drop revision metadata
+==============================================================================
+DROP INDEX IF EXISTS idx_tasks_period_last_modified;
+
+ALTER TABLE tasks_table DROP COLUMN last_modified_revision;
+ALTER TABLE periods_table DROP COLUMN content_revision;
+����'�ۙ�ܕ&]S�O
+
+==============================================================================
+## 32. add agent conversation persistence
+==============================================================================
+CREATE TABLE agent_conversations (
+    id TEXT PRIMARY KEY,
+    period_id TEXT NOT NULL,
+    task_id TEXT,
+    active_turn_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (period_id) REFERENCES periods_table (id),
+    FOREIGN KEY (task_id) REFERENCES tasks_table (id)
+);
+
+CREATE INDEX idx_agent_conversations_updated_at
+    ON agent_conversations(updated_at);
+
+CREATE TABLE agent_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    sequence_number INTEGER NOT NULL CHECK (sequence_number > 0),
+    message_type TEXT NOT NULL CHECK (
+        message_type IN ('user', 'model_text', 'model_function_call', 'function_result')
+    ),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES agent_conversations (id) ON DELETE CASCADE,
+    UNIQUE (conversation_id, sequence_number)
+);
+
+CREATE INDEX idx_agent_messages_conversation_sequence
+    ON agent_messages(conversation_id, sequence_number);
+C�&��t�m-��35o���D�_
+
+==============================================================================
+## 33. replace tombstones with agent proposals
+==============================================================================
+ALTER TABLE tasks_table ADD COLUMN agent_proposal TEXT DEFAULT NULL CHECK (
+    agent_proposal IN ('upsert', 'delete')
+);
+
+-- Committed tombstones are a legacy storage detail, not unresolved proposals.
+-- Clear any conversation pointers before we physically remove those rows.
+UPDATE agent_conversations
+SET task_id = NULL
+WHERE task_id IN (
+    SELECT id
+    FROM tasks_table
+    WHERE is_preview = 0 AND deleted_at IS NOT NULL
+);
+
+DELETE FROM tasks_table
+WHERE is_preview = 0 AND deleted_at IS NOT NULL;
+
+UPDATE tasks_table
+SET agent_proposal = CASE
+    WHEN is_preview = 1 AND deleted_at IS NOT NULL THEN 'delete'
+    WHEN is_preview = 1 THEN 'upsert'
+    ELSE NULL
+END;
+
+DROP INDEX IF EXISTS idx_tasks_period_visibility;
+
+CREATE INDEX idx_tasks_period_agent_proposal_visibility
+ON tasks_table(period_id, agent_proposal, position);
+
+ALTER TABLE tasks_table DROP COLUMN is_preview;
+ALTER TABLE tasks_table DROP COLUMN deleted_at;
+W
+
+==============================================================================
+## 34. agent conversation task fk set null
+==============================================================================
+-- no-transaction
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE agent_conversations_new (
+    id TEXT PRIMARY KEY,
+    period_id TEXT NOT NULL,
+    task_id TEXT,
+    active_turn_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (period_id) REFERENCES periods_table (id),
+    FOREIGN KEY (task_id) REFERENCES tasks_table (id) ON DELETE SET NULL
+);
+
+INSERT INTO agent_conversations_new (
+    id,
+    period_id,
+    task_id,
+    active_turn_id,
+    revision,
+    last_error,
+    created_at,
+    updated_at
+)
+SELECT
+    id,
+    period_id,
+    task_id,
+    active_turn_id,
+    revision,
+    last_error,
+    created_at,
+    updated_at
+FROM agent_conversations;
+
+DROP TABLE agent_conversations;
+
+ALTER TABLE agent_conversations_new RENAME TO agent_conversations;
+
+CREATE INDEX idx_agent_conversations_updated_at
+    ON agent_conversations(updated_at);
+
+PRAGMA foreign_key_check;
+PRAGMA foreign_keys = ON;
+����
+
+==============================================================================
+## 35. update onboarding month to 28 days
+==============================================================================
+-- Ensure the seeded onboarding month uses a 28-day duration.
+-- This updates both existing databases and fresh installs as migrations replay.
+
+UPDATE periods_table
+SET duration = 2419200000 -- 28 days in milliseconds
+WHERE id = '58707920-9657-49c6-93f0-3865ce130fab'
+  AND type = 'month';
+.ܸ�s�V`
+
+==============================================================================
+## 36. cleanup untouched onboarding children
+==============================================================================
+-- Remove untouched onboarding child periods so fresh installs start with only
+-- the seeded month. Any edited child period or extra child makes this migration
+-- a no-op.
+
+CREATE TEMP TABLE cleanup_untouched_onboarding_children_guard AS
+SELECT 1 AS can_cleanup
+WHERE EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE id = '58707920-9657-49c6-93f0-3865ce130fab'
+      AND type = 'month'
+      AND started = 0
+      AND finished = 0
+      AND active = 1
+)
+AND EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE id = 'a1b2c3d4-e5f6-789a-bcde-f0123456789a'
+      AND type = 'week'
+      AND parent_id = '58707920-9657-49c6-93f0-3865ce130fab'
+      AND started = 0
+      AND finished = 0
+      AND archived = 0
+)
+AND EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+      AND type = 'day'
+      AND parent_id = 'a1b2c3d4-e5f6-789a-bcde-f0123456789a'
+      AND started = 0
+      AND finished = 0
+      AND archived = 0
+)
+AND EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE id = 'b8c9d0e1-f2a3-456b-2345-6789012cdef0'
+      AND type = 'session'
+      AND parent_id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+      AND started = 0
+      AND finished = 0
+      AND archived = 0
+)
+AND EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE id = 'c9d0e1f2-a3b4-567c-3456-789012cdef01'
+      AND type = 'session'
+      AND parent_id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+      AND started = 0
+      AND finished = 0
+      AND archived = 0
+)
+AND NOT EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE parent_id = '58707920-9657-49c6-93f0-3865ce130fab'
+      AND type = 'week'
+      AND id != 'a1b2c3d4-e5f6-789a-bcde-f0123456789a'
+)
+AND NOT EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE parent_id = 'a1b2c3d4-e5f6-789a-bcde-f0123456789a'
+      AND type = 'day'
+      AND id != 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+)
+AND NOT EXISTS (
+    SELECT 1 FROM periods_table
+    WHERE parent_id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+      AND type = 'session'
+      AND id NOT IN (
+          'b8c9d0e1-f2a3-456b-2345-6789012cdef0',
+          'c9d0e1f2-a3b4-567c-3456-789012cdef01'
+      )
+);
+
+DELETE FROM tasks_table
+WHERE period_id IN (
+    'a1b2c3d4-e5f6-789a-bcde-f0123456789a',
+    'd4e5f6a7-b8c9-012d-ef01-23456789012b',
+    'b8c9d0e1-f2a3-456b-2345-6789012cdef0',
+    'c9d0e1f2-a3b4-567c-3456-789012cdef01'
+)
+AND EXISTS (SELECT 1 FROM cleanup_untouched_onboarding_children_guard);
+
+DELETE FROM periods_table
+WHERE id IN (
+    'b8c9d0e1-f2a3-456b-2345-6789012cdef0',
+    'c9d0e1f2-a3b4-567c-3456-789012cdef01'
+)
+AND EXISTS (SELECT 1 FROM cleanup_untouched_onboarding_children_guard);
+
+DELETE FROM periods_table
+WHERE id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+AND EXISTS (SELECT 1 FROM cleanup_untouched_onboarding_children_guard);
+
+DELETE FROM periods_table
+WHERE id = 'a1b2c3d4-e5f6-789a-bcde-f0123456789a'
+AND EXISTS (SELECT 1 FROM cleanup_untouched_onboarding_children_guard);
+
+DROP TABLE cleanup_untouched_onboarding_children_guard;
+��
+
+==============================================================================
+## 37. add agent conversation active skill
+==============================================================================
+ALTER TABLE agent_conversations
+ADD COLUMN active_skill TEXT
+CHECK (
+  active_skill IS NULL
+  OR active_skill IN ('goal_setting', 'planning', 'prioritization')
+);
+��
+
+==============================================================================
+## 38. add tasks to repeats
+==============================================================================
+ALTER TABLE repeats_table
+ADD COLUMN tasks TEXT NOT NULL DEFAULT '[]';
+��
+
+==============================================================================
+## 39. update onboarding period labels for activation
+==============================================================================
+-- Update untouched onboarding seed period labels and durations for the Stage 1
+-- activation language. Existing migration files stay immutable; this forward
+-- migration makes fresh replays and already-migrated databases converge.
+
+UPDATE periods_table
+SET
+    title = 'Long-term',
+    duration = 7257600000 -- 12 weeks in milliseconds
+WHERE id = '58707920-9657-49c6-93f0-3865ce130fab'
+  AND type = 'month'
+  AND started = 0
+  AND finished = 0;
+
+UPDATE periods_table
+SET title = 'Short-term'
+WHERE id = 'a1b2c3d4-e5f6-789a-bcde-f0123456789a'
+  AND type = 'week'
+  AND started = 0
+  AND finished = 0;
+
+UPDATE periods_table
+SET
+    title = 'Today',
+    duration = 86400000 -- 24 hours in milliseconds
+WHERE id = 'd4e5f6a7-b8c9-012d-ef01-23456789012b'
+  AND type = 'day'
+  AND started = 0
+  AND finished = 0;
+
+==============================================================================
+## 40. rename periods to cycles
+==============================================================================
+DROP INDEX IF EXISTS idx_tasks_period;
+DROP INDEX IF EXISTS idx_periods_parent;
+DROP INDEX IF EXISTS idx_periods_type;
+DROP INDEX IF EXISTS idx_periods_archived;
+DROP INDEX IF EXISTS idx_unique_active_period;
+DROP INDEX IF EXISTS idx_scores_period_type;
+DROP INDEX IF EXISTS idx_task_preview_originals_period;
+DROP INDEX IF EXISTS idx_tasks_period_preview_state;
+DROP INDEX IF EXISTS idx_tasks_period_last_modified;
+DROP INDEX IF EXISTS idx_tasks_period_visibility;
+DROP INDEX IF EXISTS idx_tasks_period_agent_proposal_visibility;
+
+ALTER TABLE periods_table RENAME TO cycles_table;
+ALTER TABLE tasks_table RENAME COLUMN period_id TO cycle_id;
+ALTER TABLE scores_table RENAME COLUMN period_id TO cycle_id;
+ALTER TABLE task_preview_originals RENAME COLUMN period_id TO cycle_id;
+ALTER TABLE agent_conversations RENAME COLUMN period_id TO cycle_id;
+
+CREATE INDEX idx_tasks_cycle ON tasks_table(cycle_id);
+CREATE INDEX idx_cycles_parent ON cycles_table(parent_id);
+CREATE INDEX idx_cycles_type ON cycles_table(type);
+CREATE INDEX idx_cycles_archived ON cycles_table(archived);
+CREATE UNIQUE INDEX idx_unique_active_cycle
+ON cycles_table(type) WHERE active = 1 AND type != 'session';
+CREATE INDEX idx_scores_cycle_type ON scores_table(cycle_id, score_type);
+CREATE INDEX idx_task_preview_originals_cycle
+ON task_preview_originals(cycle_id);
+CREATE INDEX idx_tasks_cycle_agent_proposal_visibility
+ON tasks_table(cycle_id, agent_proposal, position);
+	i����l����ǆ�
+
+==============================================================================
+## 41. add task link metadata
+==============================================================================
+-- no-transaction
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE tasks_table_new (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    completed BOOLEAN NOT NULL DEFAULT 0,
+    subtasks TEXT NOT NULL DEFAULT '[]',
+    cycle_id TEXT NOT NULL REFERENCES cycles_table(id),
+    position INTEGER NOT NULL DEFAULT 0,
+    clarity_level INTEGER DEFAULT NULL,
+    parent_id TEXT DEFAULT NULL,
+    goal_breakdown TEXT DEFAULT NULL,
+    is_refined INTEGER DEFAULT 0,
+    agent_proposal TEXT DEFAULT NULL CHECK (
+        agent_proposal IN ('upsert', 'delete')
+    ),
+    root_color_key TEXT DEFAULT NULL
+);
+
+INSERT INTO tasks_table_new (
+    id,
+    title,
+    completed,
+    subtasks,
+    cycle_id,
+    position,
+    clarity_level,
+    parent_id,
+    goal_breakdown,
+    is_refined,
+    agent_proposal,
+    root_color_key
+)
+SELECT
+    id,
+    title,
+    completed,
+    subtasks,
+    cycle_id,
+    position,
+    clarity_level,
+    NULL,
+    goal_breakdown,
+    is_refined,
+    agent_proposal,
+    NULL
+FROM tasks_table;
+
+DROP TABLE tasks_table;
+ALTER TABLE tasks_table_new RENAME TO tasks_table;
+
+CREATE INDEX idx_tasks_cycle ON tasks_table(cycle_id);
+CREATE INDEX idx_tasks_cycle_agent_proposal_visibility
+ON tasks_table(cycle_id, agent_proposal, position);
+CREATE INDEX idx_tasks_parent ON tasks_table(parent_id);
+CREATE INDEX idx_tasks_root_color_key ON tasks_table(cycle_id, root_color_key);
+
+CREATE TRIGGER reject_task_root_color_key_non_long_term_insert
+BEFORE INSERT ON tasks_table
+FOR EACH ROW
+WHEN NEW.root_color_key IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM cycles_table
+        WHERE id = NEW.cycle_id
+          AND type = 'month'
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'root_color_key requires a Long-term cycle');
+END;
+
+CREATE TRIGGER reject_task_root_color_key_non_long_term_update
+BEFORE UPDATE OF cycle_id, root_color_key ON tasks_table
+FOR EACH ROW
+WHEN NEW.root_color_key IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM cycles_table
+        WHERE id = NEW.cycle_id
+          AND type = 'month'
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'root_color_key requires a Long-term cycle');
+END;
+
+CREATE TRIGGER reject_cycle_type_change_with_root_colors
+BEFORE UPDATE OF type ON cycles_table
+FOR EACH ROW
+WHEN NEW.type != 'month'
+    AND EXISTS (
+        SELECT 1
+        FROM tasks_table
+        WHERE cycle_id = NEW.id
+          AND root_color_key IS NOT NULL
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'cycles with root colors must stay Long-term');
+END;
+
+PRAGMA foreign_key_check;
+PRAGMA foreign_keys = ON;
+
+==============================================================================
+## 42. add preview original root color key
+==============================================================================
+ALTER TABLE task_preview_originals ADD COLUMN root_color_key TEXT;
+�k��ۅa
+
+==============================================================================
+## 43. add task copy lineage
+==============================================================================
+ALTER TABLE tasks_table ADD COLUMN copied_from_task_id TEXT DEFAULT NULL;
+
+CREATE INDEX idx_tasks_cycle_copied_from_task
+ON tasks_table(cycle_id, copied_from_task_id);
+@�
+
+==============================================================================
+## 44. remove untouched onboarding month
+==============================================================================
+-- Remove the untouched onboarding long-term cycle so fresh installs can start
+-- with an empty cycle plan. This runs after periods_table has been renamed to
+-- cycles_table.
+
+DELETE FROM cycles_table
+WHERE id = '58707920-9657-49c6-93f0-3865ce130fab'
+  AND type = 'month'
+  AND title = 'Long-term'
+  AND duration = 7257600000
+  AND started = 0
+  AND finished = 0
+  AND active = 1
+  AND archived = 0
+  AND parent_id IS NULL
+  AND position = 0
+  AND NOT EXISTS (
+      SELECT 1 FROM tasks_table
+      WHERE cycle_id = '58707920-9657-49c6-93f0-3865ce130fab'
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM cycles_table child
+      WHERE child.parent_id = '58707920-9657-49c6-93f0-3865ce130fab'
+  );
+ �0
+
+==============================================================================
+## 45. allow null cycle duration
+==============================================================================
+ALTER TABLE cycles_table
+ADD COLUMN duration_new INTEGER DEFAULT 0 CHECK (duration_new IS NULL OR duration_new >= 0);
+
+UPDATE cycles_table
+SET duration_new = duration;
+
+ALTER TABLE cycles_table DROP COLUMN duration;
+ALTER TABLE cycles_table RENAME COLUMN duration_new TO duration;
+
+PRAGMA foreign_key_check;
+��ɑ���!
+
+==============================================================================
+## 46. update agent conversation active skill constraint
+==============================================================================
+-- no-transaction
+PRAGMA foreign_keys = OFF;
+
+DROP INDEX IF EXISTS idx_agent_conversations_updated_at;
+
+CREATE TABLE agent_conversations_new (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT NOT NULL,
+    task_id TEXT,
+    active_turn_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    active_skill TEXT CHECK (
+        active_skill IS NULL
+        OR active_skill IN (
+            'goal_setting',
+            'long_term_planning',
+            'short_term_planning',
+            'prioritization'
+        )
+    ),
+    FOREIGN KEY (cycle_id) REFERENCES cycles_table (id),
+    FOREIGN KEY (task_id) REFERENCES tasks_table (id) ON DELETE SET NULL
+);
+
+INSERT INTO agent_conversations_new (
+    id,
+    cycle_id,
+    task_id,
+    active_turn_id,
+    revision,
+    last_error,
+    created_at,
+    updated_at,
+    active_skill
+)
+SELECT
+    id,
+    cycle_id,
+    task_id,
+    active_turn_id,
+    revision,
+    last_error,
+    created_at,
+    updated_at,
+    CASE WHEN active_skill = 'planning' THEN NULL ELSE active_skill END
+FROM agent_conversations;
+
+DROP TABLE agent_conversations;
+
+ALTER TABLE agent_conversations_new RENAME TO agent_conversations;
+
+CREATE INDEX idx_agent_conversations_updated_at
+    ON agent_conversations(updated_at);
+
+PRAGMA foreign_key_check;
+PRAGMA foreign_keys = ON;
+�&(�
+
+==============================================================================
+## 47. add dated cycle fields
+==============================================================================
+ALTER TABLE cycles_table ADD COLUMN starts_on TEXT NULL;
+ALTER TABLE cycles_table ADD COLUMN ends_on TEXT NULL;
+ALTER TABLE cycles_table ADD COLUMN calendar_key TEXT NULL;
+
+CREATE UNIQUE INDEX idx_unique_cycle_calendar_key
+ON cycles_table(calendar_key)
+WHERE calendar_key IS NOT NULL;
+���|
+
+==============================================================================
+## 48. drop scores table
+==============================================================================
+DROP TABLE IF EXISTS scores_table;
+�$˴jbDk7����O�
+
+==============================================================================
+## 49. add clarity flags to tasks
+==============================================================================
+ALTER TABLE tasks_table ADD COLUMN needs_refinement BOOLEAN DEFAULT NULL;
+ALTER TABLE tasks_table ADD COLUMN needs_breakdown BOOLEAN DEFAULT NULL;
+��
+
+==============================================================================
+## 50. add clarity flags to preview originals
+==============================================================================
+ALTER TABLE task_preview_originals ADD COLUMN needs_refinement BOOLEAN DEFAULT NULL;
+ALTER TABLE task_preview_originals ADD COLUMN needs_breakdown BOOLEAN DEFAULT NULL;
+�5��� C
+
+==============================================================================
+## 51. drop legacy clarity columns
+==============================================================================
+ALTER TABLE tasks_table DROP COLUMN clarity_level;
+ALTER TABLE tasks_table DROP COLUMN is_refined;
+
+ALTER TABLE task_preview_originals DROP COLUMN clarity_level;
+ALTER TABLE task_preview_originals DROP COLUMN is_refined;
+U�>M~禫
+
+==============================================================================
+## 52. clear stale goal breakdown state
+==============================================================================
+UPDATE tasks_table
+SET goal_breakdown = NULL,
+    needs_refinement = NULL,
+    needs_breakdown = NULL;
+
+UPDATE task_preview_originals
+SET goal_breakdown = NULL,
+    needs_refinement = NULL,
+    needs_breakdown = NULL;
+
+DELETE FROM agent_messages;
+DELETE FROM agent_conversations;
+m
+
+==============================================================================
+## 53. reset agent conversations for launch actions
+==============================================================================
+-- no-transaction
+PRAGMA foreign_keys = OFF;
+
+DELETE FROM agent_messages;
+DELETE FROM agent_conversations;
+
+DROP INDEX IF EXISTS idx_agent_messages_conversation_sequence;
+DROP INDEX IF EXISTS idx_agent_conversations_updated_at;
+
+DROP TABLE IF EXISTS agent_messages;
+DROP TABLE IF EXISTS agent_conversations;
+
+CREATE TABLE agent_conversations (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT NOT NULL,
+    active_turn_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    active_skill TEXT CHECK (
+        active_skill IS NULL
+        OR active_skill IN (
+            'goal_setting',
+            'long_term_planning',
+            'short_term_planning',
+            'prioritization'
+        )
+    ),
+    FOREIGN KEY (cycle_id) REFERENCES cycles_table (id)
+);
+
+CREATE INDEX idx_agent_conversations_updated_at
+    ON agent_conversations(updated_at);
+
+CREATE TABLE agent_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    sequence_number INTEGER NOT NULL CHECK (sequence_number > 0),
+    message_type TEXT NOT NULL CHECK (
+        message_type IN (
+            'user',
+            'model_text',
+            'model_function_call',
+            'function_result',
+            'app_tool_result'
+        )
+    ),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES agent_conversations (id) ON DELETE CASCADE,
+    UNIQUE (conversation_id, sequence_number)
+);
+
+CREATE INDEX idx_agent_messages_conversation_sequence
+    ON agent_messages(conversation_id, sequence_number);
+
+PRAGMA foreign_key_check;
+PRAGMA foreign_keys = ON;
+�
+
+==============================================================================
+## 54. drop cycle active
+==============================================================================
+DROP INDEX IF EXISTS idx_unique_active_cycle;
+
+ALTER TABLE cycles_table DROP COLUMN active;
+وn�
+
+==============================================================================
+## 55. drop repeat tasks
+==============================================================================
+ALTER TABLE repeats_table DROP COLUMN tasks;
+o
+�N�
+
+==============================================================================
+## 56. add planning issue dismissals
+==============================================================================
+CREATE TABLE planning_issue_dismissals (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT NOT NULL,
+    issue_type TEXT NOT NULL,
+    task_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (cycle_id) REFERENCES cycles_table(id) ON DELETE CASCADE,
+    CHECK (TRIM(cycle_id) <> ''),
+    CHECK (TRIM(issue_type) <> ''),
+    CHECK (task_id IS NULL OR TRIM(task_id) <> ''),
+    UNIQUE (cycle_id, issue_type, task_id)
+);
+
+CREATE UNIQUE INDEX idx_planning_issue_dismissals_plan_unique
+    ON planning_issue_dismissals(cycle_id, issue_type)
+    WHERE task_id IS NULL;
+
+CREATE INDEX idx_planning_issue_dismissals_cycle
+    ON planning_issue_dismissals(cycle_id);
+�٧+
+
+==============================================================================
+## 57. add cycle deletion cascades
+==============================================================================
+-- Planning cycles own their complete cycle, task, and conversation subtrees.
+-- Foreign keys are disabled on the dedicated migration connection because SQLite
+-- cannot rebuild referenced tables while enforcement is enabled. The integrity
+-- guard at the end makes any pre-existing or introduced violation abort this
+-- SQLx-managed transaction.
+
+DROP TRIGGER IF EXISTS reject_task_root_color_key_non_long_term_insert;
+DROP TRIGGER IF EXISTS reject_task_root_color_key_non_long_term_update;
+DROP TRIGGER IF EXISTS reject_cycle_type_change_with_root_colors;
+
+CREATE TABLE cycles_table_new (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('session', 'day', 'week', 'month')),
+    started BOOLEAN NOT NULL DEFAULT 0,
+    finished BOOLEAN NOT NULL DEFAULT 0,
+    started_at INTEGER,
+    finished_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    parent_id TEXT REFERENCES cycles_table_new(id) ON DELETE CASCADE,
+    archived BOOLEAN DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0 AND position <= 999),
+    repeat_id TEXT REFERENCES repeats_table(id),
+    focused_time INTEGER,
+    prioritization_breakdown TEXT,
+    duration INTEGER DEFAULT 0 CHECK (duration IS NULL OR duration >= 0),
+    starts_on TEXT NULL,
+    ends_on TEXT NULL,
+    calendar_key TEXT NULL,
+    CHECK (NOT (started = 0 AND finished = 1))
+);
+
+INSERT INTO cycles_table_new (
+    id, title, type, started, finished, started_at, finished_at, created_at,
+    parent_id, archived, position, repeat_id, focused_time,
+    prioritization_breakdown, duration, starts_on, ends_on, calendar_key
+)
+SELECT
+    id, title, type, started, finished, started_at, finished_at, created_at,
+    parent_id, archived, position, repeat_id, focused_time,
+    prioritization_breakdown, duration, starts_on, ends_on, calendar_key
+FROM cycles_table;
+
+DROP TABLE cycles_table;
+ALTER TABLE cycles_table_new RENAME TO cycles_table;
+
+CREATE INDEX idx_cycles_parent ON cycles_table(parent_id);
+CREATE INDEX idx_cycles_type ON cycles_table(type);
+CREATE INDEX idx_cycles_archived ON cycles_table(archived);
+CREATE UNIQUE INDEX idx_unique_cycle_calendar_key
+ON cycles_table(calendar_key)
+WHERE calendar_key IS NOT NULL;
+
+CREATE TABLE tasks_table_new (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    completed BOOLEAN NOT NULL DEFAULT 0,
+    subtasks TEXT NOT NULL DEFAULT '[]',
+    cycle_id TEXT NOT NULL REFERENCES cycles_table(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    parent_id TEXT DEFAULT NULL,
+    goal_breakdown TEXT DEFAULT NULL,
+    agent_proposal TEXT DEFAULT NULL CHECK (
+        agent_proposal IN ('upsert', 'delete')
+    ),
+    root_color_key TEXT DEFAULT NULL,
+    copied_from_task_id TEXT DEFAULT NULL,
+    needs_refinement BOOLEAN DEFAULT NULL,
+    needs_breakdown BOOLEAN DEFAULT NULL
+);
+
+INSERT INTO tasks_table_new (
+    id, title, completed, subtasks, cycle_id, position, parent_id,
+    goal_breakdown, agent_proposal, root_color_key, copied_from_task_id,
+    needs_refinement, needs_breakdown
+)
+SELECT
+    id, title, completed, subtasks, cycle_id, position, parent_id,
+    goal_breakdown, agent_proposal, root_color_key, copied_from_task_id,
+    needs_refinement, needs_breakdown
+FROM tasks_table;
+
+DROP TABLE tasks_table;
+ALTER TABLE tasks_table_new RENAME TO tasks_table;
+
+CREATE INDEX idx_tasks_cycle ON tasks_table(cycle_id);
+CREATE INDEX idx_tasks_cycle_agent_proposal_visibility
+ON tasks_table(cycle_id, agent_proposal, position);
+CREATE INDEX idx_tasks_parent ON tasks_table(parent_id);
+CREATE INDEX idx_tasks_root_color_key ON tasks_table(cycle_id, root_color_key);
+CREATE INDEX idx_tasks_cycle_copied_from_task
+ON tasks_table(cycle_id, copied_from_task_id);
+
+CREATE TABLE agent_conversations_new (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT NOT NULL,
+    active_turn_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    active_skill TEXT CHECK (
+        active_skill IS NULL
+        OR active_skill IN (
+            'goal_setting',
+            'long_term_planning',
+            'short_term_planning',
+            'prioritization'
+        )
+    ),
+    FOREIGN KEY (cycle_id) REFERENCES cycles_table(id) ON DELETE CASCADE
+);
+
+INSERT INTO agent_conversations_new (
+    id, cycle_id, active_turn_id, revision, last_error, created_at,
+    updated_at, active_skill
+)
+SELECT
+    id, cycle_id, active_turn_id, revision, last_error, created_at,
+    updated_at, active_skill
+FROM agent_conversations;
+
+DROP TABLE agent_conversations;
+ALTER TABLE agent_conversations_new RENAME TO agent_conversations;
+
+CREATE INDEX idx_agent_conversations_updated_at
+ON agent_conversations(updated_at);
+
+CREATE TRIGGER reject_task_root_color_key_non_long_term_insert
+BEFORE INSERT ON tasks_table
+FOR EACH ROW
+WHEN NEW.root_color_key IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM cycles_table
+        WHERE id = NEW.cycle_id
+          AND type = 'month'
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'root_color_key requires a Long-term cycle');
+END;
+
+CREATE TRIGGER reject_task_root_color_key_non_long_term_update
+BEFORE UPDATE OF cycle_id, root_color_key ON tasks_table
+FOR EACH ROW
+WHEN NEW.root_color_key IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM cycles_table
+        WHERE id = NEW.cycle_id
+          AND type = 'month'
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'root_color_key requires a Long-term cycle');
+END;
+
+CREATE TRIGGER reject_cycle_type_change_with_root_colors
+BEFORE UPDATE OF type ON cycles_table
+FOR EACH ROW
+WHEN NEW.type != 'month'
+    AND EXISTS (
+        SELECT 1
+        FROM tasks_table
+        WHERE cycle_id = NEW.id
+          AND root_color_key IS NOT NULL
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'cycles with root colors must stay Long-term');
+END;
+
+CREATE TEMP TABLE cycle_deletion_foreign_key_guard (
+    vi

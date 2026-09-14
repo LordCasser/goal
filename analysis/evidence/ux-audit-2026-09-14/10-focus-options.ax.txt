@@ -1,0 +1,6 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 menu Secondary Actions: Cancel
+	1 Repeat daily
+		2 text Repeat daily
+	3 Delete
+		4 text Delete

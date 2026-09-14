@@ -1,0 +1,694 @@
+//! Cycle use cases: creation with calendar identity, lifecycle, deletion
+//! guards, copying uncompleted work.
+//!
+//! Behaviour contract: `openspec/specs/planning-cycles/spec.md`.
+
+use std::collections::HashMap;
+
+use chrono::NaiveDate;
+use rusqlite::Connection;
+
+use crate::db::Db;
+use crate::domain::calendar::{
+    self, calculate_ends_on, dated_cycle_bounds, day_key, format_date, long_term_key, parse_date,
+    week_key,
+};
+use crate::domain::cycle::{
+    Cycle, CycleType, LifecycleAction, LifecycleState, LONG_TERM_DURATIONS_MONTHS,
+    LATER_CYCLE_ID, WEEK_DURATION_MS,
+};
+use crate::domain::task::Task;
+use crate::error::{AppError, AppResult};
+use crate::repository::{cycles as repo, tasks as tasks_repo};
+use crate::service::{settings as settings_service, Mutation};
+
+/// How many of the most recent cycles of a type stay deletable. The upstream
+/// constant was never recovered from the binary (see
+/// `analysis/reports/00-technical-report.md` §"周期删除的具体阈值未提取");
+/// 5 keeps recent history cleanable while protecting anything older.
+pub const DELETABLE_LATEST_N: i64 = 5;
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct PlannerState {
+    /// All visible month/week/day cycles; the frontend groups them by parent.
+    pub cycles: Vec<Cycle>,
+    /// The permanent Do Later container.
+    pub later: Cycle,
+}
+
+pub fn get_planner_state(db: &Db) -> AppResult<PlannerState> {
+    let conn = db.pool().get()?;
+    let cycles = repo::list_planner_cycles(&conn)?;
+    let later = repo::require(&conn, LATER_CYCLE_ID)?;
+    Ok(PlannerState { cycles, later })
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct CreateCycleArgs {
+    /// `month` (Long-term) | `week` | `day`. Sessions go through `add_session`.
+    pub cycle_type: String,
+    pub parent_id: Option<String>,
+    /// Long-term only: 1, 3 or 6 product months (28 days each).
+    pub duration_months: Option<i64>,
+    /// Optional title; dated cycles derive one from their bounds when absent.
+    pub title: Option<String>,
+    /// Day cycles: `YYYY-MM-DD`. Defaults to today (local).
+    pub date: Option<String>,
+}
+
+/// Creates a strict planning cycle. An existing calendar identity surfaces as
+/// `calendar_key_taken` — the caller should reuse the existing cycle
+/// (spec: 重复创建同一天).
+pub fn create_planning_cycle(
+    db: &Db,
+    args: &CreateCycleArgs,
+    today: NaiveDate,
+    now: i64,
+) -> AppResult<Mutation<Cycle>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let week_start_day = settings_service::week_start_day_or_default(&tx)?;
+
+    let kind = match args.cycle_type.as_str() {
+        "month" => CycleType::Month,
+        "week" => CycleType::Week,
+        "day" => CycleType::Day,
+        other => {
+            return Err(AppError::validation(
+                "unsupported_cycle_type",
+                format!("cannot create a '{other}' cycle directly"),
+            ))
+        }
+    };
+
+    let (parent_id, position, starts_on, ends_on, duration, key, title) = match kind {
+        CycleType::Month => {
+            let months = args.duration_months.ok_or_else(|| {
+                AppError::validation(
+                    "long_term_duration_required",
+                    "A long-term cycle needs a duration of 1, 3 or 6 months",
+                )
+            })?;
+            if !LONG_TERM_DURATIONS_MONTHS.contains(&months) {
+                return Err(AppError::validation(
+                    "unsupported_long_term_duration",
+                    "Long-term cycles last 1, 3 or 6 months (28 days per month)",
+                ));
+            }
+            if args.parent_id.is_some() {
+                return Err(AppError::validation(
+                    "invalid_parent_type",
+                    "A long-term cycle is a root and cannot have a parent",
+                ));
+            }
+            let starts_on = today;
+            let ends_on = calculate_ends_on(starts_on, months);
+            let duration = crate::domain::cycle::long_term_duration_ms(months);
+            let key = long_term_key(starts_on, ends_on);
+            let position = next_root_position(&tx)?;
+            (
+                None,
+                position,
+                Some(starts_on),
+                Some(ends_on),
+                Some(duration),
+                Some(key),
+                args.title.clone().unwrap_or_else(|| "Long-term".into()),
+            )
+        }
+        CycleType::Week => {
+            let parent_id = args.parent_id.clone().ok_or_else(|| {
+                AppError::validation(
+                    "weekly_requires_parent",
+                    "Weekly planning cycles require a parent",
+                )
+            })?;
+            let parent = repo::require(&tx, &parent_id)?;
+            if parent.cycle_type != CycleType::Month {
+                return Err(AppError::validation(
+                    "invalid_parent_type",
+                    "A weekly cycle must live under a Long-term cycle",
+                ));
+            }
+            if parent.finished {
+                return Err(AppError::conflict(
+                    "parent_cycle_ended",
+                    "Cannot create a weekly planning cycle under an ended long-term cycle",
+                ));
+            }
+            let (starts_on, ends_on) =
+                dated_cycle_bounds(today, CycleType::Week, week_start_day as u32, 0)
+                    .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
+            let position = repo::max_position(&tx, &parent_id)? + 1;
+            (
+                Some(parent_id),
+                position,
+                Some(starts_on),
+                Some(ends_on),
+                Some(WEEK_DURATION_MS),
+                Some(week_key(starts_on)),
+                args.title.clone().unwrap_or_else(|| format_date(starts_on)),
+            )
+        }
+        CycleType::Day => {
+            let parent_id = args.parent_id.clone().ok_or_else(|| {
+                AppError::validation(
+                    "day_requires_parent",
+                    "A day cycle must live under a weekly cycle",
+                )
+            })?;
+            let parent = repo::require(&tx, &parent_id)?;
+            if parent.cycle_type != CycleType::Week {
+                return Err(AppError::validation(
+                    "invalid_parent_type",
+                    "A day cycle must live under a weekly cycle",
+                ));
+            }
+            if parent.finished {
+                return Err(AppError::conflict(
+                    "parent_cycle_ended",
+                    "Cannot create a day cycle under an ended weekly cycle",
+                ));
+            }
+            let starts_on = match &args.date {
+                Some(raw) => parse_date(raw).ok_or_else(|| {
+                    AppError::validation("invalid_date", "date must be YYYY-MM-DD")
+                })?,
+                None => today,
+            };
+            let (starts_on, ends_on) =
+                dated_cycle_bounds(starts_on, CycleType::Day, week_start_day as u32, 0)
+                    .ok_or_else(|| AppError::Internal("day bounds missing".into()))?;
+            let position = repo::max_position(&tx, &parent_id)? + 1;
+            (
+                Some(parent_id),
+                position,
+                Some(starts_on),
+                Some(ends_on),
+                Some(crate::domain::cycle::DAY_DURATION_MS),
+                Some(day_key(starts_on)),
+                args.title.clone().unwrap_or_else(|| format_date(starts_on)),
+            )
+        }
+        CycleType::Session => unreachable!("rejected above"),
+    };
+
+    let new = repo::NewCycle {
+        id: uuid::Uuid::new_v4().to_string(),
+        title,
+        cycle_type: kind,
+        parent_id: parent_id.clone(),
+        position,
+        duration,
+        starts_on: starts_on.map(format_date),
+        ends_on: ends_on.map(format_date),
+        calendar_key: key,
+        repeat_id: None,
+        created_at: now,
+    };
+    repo::insert(&tx, &new)?;
+    let created = repo::require(&tx, &new.id)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+
+    let mut mutation = Mutation::new(created);
+    mutation.cycles.push(new.id);
+    if let Some(parent) = parent_id {
+        mutation.cycles.push(parent);
+    }
+    Ok(mutation)
+}
+
+fn next_root_position(conn: &Connection) -> AppResult<i64> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(position), -1) + 1 FROM cycles \
+         WHERE parent_id IS NULL AND type = 'month' AND id != 'later' AND archived = 0",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(|e| AppError::Db(e.to_string()))
+}
+
+/// Finds-or-creates the week cycle containing `date` under the long-term cycle
+/// that covers it, then the day cycle for `date`, then materializes repeat
+/// templates into the day (spec: 模板自动出现).
+pub fn get_or_create_day(db: &Db, date: NaiveDate, now: i64) -> AppResult<Mutation<Cycle>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let week_start_day = settings_service::week_start_day_or_default(&tx)?;
+    let date_str = format_date(date);
+
+    let week = match find_covering_cycle(&tx, CycleType::Week, &date_str)? {
+        Some(week) => week,
+        None => {
+            let month = find_covering_cycle(&tx, CycleType::Month, &date_str)?.ok_or_else(|| {
+                AppError::validation(
+                    "no_covering_long_term_cycle",
+                    "No active long-term cycle covers this date",
+                )
+            })?;
+            let (starts_on, ends_on) =
+                dated_cycle_bounds(date, CycleType::Week, week_start_day as u32, 0)
+                    .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
+            let new = repo::NewCycle {
+                id: uuid::Uuid::new_v4().to_string(),
+                title: format_date(starts_on),
+                cycle_type: CycleType::Week,
+                parent_id: Some(month.id.clone()),
+                position: repo::max_position(&tx, &month.id)? + 1,
+                duration: Some(WEEK_DURATION_MS),
+                starts_on: Some(format_date(starts_on)),
+                ends_on: Some(format_date(ends_on)),
+                calendar_key: Some(week_key(starts_on)),
+                repeat_id: None,
+                created_at: now,
+            };
+            repo::insert(&tx, &new)?;
+            repo::require(&tx, &new.id)?
+        }
+    };
+
+    let day = match get_day_by_date(&tx, &date_str)? {
+        Some(day) => day,
+        None => {
+            let new = repo::NewCycle {
+                id: uuid::Uuid::new_v4().to_string(),
+                title: date_str.clone(),
+                cycle_type: CycleType::Day,
+                parent_id: Some(week.id.clone()),
+                position: repo::max_position(&tx, &week.id)? + 1,
+                duration: Some(crate::domain::cycle::DAY_DURATION_MS),
+                starts_on: Some(date_str.clone()),
+                ends_on: Some(format_date(calendar::add_days(date, 1))),
+                calendar_key: Some(day_key(date)),
+                repeat_id: None,
+                created_at: now,
+            };
+            repo::insert(&tx, &new)?;
+            repo::require(&tx, &new.id)?
+        }
+    };
+
+    let generated = crate::service::repeats::generate_for_day_in_tx(&tx, &day.id, now)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+
+    let day_id = day.id.clone();
+    let day_parent = day.parent_id.clone();
+    let mut mutation = Mutation::new(day);
+    mutation.cycles.push(day_id.clone());
+    if let Some(parent) = day_parent {
+        mutation.cycles.push(parent);
+    }
+    if !generated.is_empty() {
+        mutation.tasks.push(day_id);
+    }
+    Ok(mutation)
+}
+
+fn find_covering_cycle(
+    conn: &Connection,
+    kind: CycleType,
+    date: &str,
+) -> AppResult<Option<Cycle>> {
+    if !matches!(kind, CycleType::Week | CycleType::Month) {
+        return Ok(None);
+    }
+    let all = repo::list_planner_cycles(conn)?;
+    Ok(all
+        .into_iter()
+        .filter(|c| c.cycle_type == kind && !c.finished)
+        .filter(|c| match (c.starts_on.as_deref(), c.ends_on.as_deref()) {
+            (Some(s), Some(e)) => s <= date && date < e,
+            _ => false,
+        })
+        .min_by_key(|c| c.created_at))
+}
+
+fn get_day_by_date(conn: &Connection, date: &str) -> AppResult<Option<Cycle>> {
+    repo::get_by_calendar_key(conn, &format!("{}{}", calendar::DAY_KEY_PREFIX, date))
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct AddSessionArgs {
+    pub day_cycle_id: String,
+    pub title: String,
+    /// Milliseconds; `None` leaves the focus block without a set duration.
+    pub duration_ms: Option<i64>,
+    pub position: Option<i64>,
+}
+
+pub fn add_session(db: &Db, args: &AddSessionArgs, now: i64) -> AppResult<Mutation<Cycle>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let day = repo::require(&tx, &args.day_cycle_id)?;
+    if day.cycle_type != CycleType::Day {
+        return Err(AppError::validation(
+            "invalid_parent_type",
+            "Focus blocks live inside a day cycle",
+        ));
+    }
+    ensure_cycle_mutable(&day)?;
+    let position = match args.position {
+        Some(p) => p,
+        None => repo::max_position(&tx, &day.id)? + 1,
+    };
+    let new = repo::NewCycle {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: args.title.clone(),
+        cycle_type: CycleType::Session,
+        parent_id: Some(day.id.clone()),
+        position,
+        duration: args.duration_ms,
+        starts_on: None,
+        ends_on: None,
+        calendar_key: None,
+        repeat_id: None,
+        created_at: now,
+    };
+    repo::insert(&tx, &new)?;
+    let session = repo::require(&tx, &new.id)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    let mut mutation = Mutation::new(session);
+    mutation.cycles.push(day.id);
+    mutation.cycles.push(new.id);
+    Ok(mutation)
+}
+
+/// Ended pages are review-only (upstream: `cycle_ended`).
+pub fn ensure_cycle_mutable(cycle: &Cycle) -> AppResult<()> {
+    if cycle.finished {
+        return Err(AppError::conflict(
+            "cycle_ended",
+            "This planner page has ended and can only be reviewed",
+        ));
+    }
+    Ok(())
+}
+
+/// Edits a focus block (title, duration). Planning cycles are commitments:
+/// their title and duration never change (spec: 时长是创建时的一次性承诺).
+pub fn update_session(
+    db: &Db,
+    cycle_id: &str,
+    title: String,
+    duration_ms: Option<i64>,
+) -> AppResult<Mutation<Cycle>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let target = repo::require(&tx, cycle_id)?;
+    if target.cycle_type != CycleType::Session {
+        return Err(AppError::validation(
+            "cycle_immutable",
+            "Planning cycle titles and durations cannot be changed; end the cycle and start a new one",
+        ));
+    }
+    if title.trim().is_empty() {
+        return Err(AppError::validation("invalid_title", "Title cannot be empty"));
+    }
+    if target.started && duration_ms.is_some() && duration_ms != target.duration {
+        return Err(AppError::validation(
+            "cycle_started",
+            "A started focus block cannot change its duration",
+        ));
+    }
+    repo::update_session_fields(&tx, cycle_id, &title, duration_ms)?;
+    let updated = repo::require(&tx, cycle_id)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    let mut mutation = Mutation::new(updated);
+    mutation.cycles.push(cycle_id.to_string());
+    mutation
+        .cycles
+        .push(target.parent_id.clone().unwrap_or_else(|| cycle_id.to_string()));
+    Ok(mutation)
+}
+
+pub fn start_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cycle>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let target = repo::require(&tx, cycle_id)?;
+    // A cycle without a set duration cannot enter the lifecycle at all
+    // (spec: 启动周期前必须有时长). The Later container's duration of 0
+    // counts as "not set".
+    if target.duration.map(|d| d <= 0).unwrap_or(true) {
+        return Err(AppError::validation(
+            "cycle_duration_required",
+            "Cycle duration must be set before starting",
+        ));
+    }
+    let state = target
+        .lifecycle()
+        .ok_or_else(|| AppError::Internal("cycle in impossible lifecycle state".into()))?;
+    crate::domain::cycle::transition(state, LifecycleAction::Start)
+        .map_err(|e| AppError::conflict(e.code, e.message))?;
+    repo::set_lifecycle(&tx, cycle_id, true, false, Some(now), None)?;
+    let updated = repo::require(&tx, cycle_id)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    let mut mutation = Mutation::new(updated);
+    mutation.cycles.push(cycle_id.to_string());
+    mutation
+        .cycles
+        .push(target.parent_id.clone().unwrap_or_else(|| cycle_id.to_string()));
+    Ok(mutation)
+}
+
+pub fn finish_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cycle>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let target = repo::require(&tx, cycle_id)?;
+    let state = target
+        .lifecycle()
+        .ok_or_else(|| AppError::Internal("cycle in impossible lifecycle state".into()))?;
+    crate::domain::cycle::transition(state, LifecycleAction::Finish)
+        .map_err(|e| AppError::conflict(e.code, e.message))?;
+
+    // Finishing a focus block accrues its elapsed time into the block and up
+    // the chain (day -> week -> month) so the stored `focused_time` reflects
+    // the work done (spec: 进度必须可感知).
+    let mut touched: Vec<String> = vec![cycle_id.to_string()];
+    if target.cycle_type == CycleType::Session {
+        let started_at = target.started_at.unwrap_or(now);
+        let delta = (now - started_at).max(0);
+        if delta > 0 {
+            repo::add_focused_time(&tx, cycle_id, delta)?;
+            let mut parent = target.parent_id.clone();
+            while let Some(pid) = parent {
+                repo::add_focused_time(&tx, &pid, delta)?;
+                touched.push(pid.clone());
+                parent = repo::get(&tx, &pid)?.and_then(|c| c.parent_id);
+            }
+        }
+    }
+    repo::set_lifecycle(&tx, cycle_id, true, true, None, Some(now))?;
+    let updated = repo::require(&tx, cycle_id)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+
+    let mut mutation = Mutation::new(updated);
+    for id in touched {
+        mutation.cycles.push(id);
+    }
+    Ok(mutation)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CycleDeletionPreview {
+    pub cycle_id: String,
+    pub guard_code: Option<String>,
+    pub guard_message: Option<String>,
+    pub descendant_cycles: i64,
+    pub tasks: i64,
+    pub started_sessions: i64,
+}
+
+/// The deletion guards, in evaluation order. `None` = deletable.
+fn deletion_guard(conn: &Connection, target: &Cycle) -> AppResult<Option<(String, String)>> {
+    if target.id == LATER_CYCLE_ID {
+        return Ok(Some((
+            "protected_container".into(),
+            "The Later list can't be deleted.".into(),
+        )));
+    }
+    if target.finished {
+        return Ok(Some((
+            "past_cycle".into(),
+            "Past cycles can't be deleted.".into(),
+        )));
+    }
+    if repo::count_started_sessions(conn, &target.id)? > 0 {
+        return Ok(Some((
+            "has_started_session".into(),
+            "This cycle contains started focus blocks.".into(),
+        )));
+    }
+    if matches!(target.cycle_type, CycleType::Month | CycleType::Week | CycleType::Day)
+        && repo::count_newer_same_type(conn, target)? >= DELETABLE_LATEST_N
+    {
+        return Ok(Some((
+            "not_latest_n".into(),
+            format!("Only the latest {DELETABLE_LATEST_N} cycles can be deleted."),
+        )));
+    }
+    Ok(None)
+}
+
+pub fn get_cycle_deletion_preview(db: &Db, cycle_id: &str) -> AppResult<CycleDeletionPreview> {
+    let conn = db.pool().get()?;
+    let target = repo::require(&conn, cycle_id)?;
+    let guard = deletion_guard(&conn, &target)?;
+    Ok(CycleDeletionPreview {
+        cycle_id: cycle_id.to_string(),
+        guard_code: guard.as_ref().map(|(code, _)| code.clone()),
+        guard_message: guard.map(|(_, message)| message),
+        descendant_cycles: repo::count_descendant_cycles(&conn, cycle_id)?,
+        tasks: repo::count_tasks(&conn, cycle_id)?,
+        started_sessions: repo::count_started_sessions(&conn, cycle_id)?,
+    })
+}
+
+pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let target = repo::require(&tx, cycle_id)?;
+    if let Some((code, message)) = deletion_guard(&tx, &target)? {
+        return Err(AppError::conflict(code, message));
+    }
+    let subtree = repo::subtree_ids(&tx, cycle_id)?;
+    let parent = target.parent_id.clone();
+    repo::delete(&tx, cycle_id)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+
+    let mut mutation = Mutation::new(());
+    mutation.cycles.push(cycle_id.to_string());
+    if let Some(parent) = parent {
+        mutation.cycles.push(parent);
+    }
+    for id in subtree {
+        mutation.cycles.push(id);
+    }
+    Ok(mutation)
+}
+
+pub fn reorder_sessions(
+    db: &Db,
+    day_cycle_id: &str,
+    session_ids: &[String],
+) -> AppResult<Mutation<()>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let day = repo::require(&tx, day_cycle_id)?;
+    if day.cycle_type != CycleType::Day {
+        return Err(AppError::validation(
+            "invalid_parent_type",
+            "Focus blocks are reordered inside a day cycle",
+        ));
+    }
+    for id in session_ids {
+        let session = repo::require(&tx, id)?;
+        if session.parent_id.as_deref() != Some(day_cycle_id) {
+            return Err(AppError::validation(
+                "session_not_in_day",
+                format!("session {id} does not belong to this day"),
+            ));
+        }
+    }
+    repo::reorder(&tx, session_ids)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    Ok(Mutation::new(()).touching_cycle(day_cycle_id))
+}
+
+/// Copies every visible uncompleted task of the previous dated sibling into
+/// `cycle_id`, recording lineage via `copied_from_task_id`
+/// (spec: 从上一周期复制未完成项). No previous cycle or nothing uncompleted
+/// yields an empty result, not an error.
+pub fn copy_uncompleted_from_previous(
+    db: &Db,
+    cycle_id: &str,
+    now: i64,
+) -> AppResult<Mutation<Vec<Task>>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let target = repo::require(&tx, cycle_id)?;
+    if target.starts_on.is_none() {
+        return Err(AppError::validation(
+            "cycle_not_dated",
+            "Copying needs a dated cycle",
+        ));
+    }
+    let previous = match repo::previous_dated_sibling(&tx, &target)? {
+        Some(prev) => prev,
+        None => return Ok(Mutation::new(Vec::new()).touching_tasks(cycle_id)),
+    };
+    let source = tasks_repo::list_visible_by_cycle(&tx, &previous.id)?;
+    let to_copy: Vec<&Task> = source.iter().filter(|t| !t.completed).collect();
+    if to_copy.is_empty() {
+        return Ok(Mutation::new(Vec::new()).touching_tasks(cycle_id));
+    }
+
+    let source_ids: std::collections::HashSet<&str> =
+        source.iter().map(|t| t.id.as_str()).collect();
+    let mut id_map: HashMap<String, String> = HashMap::new();
+    let mut created: Vec<Task> = Vec::with_capacity(to_copy.len());
+    let mut next_top_position = tasks_repo::max_position(&tx, cycle_id, None)? + 1;
+
+    for original in to_copy {
+        let new_parent = match &original.parent_id {
+            None => None,
+            Some(parent) => {
+                if id_map.contains_key(parent) {
+                    Some(id_map[parent].clone())
+                } else if source_ids.contains(parent.as_str()) {
+                    // Its parent was completed and not copied: keep the copy
+                    // as a top-level item instead of a dangling reference.
+                    None
+                } else {
+                    // Cross-cycle link (e.g. weekly item -> long-term goal):
+                    // preserved so the copy still serves the same goal.
+                    Some(parent.clone())
+                }
+            }
+        };
+        let position = if new_parent.is_none() {
+            let p = next_top_position;
+            next_top_position += 1;
+            p
+        } else {
+            original.position
+        };
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let new_task = tasks_repo::NewTask {
+            id: new_id.clone(),
+            cycle_id: cycle_id.to_string(),
+            parent_id: new_parent,
+            title: original.title.clone(),
+            subtasks: original.subtasks.clone(),
+            position,
+            completed: false,
+            goal_breakdown: original.goal_breakdown.clone(),
+            needs_refinement: original.needs_refinement,
+            needs_breakdown: original.needs_breakdown,
+            root_color_key: original.root_color_key.clone(),
+            copied_from_task_id: Some(original.id.clone()),
+            created_at: now,
+        };
+        tasks_repo::insert(&tx, &new_task)?;
+        let created_task = tasks_repo::require(&tx, &new_id)?;
+        id_map.insert(original.id.clone(), new_id);
+        created.push(created_task);
+    }
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    Ok(Mutation::new(created).touching_tasks(cycle_id))
+}
+
+/// Shared helpers for sibling services.
+pub fn require_cycle(conn: &Connection, cycle_id: &str) -> AppResult<Cycle> {
+    repo::require(conn, cycle_id)
+}
+
+pub fn ensure_content_mutable(conn: &Connection, cycle_id: &str) -> AppResult<Cycle> {
+    let cycle = repo::require(conn, cycle_id)?;
+    ensure_cycle_mutable(&cycle)?;
+    Ok(cycle)
+}
+
+/// Re-exported for tests of lifecycle ordering rules.
+pub fn lifecycle_state_of(target: &Cycle) -> LifecycleState {
+    target.lifecycle().unwrap_or(LifecycleState::Finished)
+}

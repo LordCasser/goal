@@ -1,0 +1,200 @@
+{
+  "version": "0.15.0",
+  "dmg": "/Users/lordcasser/Downloads/hyperfocus_0.15.0_mac_universal.dmg",
+  "dmg_sha256": "7cc217dfc6748ec99816e2575dfc3c76a1d7d9e07d3454526df8617d5da4ec3c",
+  "binary": "/Volumes/hyperfocus/hyperfocus.app/Contents/MacOS/hyperfocus",
+  "binary_sha256": "4e4c483343fe2682bcf3678a44a418fb7c1baf0c0005bdb99a96e07e38fcf74e",
+  "installed_binary_sha256": "4e4c483343fe2682bcf3678a44a418fb7c1baf0c0005bdb99a96e07e38fcf74e",
+  "assets": [
+    {
+      "file": "analysis/evidence/web/_assets_Agent-BkuKkIG4.js",
+      "path": "/assets/Agent-BkuKkIG4.js",
+      "path_offset": 19445840,
+      "uncompressed_bytes": 5763,
+      "sha256": "784a4e258c3d7049165ce1ae58ccaca1c1f6c17a8e03c48ce387f4df6b083dea",
+      "verified": true,
+      "compressed_offset": 19445865,
+      "compressed_bytes": 2428
+    },
+    {
+      "file": "analysis/evidence/web/_assets_AgentConversation-BH0-xy3l.js",
+      "path": "/assets/AgentConversation-BH0-xy3l.js",
+      "path_offset": 18848201,
+      "uncompressed_bytes": 101884,
+      "sha256": "2cbbc282716427fc797f8a3d7f8abba658769603d5af978a7feeab7a831747b5",
+      "verified": true,
+      "compressed_offset": 18848238,
+      "compressed_bytes": 33258
+    },
+    {
+      "file": "analysis/evidence/web/_assets_AgentConversation-ca0ZS18p.css",
+      "path": "/assets/AgentConversation-ca0ZS18p.css",
+      "path_offset": 19038979,
+      "uncompressed_bytes": 1586,
+      "sha256": "a1b2aa26aa925a86b1157e2aa3b9de877d5843f120737445982c79676ed926e4",
+      "verified": true,
+      "compressed_offset": 19039017,
+      "compressed_bytes": 392
+    },
+    {
+      "file": "analysis/evidence/web/_assets_DismissibleHint-B0TgJuQ-.css",
+      "path": "/assets/DismissibleHint-B0TgJuQ-.css",
+      "path_offset": 18825577,
+      "uncompressed_bytes": 12629,
+      "sha256": "28fd4cc45346720676bae97714e57a38d10ca82ce368273abcbd78fdaac999bf",
+      "verified": true,
+      "compressed_offset": 18825613,
+      "compressed_bytes": 2969
+    },
+    {
+      "file": "analysis/evidence/web/_assets_DismissibleHint-DA_pck3w.js",
+      "path": "/assets/DismissibleHint-DA_pck3w.js",
+      "path_offset": 19046458,
+      "uncompressed_bytes": 121770,
+      "sha256": "7cc43bfed1cab94621adb3143c6967a8dea683e2cfff793c6c274011c4d440be",
+      "verified": true,
+      "compressed_offset": 19046493,
+      "compressed_bytes": 36127
+    },
+    {
+      "file": "analysis/evidence/web/_assets_LaterSidebar-D4Ub6dP3.js",
+      "path": "/assets/LaterSidebar-D4Ub6dP3.js",
+      "path_offset": 19448293,
+      "uncompressed_bytes": 1589,
+      "sha256": "c2d5c42acbcabe3d77993cf93c2d70b64bf57ed01ec690ef2fe5e94b4e9d81da",
+      "verified": true,
+      "compressed_offset": 19448325,
+      "compressed_bytes": 879
+    },
+    {
+      "file": "analysis/evidence/web/_assets_LaterSidebar-JGFe0scG.css",
+      "path": "/assets/LaterSidebar-JGFe0scG.css",
+      "path_offset": 19038869,
+      "uncompressed_bytes": 89,
+      "sha256": "77fd7e4395bc48a9600fb842c375553df8c3229edf7a7dae0b9452dcfa507021",
+      "verified": true,
+      "compressed_offset": 19038902,
+      "compressed_bytes": 77
+    },
+    {
+      "file": "analysis/evidence/web/_assets_close-B3887pRn.js",
+      "path": "/assets/close-B3887pRn.js",
+      "path_offset": 19310847,
+      "uncompressed_bytes": 10656,
+      "sha256": "0dc904182de847df9f17c8006132553a4e79068ae3c2e22e57c4a0e85ef55c53",
+      "verified": true,
+      "compressed_offset": 19310872,
+      "compressed_bytes": 3921
+    },
+    {
+      "file": "analysis/evidence/web/_assets_editor-prosemirror-woe0hEPc.js",
+      "path": "/assets/editor-prosemirror-woe0hEPc.js",
+      "path_offset": 19314793,
+      "uncompressed_bytes": 215874,
+      "sha256": "fbcd265bb9756cce9602adfd40e3661d885674d71893a5cdca6e9f9e2d6f1db8",
+      "verified": true,
+      "compressed_offset": 19314831,
+      "compressed_bytes": 61359
+    },
+    {
+      "file": "analysis/evidence/web/_assets_editor-tiptap-BwIvA7sR.js",
+      "path": "/assets/editor-tiptap-BwIvA7sR.js",
+      "path_offset": 19006963,
+      "uncompressed_bytes": 107519,
+      "sha256": "8337c985173a2a211b69dcaff141fe61ab032734289ff08ebbbb512dea4079df",
+      "verified": true,
+      "compressed_offset": 19006996,
+      "compressed_bytes": 31873
+    },
+    {
+      "file": "analysis/evidence/web/_assets_fonts_IBMPlexMono-Bold.woff2",
+      "path": "/assets/fonts/IBMPlexMono-Bold.woff2",
+      "path_offset": 18881496,
+      "uncompressed_bytes": 46684,
+      "sha256": "5788454f0ba4bd6300752c474215c4dd926682fa173ae1c6252d57828b6a235d",
+      "verified": true,
+      "compressed_offset": 18881532,
+      "compressed_bytes": 46688
+    },
+    {
+      "file": "analysis/evidence/web/_assets_fonts_IBMPlexMono-Regular.woff2",
+      "path": "/assets/fonts/IBMPlexMono-Regular.woff2",
+      "path_offset": 19400157,
+      "uncompressed_bytes": 45640,
+      "sha256": "49ce58b41a0e1cb921c0f58d9a5b8b96a2cc21437c7066f3ba4f24873076d131",
+      "verified": true,
+      "compressed_offset": 19400196,
+      "compressed_bytes": 45644
+    },
+    {
+      "file": "analysis/evidence/web/_assets_fonts_IBM_Plex_Sans_Var_Roman.woff2",
+      "path": "/assets/fonts/IBM_Plex_Sans_Var_Roman.woff2",
+      "path_offset": 19082620,
+      "uncompressed_bytes": 230368,
+      "sha256": "e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d",
+      "verified": true,
+      "compressed_offset": 19082663,
+      "compressed_bytes": 228184
+    },
+    {
+      "file": "analysis/evidence/web/_assets_index-BZ_MKiTS.js",
+      "path": "/assets/index-BZ_MKiTS.js",
+      "path_offset": 18767548,
+      "uncompressed_bytes": 205630,
+      "sha256": "6fd95cb76b71be8f505921717a0a01a48b89c47d029a1b7053d44e85a9c1eb50",
+      "verified": true,
+      "compressed_offset": 18767573,
+      "compressed_bytes": 58004
+    },
+    {
+      "file": "analysis/evidence/web/_assets_index-Bk3EgsqR.css",
+      "path": "/assets/index-Bk3EgsqR.css",
+      "path_offset": 18828582,
+      "uncompressed_bytes": 64576,
+      "sha256": "47ec566279540b6e8f4ec8a7abec5740dccfa5d5a944bcc746c8c65b357accc4",
+      "verified": true,
+      "compressed_offset": 18828608,
+      "compressed_bytes": 10432
+    },
+    {
+      "file": "analysis/evidence/web/_assets_vendor-solid-l_e3XZcw.js",
+      "path": "/assets/vendor-solid-l_e3XZcw.js",
+      "path_offset": 19001176,
+      "uncompressed_bytes": 15227,
+      "sha256": "603997e726f3424c745c83c16f8f26efce6d01b939d2309dae3ea493813d63f3",
+      "verified": true,
+      "compressed_offset": 19001208,
+      "compressed_bytes": 5755
+    },
+    {
+      "file": "analysis/evidence/web/_assets_vendor-ui-C8LHtCC1.js",
+      "path": "/assets/vendor-ui-C8LHtCC1.js",
+      "path_offset": 18988404,
+      "uncompressed_bytes": 35097,
+      "sha256": "ed4cc3969bb95d4f5422feea7239b542f61d08f3fa27821ad903a3f63043ed73",
+      "verified": true,
+      "compressed_offset": 18988433,
+      "compressed_bytes": 11672
+    },
+    {
+      "file": "analysis/evidence/web/_audio_deepgram-pcm-worklet.js",
+      "path": "/audio/deepgram-pcm-worklet.js",
+      "path_offset": 19000105,
+      "uncompressed_bytes": 3890,
+      "sha256": "a6a2edb2af2ed2401581ded64f2f69e06a6f51c29b5ca4e1ab0c6f077d7f651f",
+      "verified": true,
+      "compressed_offset": 19000135,
+      "compressed_bytes": 1041
+    },
+    {
+      "file": "analysis/evidence/web/_index.html",
+      "path": "/index.html",
+      "path_offset": 18847877,
+      "uncompressed_bytes": 1101,
+      "sha256": "c25b8222afe3af7d83887225655a2703af92247cde22736fa31df7229052e182",
+      "verified": true,
+      "compressed_offset": 18847888,
+      "compressed_bytes": 313
+    }
+  ]
+}

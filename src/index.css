@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens for this project.
+ *
+ * These are our own values, chosen to follow the visual principles extracted
+ * from the reference app (analysis/reports/design-system.md): near-invisible
+ * canvas/panel difference carried by 1px hairlines, a single warm accent used
+ * only for focus and selection, square corners, no shadows, small uppercase
+ * headings. The literal numeric values are ours, not copied.
+ */
+@theme {
+  /* neutral ramp — canvas to ink */
+  --color-ink-25: #fcfcfc;
+  --color-ink-50: #f6f6f6;
+  --color-ink-100: #e8e8e8;
+  --color-ink-200: #d2d2d2;
+  --color-ink-300: #b1b1b1;
+  --color-ink-400: #898989;
+  --color-ink-500: #6e6e6e;
+  --color-ink-600: #5e5e5e;
+  --color-ink-700: #505050;
+  --color-ink-800: #3f3f3f;
+  --color-ink-900: #2e2e2e;
+  --color-ink-950: #1b1b1b;
+
+  /* the only accent */
+  --color-accent-500: #e85c2a;
+  --color-accent-600: #bd4520;
+
+  /* semantic */
+  --color-danger-50: #fff0ee;
+  --color-danger-500: #d92d20;
+
+  /* type */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", ui-monospace, Menlo, monospace;
+
+  /* layout */
+  --spacing-header: 40px;
+  --spacing-panel: 424px;
+}
+
+:root {
+  --app-header-height: var(--spacing-header);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink-25);
+  color: var(--color-ink-950);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}

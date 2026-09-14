@@ -1,0 +1,4 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 menu Planning cycle options, Secondary Actions: Cancel
+	1 container This day contains a focus block that has already started, so it can’t be deleted.
+		2 (disabled) Delete

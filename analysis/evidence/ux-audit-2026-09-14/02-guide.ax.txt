@@ -1,0 +1,100 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 standard window Hyperfocus, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: hyperfocus, URL: tauri://localhost
+			3 container
+				4 button Toggle Later sidebar
+				5 button (expanded) Getting started, 0 of 5, Secondary Actions: Collapse
+				6 container Header status
+					7 text AI included · 14 days left
+				8 pop up button Open application menu
+			9 container
+				10 text 2026 Cycles
+				11 button Sep 14 - Dec 7
+				12 button + Add
+				13 heading LONG-TERM GOALS, Value: 2
+					14 text LONG-TERM GOALS
+				15 text 12 weeks left
+				16 pop up button Long-term cycle options
+				17 text entry area (settable) [button: Do Later]
+[pop up button: Change link color]
+Write a book draft
+					18 container (settable)
+						19 button Do Later
+						20 pop up button Change link color
+						21 text (settable) Write a book draft
+				22 container Setting long-term goals
+					23 button Dismiss Setting long-term goals
+					24 text Setting long-term goals
+					25 text Write 1-3 meaningful outcomes, not tasks. Examples: get 50 users for side project, or run 10K in 45 min. Click feedback under goals for help.
+				26 text Weeks
+				27 button W38
+				28 button + Add
+				29 heading WEEKLY PLAN, Value: 2
+					30 text WEEKLY PLAN
+				31 text 7 days left
+				32 pop up button Weekly cycle options
+				33 text entry area (settable) [pop up button: Link to parent goal]
+
+					34 container (settable)
+						35 pop up button Link to parent goal
+						36 text Type your goal here...
+				37 button Plan with AI
+				38 button 1 issue
+				39 container Planning weekly cycle
+					40 button Dismiss Planning weekly cycle
+					41 text Planning weekly cycle
+					42 text Choose a few weekly outcomes that move your long-term goals forward, plus anything else on your plate this week.
+				43 text Days
+				44 button Mon
+				45 button + Add
+				46 heading MONDAY PLAN, Value: 2
+					47 text MONDAY PLAN
+				48 text Today
+				49 pop up button Day cycle options
+				50 text entry area (settable) [pop up button: Link to parent goal]
+
+					51 container (settable)
+						52 pop up button Link to parent goal
+						53 text Type your goal here...
+				54 button Plan with AI
+				55 button 1 issue
+				56 text FOCUS BLOCKS 0 min
+				57 button
+				58 button (disabled) Start
+				59 text entry area (disabled, settable) Afternoon focus
+					60 text (settable) Afternoon focus
+				61 text 90  min
+				62 pop up button (disabled) Focus block options
+				63 text entry area (disabled, settable) 
+
+					64 container (settable)
+						65 text Type your goal here...
+			66 container Getting started
+				67 heading Getting started, Value: 2
+					68 text Getting started
+				69 progress indicator (settable, float) Getting started progress, Value: 0
+				70 container Getting started checklist
+					71 container
+						72 text Not completed: Set one clear long-term goal
+					73 container
+						74 text Not completed: Add goal to “Do Later”
+					75 container
+						76 text Not completed: Connect weekly goal to long-term goal
+					77 container
+						78 text Not completed: Connect daily task to weekly goal
+					79 container
+						80 text Not completed: Complete 30-min focus block
+				81 button Skip guide
+	82 close button
+	83 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	84 minimize button
+85 menu bar
+	86 hyperfocus
+	87 File
+	88 Edit
+	89 View
+	90 Window
+	91 Help
+
+The focused UI element is 66 container Getting started

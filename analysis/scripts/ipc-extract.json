@@ -1,0 +1,178 @@
+{
+  "commands": {
+    "acknowledge_exit_poll_shown": [],
+    "add_repeat": [
+      "params"
+    ],
+    "add_session": [
+      "parent_id"
+    ],
+    "cancel_openrouter": [
+      "attempt_id"
+    ],
+    "close_talk_to_founder": [
+      "reason"
+    ],
+    "complete_onboarding": [
+      "outcome"
+    ],
+    "connect_openrouter": [
+      "attempt_id"
+    ],
+    "continue_after_exit_poll": [],
+    "copy_uncompleted_tasks_from_previous_cycle": [
+      "cycle_id"
+    ],
+    "create_planning_cycle": [
+      "input"
+    ],
+    "daily_alignment": [],
+    "delete_planning_cycle": [
+      "cycle_id"
+    ],
+    "dismiss_exit_poll": [],
+    "dismiss_hint": [
+      "hint_id"
+    ],
+    "dismiss_planning_issue": [
+      "dismissal"
+    ],
+    "exit_after_exit_poll": [],
+    "exit_error": [],
+    "finish_cycle": [
+      "cycle_id"
+    ],
+    "get_agent_conversation": [
+      "conversation_id"
+    ],
+    "get_ai_settings": [],
+    "get_current_short_term_cycle_ids": [],
+    "get_deepgram_transcription_token": [],
+    "get_dismissed_hints": [],
+    "get_editor_workspace": [
+      "cycle_id"
+    ],
+    "get_editor_workspaces_by_cycle_ids": [
+      "cycle_ids"
+    ],
+    "get_entitlement_summary": [],
+    "get_entitlement_support_id": [],
+    "get_onboarding": [],
+    "get_or_initialize_week_start_day": [
+      "detected_week_start_day"
+    ],
+    "get_parent_link_candidates": [
+      "cycle_id"
+    ],
+    "get_plan": [
+      "selection"
+    ],
+    "get_planning_cycle_deletion_preview": [
+      "cycle_id"
+    ],
+    "get_planning_issue_dismissals": [
+      "cycle_id"
+    ],
+    "get_planning_issue_report": [
+      "cycle_id"
+    ],
+    "get_preview_summary": [],
+    "get_previous_agent_conversation": [
+      "current_conversation_id"
+    ],
+    "get_talk_to_founder_eligibility": [],
+    "get_task_by_id": [
+      "task_id"
+    ],
+    "get_tasks_by_cycle_ids": [
+      "cycle_ids"
+    ],
+    "get_week_start_day": [],
+    "keep_all_preview_changes": [],
+    "keep_task_preview": [
+      "task_id"
+    ],
+    "mark_exit_poll_listener_ready": [],
+    "maybe_later": [],
+    "move_task": [
+      "params"
+    ],
+    "no_thanks": [],
+    "patch_task": [
+      "params"
+    ],
+    "play_audio": [
+      "sound_type"
+    ],
+    "prepare_onboarding": [
+      "detected_week_start_day"
+    ],
+    "reconcile_getting_started_guide": [],
+    "record_talk_to_founder_opened": [],
+    "remove_openrouter_api_key": [],
+    "reorder_sessions": [
+      "ordered_session_ids",
+      "parent_id"
+    ],
+    "reset_task_clarity": [
+      "task_id"
+    ],
+    "sample_rate": [],
+    "save_openrouter_api_key": [
+      "api_key"
+    ],
+    "send_agent_message": [
+      "params"
+    ],
+    "send_feedback": [
+      "input"
+    ],
+    "set_ai_provider": [
+      "provider"
+    ],
+    "set_task_clarity_data": [
+      "task_id"
+    ],
+    "set_task_parent_link": [
+      "params"
+    ],
+    "set_task_root_color": [
+      "params"
+    ],
+    "show_window_when_ready": [],
+    "skip_getting_started_guide": [],
+    "start_agent_conversation": [
+      "params"
+    ],
+    "start_cycle": [
+      "cycle_id"
+    ],
+    "stop_repeat": [
+      "params"
+    ],
+    "submit_exit_poll": [
+      "input"
+    ],
+    "task_added": [],
+    "too_many_goals": [],
+    "too_many_tasks": [],
+    "undo_all_preview_changes": [],
+    "undo_task_preview": [
+      "task_id"
+    ],
+    "update_cycle": [
+      "cycle_id",
+      "params"
+    ],
+    "update_repeat": [
+      "params",
+      "repeat_id"
+    ],
+    "weekly_alignment": []
+  },
+  "events": [
+    "agent:conversation_updated",
+    "cycle:finished",
+    "tasks:patched"
+  ]
+}

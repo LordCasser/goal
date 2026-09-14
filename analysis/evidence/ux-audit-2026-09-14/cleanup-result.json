@@ -1,0 +1,8 @@
+{
+  "database_restored": true,
+  "guide_audit_achievements_reset": true,
+  "pre_existing_rows_preserved": true,
+  "audit_snapshots_kept_outside_repository": true,
+  "task_count": 1,
+  "cycle_count": 5
+}

@@ -1,0 +1,298 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "Hyperfocus home" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img "Hyperfocus" [ref=e5]
+      - navigation [ref=e6]:
+        - link "Download for macOS" [ref=e7] [cursor=pointer]:
+          - /url: /download/mac
+  - generic [ref=e9]:
+    - generic [ref=e10]:
+      - heading "Free planner that turns goals into daily progress." [level=1] [ref=e11]
+      - paragraph [ref=e12]: Choose the few goals that matter most, plan weeks and days around them, and finally make progress by doing focused work.
+      - generic [ref=e13]:
+        - link "Download for Mac" [ref=e14] [cursor=pointer]:
+          - /url: /download/mac
+        - link [ref=e16] [cursor=pointer]:
+          - /url: https://www.producthunt.com/products/hyperfocus-2?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_campaign=badge-hyperfocus-3
+          - img "Hyperfocus - Planner that turns goals into daily progress | Product Hunt" [ref=e17]
+    - generic "Interactive Hyperfocus planning mock" [ref=e22]:
+      - generic [ref=e23]:
+        - generic "Hyperfocus app header" [ref=e24]:
+          - img "Later" [ref=e29]
+        - main [ref=e33]:
+          - generic [ref=e34]:
+            - generic [ref=e35]: "2026"
+            - generic [ref=e37]:
+              - generic [ref=e38]:
+                - group "Cycles cycles" [ref=e39]:
+                  - generic [ref=e40]: Cycles
+                  - generic [ref=e44]: Mar 30 - Jun 21
+                  - generic [ref=e45]: Jun 22 - Sep 13
+                  - generic [ref=e46]: + Add
+                - region "Long-term goals" [ref=e49]:
+                  - generic [ref=e50]:
+                    - generic [ref=e51]:
+                      - heading "Long-term goals" [level=2] [ref=e55]
+                      - generic [ref=e56]: 11 weeks left
+                    - list "Plan tasks" [ref=e60]:
+                      - listitem [ref=e61]:
+                        - list [ref=e62]:
+                          - listitem [ref=e63]:
+                            - generic [ref=e65]:
+                              - button "Show connections for Launch Hyperfocus on Product Hunt in top3" [ref=e66]
+                              - generic [ref=e68]: Launch Hyperfocus on Product Hunt in top3
+                          - listitem [ref=e69]:
+                            - generic [ref=e71]: Validate onboarding with five beta users
+                          - listitem [ref=e73]:
+                            - generic [ref=e75]: Ship the launch-ready macOS app
+                          - listitem [ref=e77]:
+                            - generic [ref=e79]: Publish the new landing page and demo
+                          - listitem [ref=e81]:
+                            - generic [ref=e83]: Prepare the Product Hunt launch (hunter, supporters, assets)
+                          - listitem [ref=e85]:
+                            - generic [ref=e87]: Launch & engage with users
+                          - listitem [ref=e89]:
+                            - generic [ref=e91]: Track 200 downloads and 20 paying customers
+                      - listitem [ref=e93]:
+                        - list [ref=e94]:
+                          - listitem [ref=e95]:
+                            - generic [ref=e97]:
+                              - button "Show connections for Finish Cappadocia Ultra under 7 hours" [ref=e98]
+                              - generic [ref=e100]: Finish Cappadocia Ultra under 7 hours
+                          - listitem [ref=e101]:
+                            - generic [ref=e103]: Finalize the training plan with a coach
+                          - listitem [ref=e105]:
+                            - generic [ref=e107]: Complete 40k test race
+                          - listitem [ref=e109]:
+                            - generic [ref=e111]: Validate pacing, fueling, and equipment
+                          - listitem [ref=e113]:
+                            - generic [ref=e115]: Arrive healthy, recovered and ready
+                      - listitem [ref=e117]:
+                        - list [ref=e118]:
+                          - listitem [ref=e119]:
+                            - generic [ref=e121]:
+                              - button "Show connections for Publish 12 essays by Dec 31" [ref=e122]
+                              - generic [ref=e124]: Publish 12 essays by Dec 31
+                          - listitem [ref=e125]:
+                            - generic [ref=e127]: Focus is not about managing more
+                          - listitem [ref=e129]:
+                            - generic [ref=e131]: What games teaches us about experience
+                          - listitem [ref=e133]:
+                            - generic [ref=e135]: Why focus still matters in AI world
+                  - generic [ref=e137]: 1 issue
+              - generic [ref=e140]:
+                - group "Weeks cycles" [ref=e141]:
+                  - generic [ref=e142]: Weeks
+                  - generic [ref=e146]: W28
+                  - generic [ref=e147]: W29
+                  - generic [ref=e148]: + Add
+                - region "Weekly plan" [ref=e151]:
+                  - generic [ref=e152]:
+                    - generic [ref=e153]:
+                      - heading "Weekly plan" [level=2] [ref=e157]
+                      - generic [ref=e158]: 4 days left
+                    - list "Plan tasks" [ref=e162]:
+                      - listitem [ref=e163]:
+                        - list [ref=e164]:
+                          - listitem [ref=e165]:
+                            - generic [ref=e167]:
+                              - button "Show connections for Create a product hunt launch checklist" [ref=e168]
+                              - generic [ref=e170]: Create a product hunt launch checklist
+                          - listitem [ref=e171]:
+                            - generic [ref=e173]: Research best practices
+                          - listitem [ref=e175]:
+                            - generic [ref=e177]: Chat w/ Anton, Rahul, James on launches
+                          - listitem [ref=e179]:
+                            - generic [ref=e181]: Create a launch checklist
+                      - listitem [ref=e183]:
+                        - list [ref=e184]:
+                          - listitem [ref=e185]:
+                            - generic [ref=e187]:
+                              - button "Show connections for Update landing page with product video" [ref=e188]
+                              - generic [ref=e190]: Update landing page with product video
+                          - listitem [ref=e191]:
+                            - generic [ref=e193]: Finalize hero & feature copy
+                          - listitem [ref=e195]:
+                            - generic [ref=e197]: Record product video
+                          - listitem [ref=e199]:
+                            - generic [ref=e201]: Run 3 quick tests
+                          - listitem [ref=e203]:
+                            - generic [ref=e205]: Publish
+                      - listitem [ref=e207]:
+                        - list [ref=e208]:
+                          - listitem [ref=e209]:
+                            - generic [ref=e211]:
+                              - button "Show connections for Publish \"Focus is not about managing more\"" [ref=e212]
+                              - generic [ref=e214]: Publish "Focus is not about managing more"
+                      - listitem [ref=e215]:
+                        - list [ref=e216]:
+                          - listitem [ref=e217]:
+                            - generic [ref=e219]:
+                              - button "Show connections for Order present for mom’s birthday" [ref=e220]
+                              - generic [ref=e222]: Order present for mom’s birthday
+              - generic [ref=e224]:
+                - group "Days cycles" [ref=e225]:
+                  - generic [ref=e226]: Days
+                  - generic [ref=e230]: Mon
+                  - generic [ref=e231]: Tue
+                  - generic [ref=e232]: Wed
+                  - generic [ref=e233]: + Add
+                - generic [ref=e234]:
+                  - region "Wednesday plan" [ref=e236]:
+                    - generic [ref=e237]:
+                      - generic [ref=e238]:
+                        - heading "Wednesday plan" [level=2] [ref=e242]
+                        - generic [ref=e243]: 10 hours left
+                      - list "Plan tasks" [ref=e247]:
+                        - listitem [ref=e248]:
+                          - list [ref=e249]:
+                            - listitem [ref=e250]:
+                              - generic [ref=e252]:
+                                - button "Show connections for Write 1000 words for essay" [ref=e253]
+                                - generic [ref=e255]: Write 1000 words for essay
+                        - listitem [ref=e256]:
+                          - list [ref=e257]:
+                            - listitem [ref=e258]:
+                              - generic [ref=e260]:
+                                - button "Show connections for Finalize hero & feature copy" [ref=e261]
+                                - generic [ref=e263]: Finalize hero & feature copy
+                            - listitem [ref=e264]:
+                              - generic [ref=e266]: Hero screenshot
+                            - listitem [ref=e268]:
+                              - generic [ref=e270]: Method
+                            - listitem [ref=e272]:
+                              - generic [ref=e274]: "Feature 1: long-term goals"
+                            - listitem [ref=e276]:
+                              - generic [ref=e278]: "Feature 2: weekly & daily plans"
+                            - listitem [ref=e280]:
+                              - generic [ref=e282]: "Feature 3: Focus blocks"
+                            - listitem [ref=e284]:
+                              - generic [ref=e286]: Manifest
+                        - listitem [ref=e288]:
+                          - list [ref=e289]:
+                            - listitem [ref=e290]:
+                              - generic [ref=e292]:
+                                - button "Show connections for Pay the rent to Mariam" [ref=e293]
+                                - generic [ref=e295]: Pay the rent to Mariam
+                  - region "Focus blocks" [ref=e297]:
+                    - generic [ref=e299]:
+                      - heading "Focus Blocks" [level=2] [ref=e303]
+                      - generic [ref=e304]: 90 min
+                    - generic [ref=e311]:
+                      - generic [ref=e314]:
+                        - generic [ref=e316]:
+                          - button "Stop" [ref=e317] [cursor=pointer]
+                          - generic [ref=e320]: 37:38
+                          - generic [ref=e325]:
+                            - generic [ref=e326]: pan_zoom
+                            - generic [ref=e328]: more_horiz
+                        - generic [ref=e333]:
+                          - generic [ref=e334]: Finalize copy for landing page
+                          - generic [ref=e337]: Update hero screenshot
+                          - generic [ref=e340]: Add old way vs hyperfocus way
+                          - generic [ref=e343]: Align features copy with new value props
+                      - generic [ref=e350] [cursor=pointer]:
+                        - generic [ref=e351]: check
+                        - generic [ref=e354]:
+                          - generic [ref=e355]: Afternoon focus
+                          - generic [ref=e356]: 90 / 90 min
+                        - generic [ref=e357]:
+                          - generic [ref=e358]: keyboard_arrow_down
+                          - generic [ref=e360]: more_horiz
+  - region [ref=e362]:
+    - article [ref=e363]:
+      - generic [ref=e364]:
+        - paragraph [ref=e365]:
+          - strong [ref=e366]: Task managers got it backward.
+        - paragraph [ref=e367]: They all promised you the same thing – that if you capture more, organize more, and keep up with more, you’ll finally get everything under control.
+        - paragraph [ref=e368]: I believe this is backward.
+        - paragraph [ref=e369]: When everything starts from an inbox, you’re reacting to things instead of spending time on goals that actually matter. You organize things. Process things. Jump between things. You feel busy, but not always productive.
+        - paragraph [ref=e370]: Yet there’s another way to work.
+        - paragraph [ref=e371]: With Hyperfocus, you start from “What do I want to achieve in the coming months?” It takes time to answer. But when you finally have it, the rest falls into place. You start feeling focused. Committed. Moving forward. Making progress toward goals that are actually yours.
+        - paragraph [ref=e372]: That's how I work. And if this resonates, I invite you to try Hyperfocus. Download the app, play around, and see if it fits.
+      - generic [ref=e373]:
+        - img "Dmitri, maker of Hyperfocus" [ref=e374]
+        - generic [ref=e375]:
+          - strong [ref=e376]: Dmitri Tcepelev
+          - link "dmitri@hyperfocus.in" [ref=e377] [cursor=pointer]:
+            - /url: mailto:dmitri@hyperfocus.in
+          - generic [ref=e378]: Maker of Hyperfocus
+  - region [ref=e379]:
+    - generic [ref=e380]:
+      - heading "A method that puts goals first." [level=2] [ref=e382]
+      - list "Hyperfocus planning flow" [ref=e384]:
+        - listitem [ref=e385]:
+          - generic [ref=e387]: flag
+          - generic [ref=e388]: Goals
+        - listitem [ref=e389]:
+          - generic [ref=e391]: view_week
+          - generic [ref=e392]: Weeks
+        - listitem [ref=e393]:
+          - generic [ref=e395]: today
+          - generic [ref=e396]: Days
+        - listitem [ref=e397]:
+          - generic [ref=e399]: timer
+          - generic [ref=e400]: Focus blocks
+      - button "Watch a 2 minute tour" [ref=e401] [cursor=pointer]:
+        - generic [ref=e403]: play_circle
+        - generic [ref=e405]:
+          - generic [ref=e406]: Watch a 2 minute tour
+          - generic [aria-hidden] [ref=e407]: arrow_forward
+  - generic [ref=e410]:
+    - article [ref=e411]:
+      - generic [ref=e412]:
+        - heading "Your plans, connected to what matters." [level=3] [ref=e413]
+        - paragraph [ref=e414]: Stay focused on what matters most by connecting long-term goals to your weekly and daily plans in one workspace.
+      - img "A long-term goal connected to its weekly and daily plans" [ref=e417]
+    - article [ref=e418]:
+      - generic [ref=e419]:
+        - heading "Second opinion on your goals and plans." [level=3] [ref=e420]
+        - paragraph [ref=e421]: Hyperfocus AI reviews your goals and plans as you write, flagging vague outcomes, unrealistic scope, and missing next steps. Apply the feedback yourself – or work through it with an assistant built for goal-setting, prioritization, and planning.
+      - img "Real-time planning feedback beside guidance from the Hyperfocus assistant" [ref=e424]
+    - article [ref=e425]:
+      - generic [ref=e426]:
+        - heading "Your next step, always clear." [level=3] [ref=e427]
+        - paragraph [ref=e428]: A quick weekly and daily planning ritual narrows everything down to one clear next step – so you can spend less time deciding, and more time doing.
+      - img "Weekly planning and review rituals in Hyperfocus" [ref=e431]
+    - article [ref=e432]:
+      - generic [ref=e433]:
+        - heading "Turn plans into progress, one block at a time." [level=3] [ref=e434]
+        - paragraph [ref=e435]: Make progress with time-boxed sessions where you focus on one task at a time.
+      - img "A recurring focus block in Hyperfocus, with one task selected for the session" [ref=e438]
+  - region [ref=e439]:
+    - generic [ref=e441]:
+      - generic [ref=e442]:
+        - heading "FAQ" [level=2] [ref=e443]
+        - paragraph [ref=e444]:
+          - text: If you can’t find the answer to your question below, email me
+          - link "dmitri@hyperfocus.in" [ref=e445] [cursor=pointer]:
+            - /url: mailto:dmitri@hyperfocus.in
+      - generic [ref=e446]:
+        - group [ref=e447]:
+          - generic "Is Hyperfocus really free? What’s included?" [ref=e448] [cursor=pointer]
+        - group [ref=e451]:
+          - generic "How does AI work? Is it also free?" [ref=e452] [cursor=pointer]
+        - group [ref=e455]:
+          - generic "What does Hyperfocus AI do, and can I use Hyperfocus without it?" [ref=e456] [cursor=pointer]
+        - group [ref=e459]:
+          - generic "Which operating systems does Hyperfocus support?" [ref=e460] [cursor=pointer]
+        - group [ref=e463]:
+          - generic "How is Hyperfocus different from a task manager or to-do app?" [ref=e464] [cursor=pointer]
+        - group [ref=e467]:
+          - generic "Where is my data stored?" [ref=e468] [cursor=pointer]
+  - generic [ref=e473]:
+    - heading "Start making progress on your goals today." [level=2] [ref=e474]
+    - link "Download for Mac" [ref=e475] [cursor=pointer]:
+      - /url: /download/mac
+  - contentinfo [ref=e477]:
+    - generic [ref=e478]:
+      - generic [ref=e479]: © 2026 Hyperfocus
+      - navigation [ref=e480]:
+        - link "Terms" [ref=e481] [cursor=pointer]:
+          - /url: /terms/
+        - link "Privacy" [ref=e482] [cursor=pointer]:
+          - /url: /privacy/
+        - link "Contact" [ref=e483] [cursor=pointer]:
+          - /url: mailto:dmts@hyperfocus.in

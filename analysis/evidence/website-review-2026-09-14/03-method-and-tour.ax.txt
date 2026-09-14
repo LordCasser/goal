@@ -1,0 +1,2 @@
+There has been no change in the accessibility tree for Window: "Hyperfocus – Goals-first planner".
+The focused UI element is 25 HTML 内容 Hyperfocus – Goals-first planner, URL: hyperfocus.in/

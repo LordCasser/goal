@@ -1,0 +1,131 @@
+{
+  "captured_at": "2026-09-14",
+  "note": "仅保存本轮合成测试条目与结构信息；真实数据备份留在系统临时目录，不进入仓库。",
+  "queries": {
+    "migration_version": {
+      "sql": "select count(*) as count,max(version) as max_version from _sqlx_migrations",
+      "rows": [
+        {
+          "count": 57,
+          "max_version": 57
+        }
+      ]
+    },
+    "audit_tasks": {
+      "sql": "select t.id,t.cycle_id,c.type,c.title as container,t.title,t.parent_id,t.copied_from_task_id,t.root_color_key,t.subtasks,t.agent_proposal,t.needs_refinement,t.needs_breakdown from tasks_table t join cycles_table c on c.id=t.cycle_id where t.title like 'UX audit%' order by t.id",
+      "rows": [
+        {
+          "id": "4a72b8d1-68cd-4a21-b038-6b885fe29b13",
+          "cycle_id": "later",
+          "type": "month",
+          "container": "Later",
+          "title": "UX audit validate the weekly workflow",
+          "parent_id": "c6b91b0b-8004-4603-8d20-704aa75fdaa2",
+          "copied_from_task_id": null,
+          "root_color_key": null,
+          "subtasks": "[]",
+          "agent_proposal": null,
+          "needs_refinement": null,
+          "needs_breakdown": null
+        },
+        {
+          "id": "571a1a94-1ae2-40cc-9fd4-e4f78b894980",
+          "cycle_id": "4d068adc-f9d4-4ff6-81ed-98594afdad92",
+          "type": "day",
+          "container": "Day",
+          "title": "UX audit daily action",
+          "parent_id": "4a72b8d1-68cd-4a21-b038-6b885fe29b13",
+          "copied_from_task_id": null,
+          "root_color_key": null,
+          "subtasks": "[]",
+          "agent_proposal": null,
+          "needs_refinement": 1,
+          "needs_breakdown": 0
+        },
+        {
+          "id": "7df210ae-36e4-41b7-8538-65f5a325b7a0",
+          "cycle_id": "ab0db030-2135-48a0-8048-39fe1bc4de21",
+          "type": "session",
+          "container": "UX audit focus",
+          "title": "UX audit focus action",
+          "parent_id": null,
+          "copied_from_task_id": null,
+          "root_color_key": null,
+          "subtasks": "[]",
+          "agent_proposal": null,
+          "needs_refinement": null,
+          "needs_breakdown": null
+        },
+        {
+          "id": "a81be9ec-a689-4122-8c30-a5f47079a7b1",
+          "cycle_id": "7c3d6afb-89ae-4693-b8ff-6f1993b2afe1",
+          "type": "week",
+          "container": "Weekly",
+          "title": "UX audit validate the weekly workflow",
+          "parent_id": "c6b91b0b-8004-4603-8d20-704aa75fdaa2",
+          "copied_from_task_id": "4a72b8d1-68cd-4a21-b038-6b885fe29b13",
+          "root_color_key": null,
+          "subtasks": "[]",
+          "agent_proposal": null,
+          "needs_refinement": null,
+          "needs_breakdown": null
+        },
+        {
+          "id": "fc5663f0-371e-448a-8c8f-af524b189fa1",
+          "cycle_id": "later",
+          "type": "month",
+          "container": "Later",
+          "title": "UX audit Explore keyboard workflow",
+          "parent_id": null,
+          "copied_from_task_id": null,
+          "root_color_key": null,
+          "subtasks": "[{\"title\":\"Review the input rules\",\"completed\":false,\"subtasks\":[]}]",
+          "agent_proposal": null,
+          "needs_refinement": null,
+          "needs_breakdown": null
+        }
+      ]
+    },
+    "audit_focus": {
+      "sql": "select id,title,parent_id,started,finished,started_at,finished_at,duration,focused_time from cycles_table where title='UX audit focus'",
+      "rows": [
+        {
+          "id": "ab0db030-2135-48a0-8048-39fe1bc4de21",
+          "title": "UX audit focus",
+          "parent_id": "4d068adc-f9d4-4ff6-81ed-98594afdad92",
+          "started": 1,
+          "finished": 1,
+          "started_at": 1789368757630,
+          "finished_at": 1789368769870,
+          "duration": 5400000,
+          "focused_time": 12240
+        }
+      ]
+    },
+    "table_constraints": {
+      "sql": "select name,sql from sqlite_master where name in ('tasks_table','task_preview_originals','cycles_table','planning_issue_dismissals','repeats_table')",
+      "rows": [
+        {
+          "name": "repeats_table",
+          "sql": "CREATE TABLE repeats_table (\n    id TEXT PRIMARY KEY,\n    title TEXT NOT NULL,\n    duration INTEGER NOT NULL CHECK (duration >= 0),\n    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0 AND position <= 999),\n    archived BOOLEAN NOT NULL DEFAULT 0\n)"
+        },
+        {
+          "name": "task_preview_originals",
+          "sql": "CREATE TABLE task_preview_originals (\n    task_id TEXT PRIMARY KEY REFERENCES tasks_table(id) ON DELETE CASCADE,\n    cycle_id TEXT NOT NULL REFERENCES \"cycles_table\"(id) ON DELETE CASCADE,\n    original_exists BOOLEAN NOT NULL,\n    title TEXT,\n    completed BOOLEAN,\n    subtasks TEXT,\n    position INTEGER,\n    goal_breakdown TEXT,\n    parent_id TEXT,\n    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)\n, root_color_key TEXT, needs_refinement BOOLEAN DEFAULT NULL, needs_breakdown BOOLEAN DEFAULT NULL)"
+        },
+        {
+          "name": "planning_issue_dismissals",
+          "sql": "CREATE TABLE planning_issue_dismissals (\n    id TEXT PRIMARY KEY,\n    cycle_id TEXT NOT NULL,\n    issue_type TEXT NOT NULL,\n    task_id TEXT,\n    created_at TEXT NOT NULL DEFAULT (datetime('now')),\n    FOREIGN KEY (cycle_id) REFERENCES cycles_table(id) ON DELETE CASCADE,\n    CHECK (TRIM(cycle_id) <> ''),\n    CHECK (TRIM(issue_type) <> ''),\n    CHECK (task_id IS NULL OR TRIM(task_id) <> ''),\n    UNIQUE (cycle_id, issue_type, task_id)\n)"
+        },
+        {
+          "name": "cycles_table",
+          "sql": "CREATE TABLE \"cycles_table\" (\n    id TEXT PRIMARY KEY,\n    title TEXT NOT NULL,\n    type TEXT NOT NULL CHECK (type IN ('session', 'day', 'week', 'month')),\n    started BOOLEAN NOT NULL DEFAULT 0,\n    finished BOOLEAN NOT NULL DEFAULT 0,\n    started_at INTEGER,\n    finished_at INTEGER,\n    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),\n    parent_id TEXT REFERENCES \"cycles_table\"(id) ON DELETE CASCADE,\n    archived BOOLEAN DEFAULT 0,\n    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0 AND position <= 999),\n    repeat_id TEXT REFERENCES repeats_table(id),\n    focused_time INTEGER,\n    prioritization_breakdown TEXT,\n    duration INTEGER DEFAULT 0 CHECK (duration IS NULL OR duration >= 0),\n    starts_on TEXT NULL,\n    ends_on TEXT NULL,\n    calendar_key TEXT NULL,\n    CHECK (NOT (started = 0 AND finished = 1))\n)"
+        },
+        {
+          "name": "tasks_table",
+          "sql": "CREATE TABLE \"tasks_table\" (\n    id TEXT PRIMARY KEY,\n    title TEXT NOT NULL,\n    completed BOOLEAN NOT NULL DEFAULT 0,\n    subtasks TEXT NOT NULL DEFAULT '[]',\n    cycle_id TEXT NOT NULL REFERENCES cycles_table(id) ON DELETE CASCADE,\n    position INTEGER NOT NULL DEFAULT 0,\n    parent_id TEXT DEFAULT NULL,\n    goal_breakdown TEXT DEFAULT NULL,\n    agent_proposal TEXT DEFAULT NULL CHECK (\n        agent_proposal IN ('upsert', 'delete')\n    ),\n    root_color_key TEXT DEFAULT NULL,\n    copied_from_task_id TEXT DEFAULT NULL,\n    needs_refinement BOOLEAN DEFAULT NULL,\n    needs_breakdown BOOLEAN DEFAULT NULL\n)"
+        }
+      ]
+    }
+  }
+}

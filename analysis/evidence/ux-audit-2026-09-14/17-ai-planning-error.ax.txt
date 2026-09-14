@@ -1,0 +1,73 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 standard window Hyperfocus, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: hyperfocus, URL: tauri://localhost
+			3 container
+				4 button Toggle Later sidebar
+				5 button (collapsed) Getting started, 3 of 5, Secondary Actions: Expand
+				6 container Header status
+					7 text AI included · 14 days left
+				8 pop up button Open application menu
+			9 container
+				10 text 2026 Cycles
+				11 button Sep 14 - Dec 7
+				12 button + Add
+				13 heading LONG-TERM GOALS, Value: 2
+					14 text LONG-TERM GOALS
+				15 text 12 weeks left
+				16 pop up button Long-term cycle options
+				17 text entry area (settable) [button: Do Later]
+[pop up button: Change link color]
+Write a book draft
+					18 container (settable)
+						19 button Do Later
+						20 pop up button Change link color
+						21 text (settable) Write a book draft
+				22 container Setting long-term goals
+					23 button Dismiss Setting long-term goals
+					24 text Setting long-term goals
+					25 text Write 1-3 meaningful outcomes, not tasks. Examples: get 50 users for side project, or run 10K in 45 min. Click feedback under goals for help.
+				26 text Weeks
+				27 button W38
+				28 button W39
+				29 button + Add
+				30 heading WEEKLY PLAN, Value: 2
+					31 text WEEKLY PLAN
+				32 text Starts Sep 21
+				33 pop up button Weekly cycle options
+				34 text entry area (settable) [pop up button: Link to parent goal]
+
+					35 container (settable)
+						36 pop up button Link to parent goal
+						37 text Type your goal here...
+				38 button Copy from previous week
+				39 button Plan with AI
+				40 button 1 issue
+				41 container Planning weekly cycle
+					42 button Dismiss Planning weekly cycle
+					43 text Planning weekly cycle
+					44 text Choose a few weekly outcomes that move your long-term goals forward, plus anything else on your plate this week.
+				45 text Days
+				46 button + Add
+				47 heading DAILY PLAN, Value: 2
+					48 text DAILY PLAN
+				49 text Write a few daily goals that move your weekly goals forward, plus anything else on your plate today.
+				50 button Create daily plan
+			51 container
+				52 text Hyperfocus Agent
+				53 button Previous
+				54 button
+				55 text Help me plan this week Planning skill activated LLM call failed: API error (status 400): { "error": { "code": 400, "message": "User location is not supported for the API use.", "status": "FAILED_PRECONDITION" } }
+				56 button Retry
+	57 close button
+	58 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	59 minimize button
+60 menu bar
+	61 hyperfocus
+	62 File
+	63 Edit
+	64 View
+	65 Window
+	66 Help
+
+The focused UI element is 2 HTML content Description: hyperfocus, URL: tauri://localhost

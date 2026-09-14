@@ -1,0 +1,12 @@
+{
+  "requirements": 32,
+  "acceptance_scenarios": 64,
+  "product_observation_records": 24,
+  "screenshots": 20,
+  "verified_frontend_assets": 19,
+  "historical_messages_normalized": 12,
+  "broken_links": [],
+  "audit_business_data_removed": true,
+  "audit_guide_records_reset": true,
+  "application_code_changed": false
+}

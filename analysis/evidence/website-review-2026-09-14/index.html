@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hyperfocus – Goals-first planner</title>
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="/assets/favicon-16x16-W1iyAVL-.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="/assets/favicon-32x32-CWFlDqHy.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="/assets/apple-touch-icon-DJk6sL_C.png"
+    />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@24,300,0,0;24,400,1,0"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&display=swap"
+      rel="stylesheet"
+    />
+    <meta
+      name="description"
+      content="Hyperfocus is a goals-first planner that helps you choose what matters most, shape weeks and days around it, and move it forward with focused work."
+    />
+
+    <script src="https://fast.wistia.com/player.js" async></script>
+    <script
+      src="https://fast.wistia.com/embed/yaoveos388.js"
+      type="module"
+    ></script>
+    <script type="module" crossorigin src="/assets/main-foDo0Cvb.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-CufOTVcg.css">
+      <script>
+!function(t,e){var o,n,p,r;e.__SV||(window.posthog && window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}p||((p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",p.onerror=function(){p=null},(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r));var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="an ln init xn Cn Br kn In capture Fn nn calculateEventProperties On register register_once register_for_session unregister unregister_for_session Ln getFeatureFlag getFeatureFlagPayload getFeatureFlagResult getAllFeatureFlags isFeatureEnabled reloadFeatureFlags updateFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey cancelPendingSurvey canRenderSurvey canRenderSurveyAsync Dn identify setPersonProperties unsetPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset shutdown setIdentity clearIdentity get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException addExceptionStep captureLog startExceptionAutocapture stopExceptionAutocapture loadToolbar get_property getSessionProperty An Rn createPersonProfile setInternalOrTestUser $n yn jn opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing get_explicit_consent_status is_capturing clear_opt_in_out_capturing Tn debug Ur Rt getPageViewId captureTraceFeedback captureTraceMetric pn".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+var normalizeMarketingPathname = function normalizeMarketingPathname(pathname) {
+	return pathname.replace(/\/index\.html$/, "").replace(/\/$/, "") || "/";
+};
+var behaviorMapEnabled = (function isBehaviorMapPath(pathname) {
+	return normalizeMarketingPathname(pathname) === "/";
+})(window.location.pathname);
+posthog.init("phc_UhlUGwr66xAa392TPrk9jrffChddyFKnzhSL3BMB0lm", {
+  api_host: "https://v.hyperfocus.in",
+  ui_host: "https://us.posthog.com",
+  defaults: "2026-05-30",
+  person_profiles: "identified_only",
+  cookieless_mode: "always",
+  capture_pageview: true,
+  autocapture: behaviorMapEnabled,
+  capture_heatmaps: behaviorMapEnabled,
+  capture_pageleave: behaviorMapEnabled,
+  disable_session_recording: true,
+  disable_surveys: true,
+  capture_exceptions: false,
+  capture_performance: false,
+  advanced_disable_feature_flags: true,
+  before_send: function enforceMarketingSiteSurface(event) {
+	if (!event) return event;
+	event.properties ||= {};
+	event.properties.surface = "marketing_site";
+	return event;
+}
+});
+</script>
+  </head>
+  <body class="font-sans bg-white text-gray-950 overflow-x-hidden antialiased">
+    <header class="site-header bg-white">
+  <div
+    class="site-header-inner page-shell flex items-center justify-between"
+  >
+    <a
+      href="/"
+      class="inline-flex items-center no-underline"
+      aria-label="Hyperfocus home"
+    >
+      <img src="/assets/logo-WgHjoNjJ.svg" alt="Hyperfocus" class="h-[16px] w-auto" />
+    </a>
+    <nav class="flex items-center gap-4">
+      <a
+        href="/download/mac"
+        class="btn-ghost btn-sm"
+        data-analytics-event="app download clicked"
+        data-analytics-platform="macos"
+        data-analytics-location="header"
+        >Download for macOS</a
+      >
+    </nav>
+  </div>
+</header>
+
+    <!-- ── Hero ───────────────────────────────────────── -->
+    <section class="hero-grid relative overflow-hidden pt-4 pb-20">
+      <div class="page-shell">
+        <div class="relative z-10 max-w-[800px] mb-6">
+          <h1
+            class="heading-hero hero-title mt-3 mb-2 text-gray-950 max-w-[720px]"
+          >
+              Free planner that turns goals into daily progress.
+          </h1>
+          <p
+            class="body-lg hero-subtitle mb-3 text-gray-500 max-w-[660px] 2xl:max-w-[720px]"
+          >
+              Choose the few goals that matter most, plan weeks and days around them, and finally make progress by doing focused work.
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <a
+              href="/download/mac"
+              class="btn-primary btn-download"
+              data-analytics-event="app download clicked"
+              data-analytics-platform="macos"
+              data-analytics-location="home_hero"
+              ><img
+                src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20xml:space='preserve'%20width='814'%20height='1000'%3e%3cpath%20d='M788.1%20340.9c-5.8%204.5-108.2%2062.2-108.2%20190.5%200%20148.4%20130.3%20200.9%20134.2%20202.2-.6%203.2-20.7%2071.9-68.7%20141.9-42.8%2061.6-87.5%20123.1-155.5%20123.1s-85.5-39.5-164-39.5c-76.5%200-103.7%2040.8-165.9%2040.8s-105.6-57-155.5-127C46.7%20790.7%200%20663%200%20541.8c0-194.4%20126.4-297.5%20250.8-297.5%2066.1%200%20121.2%2043.4%20162.7%2043.4%2039.5%200%20101.1-46%20176.3-46%2028.5%200%20130.9%202.6%20198.3%2099.2zm-234-181.5c31.1-36.9%2053.1-88.1%2053.1-139.3%200-7.1-.6-14.3-1.9-20.1-50.6%201.9-110.8%2033.7-147.1%2075.8-28.5%2032.4-55.1%2083.6-55.1%20135.5%200%207.8%201.3%2015.6%201.9%2018.1%203.2.6%208.4%201.3%2013.6%201.3%2045.4%200%20102.5-30.4%20135.5-71.3z'/%3e%3c/svg%3e"
+                class="apple-logo relative top-[-1px]"
+                alt=""
+                aria-hidden="true"
+              />Download for Mac</a
+            >
+            <a
+              href="https://www.producthunt.com/products/hyperfocus-2?embed=true&amp;utm_source=badge-top-post-badge&amp;utm_medium=badge&amp;utm_campaign=badge-hyperfocus-3"
+              class="ml-2 shrink-0"
+              target="_blank"
+              rel="noopener noreferrer"
+              >
+              <img
+                alt="Hyperfocus - Planner that turns goals into daily progress | Product Hunt"
+                width="250"
+                height="54"
+                src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1225037&amp;theme=light&amp;period=daily&amp;t=1788159833436"
+              />
+            </a>
+          </div>
+        </div>
+
+        <div class="hero-mock-composition relative z-10">
+          <div
+            class="app-window hero-window relative border border-gray-200 bg-white"
+          >
+            <div class="desktop-mock">
+              <div
+                class="relative flex items-center justify-center bg-white overflow-hidden"
+              >
+                <div
+                  id="hero-plan-mock"
+                  class="h-full w-full"
+                  aria-label="Interactive Hyperfocus planning mock"
+                ></div>
+              </div>
+            </div>
+            <picture class="responsive-screenshot">
+              <source
+                srcset="/assets/hero-LdUgIVSP.webp 2x"
+                type="image/webp"
+              />
+              <img
+                src="/assets/hero-CiQUOv4a.png"
+                srcset="/assets/hero-CiQUOv4a.png 2x"
+                width="2080"
+                height="1436"
+                alt="Hyperfocus planning board showing Long-term and Weekly cycles"
+                class="block w-full h-auto"
+              />
+            </picture>
+          </div>
+
+          <div
+            id="hero-agent-mock"
+            class="hero-agent-mock-mount hero-agent-reveal"
+            aria-hidden="true"
+            inert
+          ></div>
+        </div>
+      </div>
+      <div class="hero-agent-reveal-trigger" aria-hidden="true"></div>
+    </section>
+
+
+    <!-- ── Manifesto ──────────────────────────────────── -->
+    <section
+      id="manifesto"
+      class="manifesto"
+      aria-labelledby="manifesto-heading"
+    >
+      <article class="manifesto-letter">
+        <div class="manifesto-copy">
+          <p>
+            <strong>Task managers got it backward.</strong>
+          </p>
+
+          <p>
+            They all promised you the same thing – that if you capture more, organize more, and keep up with more, you’ll finally get everything under control.
+          </p>
+
+          <p>
+              I believe this is backward.
+          </p>
+
+          <p>
+            When everything starts from an inbox, you’re reacting to things instead of spending time on goals that actually matter. You organize things. Process things. Jump between things. You feel busy, but not always productive.
+          </p>
+
+          <p>
+            Yet there’s another way to work.
+          </p>
+
+          <p>With Hyperfocus, you start from “What do I want to achieve in the coming months?” It takes time to answer. But when you finally have it, the rest falls into place. You start feeling focused. Committed. Moving forward. Making progress toward goals that are actually yours.</p>
+
+          <p>
+            That's how I work. And if this resonates, I invite you to try Hyperfocus. Download the app, play around, and see if it fits.
+          </p>
+        </div>
+
+        <address class="manifesto-signoff">
+          <img
+            src="/assets/headshot-CfQZlkJI.jpeg"
+            width="900"
+            height="900"
+            loading="lazy"
+            decoding="async"
+            alt="Dmitri, maker of Hyperfocus"
+            class="manifesto-headshot"
+          />
+          <div class="manifesto-signoff-copy">
+            <strong>Dmitri Tcepelev</strong>
+            <a href="/cdn-cgi/l/email-protection#cbafa6a2bfb9a28ba3b2bbaeb9ada4a8beb8e5a2a5"><span class="__cf_email__" data-cfemail="70141d19040219301809001502161f1305035e191e">[email&#160;protected]</span></a>
+            <span>Maker of Hyperfocus</span>
+          </div>
+        </address>
+      </article>
+    </section>
+
+    <!-- ── How it works ──────────────────────────────── -->
+    <section
+      id="how-it-works"
+      class="how-it-works"
+      aria-labelledby="how-it-works-heading"
+    >
+      <div class="page-shell">
+        <header class="how-it-works-header">
+          <h2 id="how-it-works-heading" class="how-it-works-title">
+              A method that puts goals first.
+          </h2>
+        </header>
+
+        <div class="workflow-overview">
+          <ol class="workflow-flow" aria-label="Hyperfocus planning flow">
+            <li class="workflow-stage">
+              <span class="workflow-stage-marker" aria-hidden="true">
+                <span class="material-symbols-sharp">flag</span>
+              </span>
+              <span class="workflow-stage-label">Goals</span>
+            </li>
+            <li class="workflow-stage">
+              <span class="workflow-stage-marker" aria-hidden="true">
+                <span class="material-symbols-sharp">view_week</span>
+              </span>
+              <span class="workflow-stage-label">Weeks</span>
+            </li>
+            <li class="workflow-stage">
+              <span class="workflow-stage-marker" aria-hidden="true">
+                <span class="material-symbols-sharp">today</span>
+              </span>
+              <span class="workflow-stage-label">Days</span>
+            </li>
+            <li class="workflow-stage">
+              <span class="workflow-stage-marker" aria-hidden="true">
+                <span class="material-symbols-sharp">timer</span>
+              </span>
+              <span class="workflow-stage-label">Focus blocks</span>
+            </li>
+          </ol>
+        </div>
+
+        <button
+          type="button"
+          class="tour-teaser"
+          data-tour-open
+          aria-haspopup="dialog"
+          aria-controls="tour-dialog"
+        >
+          <span class="tour-teaser-media" aria-hidden="true">
+            <img
+              src="/assets/head-i0gRQqm1.webp"
+              width="280"
+              height="176"
+              loading="lazy"
+              decoding="async"
+              alt=""
+            />
+            <span class="tour-play-icon">
+              <span class="material-symbols-sharp">play_circle</span>
+            </span>
+          </span>
+          <span class="tour-teaser-copy">
+            <span>Watch a 2 minute tour</span>
+            <span class="material-symbols-sharp" aria-hidden="true">arrow_forward</span>
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <dialog
+      id="tour-dialog"
+      class="tour-dialog"
+      aria-label="Take a 2 minute tour of Hyperfocus"
+      tabindex="-1"
+      autofocus
+    >
+      <button
+        type="button"
+        class="tour-dialog-close"
+        data-tour-close
+        aria-label="Close video"
+      >
+        <span class="material-symbols-sharp" aria-hidden="true">close</span>
+      </button>
+      <wistia-player
+        class="tour-video"
+        media-id="yaoveos388"
+        aspect="1.5384615384615385"
+        rounded-player="0"
+        player-border-radius="0"
+      ></wistia-player>
+    </dialog>
+
+    <!-- ── Value propositions ───────────────────────────── -->
+    <div class="value-props-section">
+      <div class="page-shell">
+        <div class="value-props">
+          <article class="value-prop value-prop--wide">
+            <div class="value-prop-copy value-prop-copy--wide">
+              <h3 class="value-prop-title">
+                  Your plans, connected to what matters.
+              </h3>
+              <p class="value-prop-subtitle">
+                Stay focused on what matters most by connecting long-term goals
+                to your weekly and daily plans in one workspace.
+              </p>
+            </div>
+            <div
+              class="value-prop-media value-prop-media--wide"
+            >
+              <picture class="value-prop-picture">
+                <source
+                  media="(max-width: 720px)"
+                  srcset="/assets/connected-goals-mobile-CwenwoYD.webp"
+                  type="image/webp"
+                  width="2971"
+                  height="1864"
+                />
+                <source
+                  media="(max-width: 720px)"
+                  srcset="/assets/connected-goals-mobile-C9hfEzqj.png"
+                  width="2971"
+                  height="1864"
+                />
+                <source
+                  srcset="/assets/connected-goals-PA5qXU7i.webp"
+                  type="image/webp"
+                />
+                <img
+                  src="/assets/connected-goals-ZoxmkM_E.png"
+                  width="2936"
+                  height="1307"
+                  loading="lazy"
+                  decoding="async"
+                  alt="A long-term goal connected to its weekly and daily plans"
+                  class="value-prop-image"
+                />
+              </picture>
+            </div>
+          </article>
+
+          <article id="hyperfocus-ai" class="value-prop value-prop--split">
+            <div class="value-prop-copy">
+              <h3 class="value-prop-title">
+                Second opinion on your goals and plans.
+              </h3>
+              <p class="value-prop-subtitle">
+                Hyperfocus AI reviews your goals and plans as you write,
+                flagging vague outcomes, unrealistic scope, and missing next
+                steps. Apply the feedback yourself – or work through it with an
+                assistant built for goal-setting, prioritization, and planning.
+              </p>
+            </div>
+            <div
+              class="value-prop-media value-prop-media--ai"
+            >
+              <picture class="value-prop-picture">
+                <source
+                  srcset="/assets/second-opinion-BZe0LbSb.webp"
+                  type="image/webp"
+                />
+                <img
+                  src="/assets/second-opinion-CwaH4xDf.png"
+                  width="1129"
+                  height="911"
+                  loading="lazy"
+                  decoding="async"
+                  alt="Real-time planning feedback beside guidance from the Hyperfocus assistant"
+                  class="value-prop-image"
+                />
+              </picture>
+            </div>
+          </article>
+
+          <article class="value-prop value-prop--split">
+            <div class="value-prop-copy">
+              <h3 class="value-prop-title">
+                  Your next step, always clear.
+              </h3>
+              <p class="value-prop-subtitle">
+                A quick weekly and daily planning ritual narrows everything down
+                to one clear next step – so you can spend less time deciding,
+                and more time doing.
+              </p>
+            </div>
+            <div
+              class="value-prop-media value-prop-media--bottom"
+            >
+              <picture class="value-prop-picture">
+                <source
+                  srcset="/assets/planning-rituals-Dfmt8WSs.webp"
+                  type="image/webp"
+                />
+                <img
+                  src="/assets/planning-rituals-jSG0Zn2d.png"
+                  width="1629"
+                  height="1569"
+                  loading="lazy"
+                  decoding="async"
+                  alt="Weekly planning and review rituals in Hyperfocus"
+                  class="value-prop-image"
+                />
+              </picture>
+            </div>
+          </article>
+
+          <article class="value-prop value-prop--split">
+            <div class="value-prop-copy">
+              <h3 class="value-prop-title">
+                  Turn plans into progress, one block at a time.
+              </h3>
+              <p class="value-prop-subtitle">
+                  Make progress with time-boxed sessions where you focus on one task at a time.
+              </p>
+            </div>
+            <div
+              class="value-prop-media value-prop-media--focus"
+            >
+              <picture class="value-prop-picture">
+                <source srcset="/assets/focus-block-progress-CTqJ5kYj.webp" type="image/webp" />
+                <img
+                  src="/assets/focus-block-progress-Zpim63eo.png"
+                  width="1446"
+                  height="801"
+                  loading="lazy"
+                  decoding="async"
+                  alt="A recurring focus block in Hyperfocus, with one task selected for the session"
+                  class="value-prop-image"
+                />
+              </picture>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Frequently asked questions ─────────────────── -->
+    <section id="faq" class="faq" aria-labelledby="faq-heading">
+      <div class="page-shell">
+        <div class="faq-layout">
+          <header class="faq-header">
+            <h2 id="faq-heading" class="heading-xl">FAQ</h2>
+            <p class="value-prop-subtitle">
+              If you can’t find the answer to your question below, email me
+              <a href="/cdn-cgi/l/email-protection#fb9f96928f8992bb93828b9e899d94988e88d59295" class="text-gray-700 underline underline-offset-4 transition-colors hover:text-red-500"><span class="__cf_email__" data-cfemail="bdd9d0d4c9cfd4fdd5c4cdd8cfdbd2dec8ce93d4d3">[email&#160;protected]</span></a
+              >
+            </p>
+          </header>
+
+          <div class="faq-list">
+            <details class="faq-item">
+              <summary class="faq-summary">
+                <span class="faq-question">
+                  Is Hyperfocus really free? What’s included?
+                </span>
+                <span class="faq-toggle" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-answer">
+                <p>
+                  Yes. Hyperfocus is free forever. There is no Pro subscription, paid plan, or pack of AI credits to buy.
+                </p>
+              </div>
+            </details>
+            <details class="faq-item">
+              <summary class="faq-summary">
+                <span class="faq-question">
+                    How does AI work? Is it also free?
+                </span>
+                <span class="faq-toggle" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-answer">
+                  <p>
+                    All AI features use third-party AI providers. Hyperfocus includes AI for your first 14 days, so you can try every AI feature without setting anything up. After that, you can connect your own OpenRouter account, add a few dollars, and pay as you go. You pay the provider directly. I don’t take a cut or make money from your AI usage.
+                  </p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-summary">
+                <span class="faq-question">
+                  What does Hyperfocus AI do, and can I use Hyperfocus without
+                  it?
+                </span>
+                <span class="faq-toggle" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-answer">
+                <p>
+                  First, Hyperfocus AI reviews your goals
+                  and plans as you write, flagging vague and unrealistic plans. Like Grammarly, but for planning.
+                </p>
+                <p>
+                  Second, it includes purpose-built planning skills that help
+                  you clarify your priorities, choose what matters, and break
+                  goals down into workable steps.
+                </p>
+                <p>AI is optional. You can use the planner without it.</p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-summary">
+                <span class="faq-question">
+                  Which operating systems does Hyperfocus support?
+                </span>
+                <span class="faq-toggle" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-answer">
+                <p>Hyperfocus is currently available only for macOS.</p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-summary">
+                <span class="faq-question">
+                  How is Hyperfocus different from a task manager or to-do app?
+                </span>
+                <span class="faq-toggle" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-answer">
+                <p>
+                  Most task managers start with an inbox – they are great at helping you collect and organize tasks.
+                </p>
+                <p>
+                    Hyperfocus starts with your goals. It is great at identifying the outcomes that matter most and helping you consistently make progress toward them.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-summary">
+                <span class="faq-question">Where is my data stored?</span>
+                <span class="faq-toggle" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-answer">
+                <p>
+                  Hyperfocus is local-first. Your goals, plans, and tasks are
+                  stored locally on your Mac, and the planner works offline.
+                </p>
+                <p>
+                  If you use AI, the parts of your plan relevant to your
+                  request may be sent to the third-party AI provider handling
+                  it, such as Google or OpenAI. For the included AI usage,
+                  requests are sent under a no-logging policy.
+                </p>
+                <p>
+                  If you connect your AI provider, that provider’s logging and
+                  data-handling policy applies.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Final CTA ──────────────────────────────────── -->
+    <section id="cta" class="cta-grid relative overflow-hidden py-32">
+      <div class="page-shell">
+        <div class="relative z-10 max-w-[720px]">
+          <h2 class="heading-hero mt-3 mb-4 max-w-[720px]">
+              Start making progress on your goals today.
+          </h2>
+          <a
+            href="/download/mac"
+            class="btn-primary btn-download mt-1"
+            data-analytics-event="app download clicked"
+            data-analytics-platform="macos"
+            data-analytics-location="home_final_cta"
+            ><img
+              src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20xml:space='preserve'%20width='814'%20height='1000'%3e%3cpath%20d='M788.1%20340.9c-5.8%204.5-108.2%2062.2-108.2%20190.5%200%20148.4%20130.3%20200.9%20134.2%20202.2-.6%203.2-20.7%2071.9-68.7%20141.9-42.8%2061.6-87.5%20123.1-155.5%20123.1s-85.5-39.5-164-39.5c-76.5%200-103.7%2040.8-165.9%2040.8s-105.6-57-155.5-127C46.7%20790.7%200%20663%200%20541.8c0-194.4%20126.4-297.5%20250.8-297.5%2066.1%200%20121.2%2043.4%20162.7%2043.4%2039.5%200%20101.1-46%20176.3-46%2028.5%200%20130.9%202.6%20198.3%2099.2zm-234-181.5c31.1-36.9%2053.1-88.1%2053.1-139.3%200-7.1-.6-14.3-1.9-20.1-50.6%201.9-110.8%2033.7-147.1%2075.8-28.5%2032.4-55.1%2083.6-55.1%20135.5%200%207.8%201.3%2015.6%201.9%2018.1%203.2.6%208.4%201.3%2013.6%201.3%2045.4%200%20102.5-30.4%20135.5-71.3z'/%3e%3c/svg%3e"
+              class="apple-logo"
+              alt=""
+              aria-hidden="true"
+            />Download for Mac</a
+          >
+        </div>
+      </div>
+    </section>
+
+    <footer class="border-t border-gray-100 py-4">
+  <div
+    class="page-shell flex items-center justify-between flex-wrap gap-2"
+  >
+    <span class="font-mono text-[11px] text-gray-400"
+      >&copy; 2026 Hyperfocus</span
+    >
+    <nav class="flex items-center gap-4 font-mono text-[11px]">
+      <a class="legal-footer-link" href="/terms/">Terms</a>
+      <a class="legal-footer-link" href="/privacy/">Privacy</a>
+      <a class="legal-footer-link" href="/cdn-cgi/l/email-protection#86e2ebf2f5c6eefff6e3f4e0e9e5f3f5a8efe8">Contact</a>
+    </nav>
+  </div>
+</footer>
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ad9f3ec86c84d9',t:'MTc4OTM3MDM1Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
