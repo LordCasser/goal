@@ -257,14 +257,17 @@ pub(crate) fn reset_for_test(dir: PathBuf, level: Level) {
     logger.max_files.store(MAX_LOG_FILES, Ordering::Relaxed);
 }
 
+/// Test-only serializer for the process-global logger. Logging's own tests
+/// re-point the logger at their own directories (`reset_for_test`); tests
+/// elsewhere in the crate that can log while one of those runs (e.g. the
+/// provider-store corrupt-file recovery warn) hold the same lock so their
+/// lines cannot land in a foreign test's files or shift its rotations.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The logger is global, so these tests interfere with each other; this
-    /// lock serializes them (each one re-points the logger at its own temp
-    /// directory via `reset_for_test`).
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn read_log(dir: &Path) -> String {
         std::fs::read_to_string(dir.join(LOG_FILE)).unwrap_or_default()

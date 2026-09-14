@@ -2,6 +2,7 @@
 //! the returned [`Mutation`] into event emissions. They never touch SQL
 //! directly; the full command contract lives in `docs/architecture.md`.
 
+pub mod ai_settings;
 pub mod cycles;
 pub mod editor;
 pub mod later;

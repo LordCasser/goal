@@ -27,7 +27,10 @@ pub fn get(db: &Db) -> AppResult<Settings> {
         .and_then(|v| v.parse::<i64>().ok())
         .filter(|v| is_valid_week_start_day(*v));
     let theme = repo::get(&conn, repo::KEY_THEME)?.filter(|v| is_valid_theme(v));
-    Ok(Settings { week_start_day, theme })
+    Ok(Settings {
+        week_start_day,
+        theme,
+    })
 }
 
 /// The two user-confirmed light themes (design.md §4.4).
@@ -56,7 +59,11 @@ pub fn set_log_level(db: &Db, level: String) -> AppResult<()> {
         )
     })?;
     let conn = db.pool().get()?;
-    repo::set(&conn, repo::KEY_LOG_LEVEL, parsed.label().to_lowercase().as_str())?;
+    repo::set(
+        &conn,
+        repo::KEY_LOG_LEVEL,
+        parsed.label().to_lowercase().as_str(),
+    )?;
     crate::logging::set_level(parsed);
     Ok(())
 }

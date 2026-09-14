@@ -35,10 +35,9 @@ fn full_chain_walkthrough_accrues_focus_time() {
     .unwrap()
     .value;
     cycles::start_cycle(&test.db, &session.id, common::NOW + 1).unwrap();
-    let finished =
-        cycles::finish_cycle(&test.db, &session.id, common::NOW + 1 + 32 * 60 * 1000)
-            .unwrap()
-            .value;
+    let finished = cycles::finish_cycle(&test.db, &session.id, common::NOW + 1 + 32 * 60 * 1000)
+        .unwrap()
+        .value;
 
     assert!(finished.started && finished.finished);
     let expected = 32 * 60 * 1000;
@@ -69,8 +68,8 @@ fn backup_exports_and_restores_into_a_fresh_location() {
         .iter()
         .find(|c| c.id == month.id)
         .expect("cycle survives restore");
-    let tasks_state = planner_lib::service::editor::get_editor_workspace(&restored, &month.id)
-        .unwrap();
+    let tasks_state =
+        planner_lib::service::editor::get_editor_workspace(&restored, &month.id).unwrap();
     assert!(
         tasks_state
             .tasks
@@ -89,7 +88,6 @@ fn debug_log_lands_in_log_dir_with_module_and_level() {
     let logs = dir.path().join("logs");
     planner_lib::logging::init(logs.clone(), Some(planner_lib::logging::Level::Info));
     planner_lib::logging::info("app", "acceptance smoke line");
-    let contents =
-        std::fs::read_to_string(logs.join("planner.log")).expect("log file readable");
+    let contents = std::fs::read_to_string(logs.join("planner.log")).expect("log file readable");
     assert!(contents.contains("[INFO] [app] acceptance smoke line"));
 }

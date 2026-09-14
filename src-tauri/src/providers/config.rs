@@ -646,6 +646,12 @@ mod tests {
 
     #[test]
     fn corrupt_file_is_backed_up_and_recoverable() {
+        // The recovery path emits a warn into the process-global logger;
+        // hold the logging test lock so that line cannot land in (and rotate)
+        // a concurrently running logging test's files.
+        let _logging = crate::logging::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join(FILE_NAME);
         std::fs::write(&file, "{ this is not json").expect("corrupt file");

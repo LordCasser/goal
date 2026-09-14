@@ -26,11 +26,18 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = db::init(&handle)?;
-            let log_dir = db::data_dir(&handle)?.join("logs");
+            let data_dir = db::data_dir(&handle)?;
             let initial_level = persisted_log_level(&state);
             app.manage(state);
 
-            logging::init(log_dir, initial_level);
+            // AI settings state (task 4.1): provider metadata from
+            // providers.json in the same data directory, credentials from the
+            // system keychain. Loaded before `manage` so commands never see a
+            // half-initialized store.
+            let ai_settings = providers::service::AiSettingsState::load(&data_dir)?;
+            app.manage(ai_settings);
+
+            logging::init(data_dir.join("logs"), initial_level);
             logging::info("app", "app started");
             Ok(())
         })
@@ -80,6 +87,14 @@ pub fn run() {
             commands::settings::set_log_level,
             commands::settings::get_app_flag,
             commands::settings::set_app_flag,
+            // ai settings
+            commands::ai_settings::get_ai_settings,
+            commands::ai_settings::save_provider,
+            commands::ai_settings::delete_provider,
+            commands::ai_settings::set_active_provider,
+            commands::ai_settings::save_provider_api_key,
+            commands::ai_settings::remove_provider_api_key,
+            commands::ai_settings::test_provider_connection,
             // maintenance
             commands::maintenance::get_schema_version,
             commands::maintenance::export_backup,
