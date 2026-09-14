@@ -65,26 +65,34 @@ src-tauri/src/
 ├── repository/
 │   ├── cycles.rs
 │   ├── tasks.rs
+│   ├── settings.rs    app_settings 键值
 │   └── proposals.rs
 ├── service/
 │   ├── cycles.rs      创建/启动/结束/复制/删除守卫
 │   ├── tasks.rs       增删改、移动、链接、着色
+│   ├── settings.rs    主题/日志级别/一次性提示等设置用例
+│   ├── editor.rs      编辑态工作区（树 + Markdown 渲染）
 │   └── proposals.rs   预览写入、Keep/Revert
+├── logging/           统一本地调试日志（级别/滚动/脱敏；纯本地零出网）
+├── providers/         BYOK 供应商配置（providers.json）与钥匙串凭据
+├── sampling/          三协议采样客户端（统一事件流 + 错误分类）
 ├── events.rs          CycleEvent / TaskEvent 发射器
 └── commands/
     ├── mod.rs         命令注册清单
-    ├── cycles.rs
-    ├── tasks.rs
-    └── proposals.rs
+    ├── cycles.rs / tasks.rs / editor.rs / later.rs / repeats.rs
+    ├── proposals.rs / settings.rs / maintenance.rs
+    └── ai_settings.rs BYOK 供应商设置命令
 
 src/
-├── main.tsx / App.tsx
-├── lib/ipc.ts         命令封装（唯一 invoke 出口）
-├── lib/events.ts      事件订阅
-├── features/planner/  工作台：横向周期列
-├── features/later/    Do Later 侧栏
-├── features/proposals/待确认改动底栏
-└── ui/                基础组件（Button/Input/Dialog/...）
+├── main.tsx / App.tsx 外壳：统一窗口栏 + 面板布局 + ⌘⇧L
+├── lib/ipc.ts         命令封装（唯一 invoke 出口，类型从 Rust 推导）
+├── lib/events.ts      事件订阅 → react-query 失效（qk key 工厂）
+├── lib/theme.ts       白底/灰底双主题运行时（data-theme 切换）
+├── features/planner/  工作台：横向周期列、时长弹窗、专注块、任务编辑
+├── features/later/    Do Later 侧栏（一次性说明卡经 app flag 持久化）
+├── features/proposals/待确认改动底栏（Keep/Revert all）
+├── features/settings/ 设置弹窗（主题/周起始日/日志级别/日志目录）
+└── ui/                基础组件（Button/Input/Checkbox/Dialog/Popover/EmptyState/ProgressDot）
 ```
 
 ## 数据模型
@@ -241,14 +249,15 @@ Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日�
 
 | 组 | 命令 |
 | --- | --- |
-| 周期 | `get_planner_state` `create_planning_cycle` `update_cycle` `delete_planning_cycle` `get_cycle_deletion_preview` `start_cycle` `finish_cycle` `add_session` `reorder_sessions` `copy_uncompleted_from_previous` |
+| 周期 | `get_planner_state` `list_sessions` `create_planning_cycle` `update_cycle` `delete_planning_cycle` `get_cycle_deletion_preview` `start_cycle` `finish_cycle` `add_session` `reorder_sessions` `copy_uncompleted_from_previous` `ensure_day` |
 | 任务 | `add_task` `update_task` `patch_task` `delete_task` `move_task` `reorder_tasks` `set_task_parent_link` `set_task_root_color` |
 | 编辑态 | `get_editor_workspace` `get_editor_workspaces_by_cycle_ids` |
 | 重复日程 | `add_repeat` `update_repeat` `stop_repeat` |
 | 预览 | `get_preview_summary` `keep_task_preview` `undo_task_preview` `keep_all_previews` `undo_all_previews` |
 | Do Later | `add_later_goal` `promote_later_goal` |
-| 设置 | `get_settings` `set_week_start_day` |
+| 设置 | `get_settings` `set_week_start_day` `set_theme` `set_log_level` `get_app_flag` `set_app_flag` |
 | 维护 | `export_backup` `get_schema_version` `get_debug_log_dir` |
+| AI 设置 | `get_ai_settings` `save_provider` `delete_provider` `set_active_provider` `save_provider_api_key` `remove_provider_api_key` `test_provider_connection` |
 
 事件（Rust → 前端）：
 
@@ -289,7 +298,7 @@ react-query 缓存 ←────────── 失效并重取 ←──�
 
 ## 设置
 
-`app_settings` 表存键值（`week_start_day`、`last_seen_version` 等非敏感项）。凭据类数据走系统钥匙串，**不进数据库、不进配置文件、不进日志**。
+`app_settings` 表存键值（`week_start_day`、`theme`、`log_level`、`hint.*` 一次性提示等非敏感项）。凭据类数据走系统钥匙串，**不进数据库、不进配置文件、不进日志**。主题经 `set_theme` 持久化（design.md §4.4），前端以 localStorage 作首帧缓存、app_settings 为持久真相。
 
 ## 派生优先于物化
 
