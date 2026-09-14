@@ -20,16 +20,10 @@ pub fn get_planner_state(db: State<'_, Db>) -> AppResult<cycles::PlannerState> {
 pub fn create_planning_cycle(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
-    telemetry: State<'_, crate::telemetry::Reporter>,
     args: CreateCycleArgs,
 ) -> AppResult<crate::domain::cycle::Cycle> {
     let today = calendar::today_local();
     let mutation = cycles::create_planning_cycle(&db, &args, today, crate::service::now_ms())?;
-    if args.cycle_type == "month" {
-        telemetry.record(crate::telemetry::TelemetryEvent::new(
-            crate::telemetry::EventName::LongTermCycleCreated,
-        ));
-    }
     emit_mutation(&app, &mutation);
     Ok(mutation.value)
 }
@@ -82,15 +76,9 @@ pub fn start_cycle(
 pub fn finish_cycle(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
-    telemetry: State<'_, crate::telemetry::Reporter>,
     cycle_id: String,
 ) -> AppResult<crate::domain::cycle::Cycle> {
     let mutation = cycles::finish_cycle(&db, &cycle_id, crate::service::now_ms())?;
-    if mutation.value.cycle_type == crate::domain::cycle::CycleType::Session {
-        telemetry.record(crate::telemetry::TelemetryEvent::new(
-            crate::telemetry::EventName::SessionFinished,
-        ));
-    }
     emit_mutation(&app, &mutation);
     Ok(mutation.value)
 }

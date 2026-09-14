@@ -247,8 +247,8 @@ Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日�
 | 重复日程 | `add_repeat` `update_repeat` `stop_repeat` |
 | 预览 | `get_preview_summary` `keep_task_preview` `undo_task_preview` `keep_all_previews` `undo_all_previews` |
 | Do Later | `add_later_goal` `promote_later_goal` |
-| 设置 | `get_settings` `set_week_start_day` `get_telemetry_settings` `set_telemetry_enabled` |
-| 维护 | `export_backup` `get_schema_version` `export_diagnostics` |
+| 设置 | `get_settings` `set_week_start_day` |
+| 维护 | `export_backup` `get_schema_version` `get_debug_log_dir` |
 
 事件（Rust → 前端）：
 
@@ -289,7 +289,7 @@ react-query 缓存 ←────────── 失效并重取 ←──�
 
 ## 设置
 
-`app_settings` 表存键值（`week_start_day`、`telemetry_enabled`、`last_seen_version` 等非敏感项）。凭据类数据走系统钥匙串，**不进数据库、不进配置文件、不进日志**。
+`app_settings` 表存键值（`week_start_day`、`last_seen_version` 等非敏感项）。凭据类数据走系统钥匙串，**不进数据库、不进配置文件、不进日志**。
 
 ## 派生优先于物化
 
@@ -302,17 +302,15 @@ react-query 缓存 ←────────── 失效并重取 ←──�
 
 同理**不引入修订号 / 版本向量 / 乐观并发控制**：单用户本地应用不存在并发写入，这些字段只增加复杂度。理由与证据见 `analysis/reports/10-requirement-evolution.md` §0x03、§0x05。
 
-## 遥测边界
+## 本地调试日志
 
-遥测是唯一允许的非必要出网流量（AI 除外），受 `openspec/specs/telemetry/spec.md` 约束：
+应用不含任何遥测（该能力于 2026-09-14 删除，规范 `openspec/specs/telemetry/spec.md` 已于 2026-09-15 移除）。替代能力是 `openspec/specs/local-logging/spec.md` 定义的统一本地调试日志：
 
-- 开关缺失即视为**未启用**
-- 事件载荷只允许枚举值、计数、时长；**不得包含任何自由文本**（目标标题、任务标题、笔记、周期名）
-- 匿名标识独立于设备指纹与授权标识
-- 上报不在业务关键路径同步等待，失败静默丢弃
-- 新增事件或字段时按"是否可能携带用户内容"审查
-
-关闭遥测 + 不使用 AI 时，应用在离线状态下应当零出网。
+- 全部模块经统一日志桩写本机日志文件；级别 error/warn/info/debug 可调
+- 日志纯本地：没有任何上报通道。除用户配置的 AI 供应商请求外，应用零出网
+- 凭据（API Key、令牌）绝不入日志；完整计划内容仅 debug 级别
+- 日志按大小滚动淘汰；写入失败静默，不影响业务
+- 设置页提供打开日志目录的入口（`get_debug_log_dir`）
 
 ## 验证入口
 

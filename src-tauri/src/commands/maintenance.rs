@@ -13,14 +13,6 @@ pub fn get_schema_version(db: State<'_, Db>) -> AppResult<i64> {
 
 /// Exports a self-contained database copy (WAL checkpointed first).
 #[tauri::command]
-pub fn export_backup(
-    db: State<'_, Db>,
-    telemetry: State<'_, crate::telemetry::Reporter>,
-    target_path: String,
-) -> AppResult<()> {
-    db::backup::export(&db, std::path::Path::new(&target_path))?;
-    telemetry.record(crate::telemetry::TelemetryEvent::new(
-        crate::telemetry::EventName::BackupExported,
-    ));
-    Ok(())
+pub fn export_backup(db: State<'_, Db>, target_path: String) -> AppResult<()> {
+    db::backup::export(&db, std::path::Path::new(&target_path))
 }

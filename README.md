@@ -6,6 +6,8 @@
 
 本轮重做需求的入口是 [核心 UX 候选基线](analysis/reports/30-core-ux-requirements.md)：35 条需求、70 个验收场景，附来源与优先级。[实际使用与证据复核](analysis/reports/31-product-use-and-evidence.md) 保存了同版本复测与资源身份校验；[待决策与缺口](analysis/reports/32-rebuild-decisions-and-gaps.md) 独立记录 12 个产品决策、4 项架构债务。[官网 UX/UI 复核](analysis/reports/33-website-ux-ui-review.md) 补充设计对照与需求差异，其中 **UXR-033「点击条目持续展示关联」是用户确认的额外需求**。候选需求尚未自动同步到既有 OpenSpec，重做前应先处理记录中的行为冲突。
 
+应用前端设计统一从 [design.md](design.md) 进入：依据原 App 与官网中的 App 界面展示，整理工作台布局、视觉规范、组件状态、交互规则和验收场景，不包含官网页面自身的设计。
+
 ---
 
 ## 这份仓库里有什么
@@ -15,6 +17,7 @@
 | `openspec/specs/` | **既有需求规范**，15 个能力 | 已整理的重建行为；本轮复测差异见 `32-rebuild-decisions-and-gaps.md` |
 | `openspec/changes/` | 变更提案（8 个：1 个重建 + 3 个补齐基线 + 4 个扩展） | 待实施 |
 | `docs/architecture.md` | 模块边界、依赖方向、数据所有权、IPC 契约 | 架构的唯一权威来源 |
+| `design.md` | **应用前端设计入口**：布局、视觉、组件状态、交互与验收映射 | 区分原 App / 官网 App 展示、首版建议和待决策项 |
 | `analysis/reports/30-core-ux-requirements.md` | **重做 UX 候选基线**：35 条需求、70 个验收场景 | 用于加入新想法、确定最终产品行为 |
 | `analysis/reports/31-product-use-and-evidence.md` | **实际产品复测**：24 组记录、20 张界面截图、19 个资源逐字节校验 | 本轮事实与未验证边界 |
 | `analysis/reports/32-rebuild-decisions-and-gaps.md` | **待决策与缺口**：产品规则、规范矛盾、独立架构债务 | 重做前需处理的差异 |
@@ -28,11 +31,11 @@
 | `analysis/evidence/` | 原始证据：数据库 schema、迁移史、还原出的前端、官网 DOM/CSS、UI 截图、符号表 | 未加工的原始材料 |
 | `src-tauri/` `src/` | 可编译的工程骨架（Tauri 2 + React 19） | 仅骨架，未实现业务逻辑 |
 
-### 三份材料的分工
+### 材料的分工
 
 - **要重建什么行为** → `openspec/specs/`（每条需求带可证伪的场景）
 - **技术怎么选、怎么搭** → `00-technical-report.md` + `docs/architecture.md`
-- **界面怎么交互** → `40-frontend-ux-deconstruction.md` + `design-system.md`
+- **应用界面怎么设计和交互** → [design.md](design.md)；原始依据保留在 `40-frontend-ux-deconstruction.md` 与 `analysis/reports/design-system.md`
 
 ---
 
@@ -96,12 +99,11 @@ openspec status --change rebuild-baseline
 
 | 变更 | 内容 | 任务数 | 依赖 |
 | --- | --- | --- | --- |
-| `rebuild-baseline` | 从零实现骨架与本地数据层（`skip_specs`） | 45 | — |
-| `add-ai-access-and-voice` | 设备指纹与授权令牌、托管通道、钥匙串凭据、PKCE、语音管线（`skip_specs`） | 47 | baseline |
+| `rebuild-baseline` | 从零实现骨架与本地数据层、本地调试日志（`skip_specs`；遥测章节已按产品决定替换为 `local-logging`） | 63 | — |
+| `add-ai-access-and-voice` | BYOK 供应商（三种 API 格式：Anthropic Messages / Chat Completions / Responses）、钥匙串凭据、模型设置页（`skip_specs`；已并入原 `add-local-llm-provider`，语音已移出范围） | 37 | baseline |
 | `add-ai-planning-core` | agent 回合与五个技能、工具集、GoalBreakdown、优先级、边写边审（`skip_specs`） | 62 | baseline + ai-access |
 | `add-onboarding-and-lifecycle` | 五步引导、一次性提示、退出调查、反馈、自动更新、专注块通知（`skip_specs`） | 39 | baseline |
 | `add-review-retrospective` | 周期复盘、未完成项去向、跨周期汇总、`review` 技能 | 33 | ai-planning-core |
-| `add-local-llm-provider` | Ollama / LM Studio（OpenAI 兼容）、能力探测 | 29 | ai-access |
 | `add-calendar-time-view` | 日历网格、单日时间轴、跨日期移动、时间预算 | 27 | baseline |
 | `add-reminders-notifications` | 任务/日/周期提醒、免打扰、启动补偿 | 30 | baseline |
 
@@ -112,7 +114,6 @@ openspec status --change rebuild-baseline
 | `planning-cycles` | rebuild-baseline | — |
 | `task-graph` | rebuild-baseline | — |
 | `session-repeats` | rebuild-baseline | — |
-| `telemetry` | rebuild-baseline | — |
 | `agent-proposals` | rebuild-baseline | — |
 | `local-persistence` | rebuild-baseline | — |
 | `planner-workspace` | rebuild-baseline | add-review-retrospective、add-calendar-time-view |
@@ -120,8 +121,8 @@ openspec status --change rebuild-baseline
 | `goal-clarification` | add-ai-planning-core | — |
 | `prioritization` | add-ai-planning-core | — |
 | `planning-issues` | add-ai-planning-core | — |
-| `ai-access` | add-ai-access-and-voice | add-local-llm-provider |
-| `voice-input` | add-ai-access-and-voice | — |
+| `ai-access` | add-ai-access-and-voice（2026-09-14 规范重写：纯 BYOK，无订阅/试用/托管） | — |
+| `voice-input` | —（已移出实现范围） | — |
 | `onboarding-guidance` | add-onboarding-and-lifecycle | — |
 | `app-lifecycle` | add-onboarding-and-lifecycle | add-reminders-notifications（专注块通知收敛） |
 
@@ -146,7 +147,7 @@ cd src-tauri && cargo check          # 后端编译检查
 npm run tauri dev                    # 启动应用
 ```
 
-> 前端只是占位。前端 UX 重建是独立任务，对照材料是 `analysis/reports/40-frontend-ux-deconstruction.md`。
+> 前端只是占位。前端重做从 [design.md](design.md) 进入，交互取证见 `analysis/reports/40-frontend-ux-deconstruction.md`。
 
 ---
 

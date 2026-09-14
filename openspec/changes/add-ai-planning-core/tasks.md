@@ -2,9 +2,9 @@
 
 - [ ] 1.1 `ai/llm/mod.rs`：`LlmProvider` trait（`generate_agent` / `generate_json`）、`AgentRequest` / `AgentResponse` / `LlmRequest` 类型
 - [ ] 1.2 工具定义类型：名称、描述、参数 JSON Schema；一个 assembler 收集全部工具定义
-- [ ] 1.3 `ai/llm/resolved.rs`：按设置解析当前 provider（`hyperfocus` / `openrouter` / `local`）
+- [ ] 1.3 `ai/llm/resolved.rs`：按设置解析激活的 BYOK 供应商（三种 API 格式之一；无激活项时 AI 不可用并给配置路径；`supports_tools=false` 时对话模式）
 - [ ] 1.4 `ai/llm/fake.rs`：`FakeProvider`，按脚本返回预置工具调用与文本，供测试使用（`#[cfg(test)]` 或 test 专用 feature）
-- [ ] 1.5 测试：请求/响应序列化往返；provider 解析在三种设置下的结果
+- [ ] 1.5 测试：请求/响应序列化往返；provider 解析在「有激活项 / 无激活项 / 不支持工具」三种设置下的结果
 
 ## 2. 会话与回合
 

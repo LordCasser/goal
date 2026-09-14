@@ -18,11 +18,9 @@ pub fn get_preview_summary(db: State<'_, Db>, cycle_id: String) -> AppResult<Pre
 pub fn keep_task_preview(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
-    telemetry: State<'_, crate::telemetry::Reporter>,
     task_id: String,
 ) -> AppResult<Task> {
     let mutation = proposals::keep_task_preview(&db, &task_id)?;
-    telemetry.record(crate::telemetry::TelemetryEvent::new(crate::telemetry::EventName::PreviewKept));
     emit_mutation(&app, &mutation);
     Ok(mutation.value)
 }
@@ -31,13 +29,9 @@ pub fn keep_task_preview(
 pub fn undo_task_preview(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
-    telemetry: State<'_, crate::telemetry::Reporter>,
     task_id: String,
 ) -> AppResult<()> {
     let mutation = proposals::undo_task_preview(&db, &task_id)?;
-    telemetry.record(crate::telemetry::TelemetryEvent::new(
-        crate::telemetry::EventName::PreviewReverted,
-    ));
     emit_mutation(&app, &mutation);
     Ok(())
 }

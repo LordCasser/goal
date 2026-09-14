@@ -17,7 +17,7 @@ context: |
   - 日期身份用本地日期字符串，不用 UTC 时间戳；`domain/calendar.rs` 是唯一处理日期的地方。
   - 密钥类数据只进系统钥匙串，不进数据库/配置文件/日志。
 
-  规范组织：openspec/specs/<capability>/spec.md，能力按职责切分（周期、任务、agent 会话、提议、澄清、优先级、计划问题、AI 访问、语音、引导、生命周期、本地存储、工作台）。
+  规范组织：openspec/specs/<capability>/spec.md，能力按职责切分（周期、任务、agent 会话、提议、澄清、优先级、计划问题、AI 访问、语音、引导、生命周期、本地存储、本地日志、工作台）。
 
 rules:
   proposal:

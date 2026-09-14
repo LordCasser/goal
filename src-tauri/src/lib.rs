@@ -2,9 +2,10 @@
 //!
 //! Layering and ownership are described in `docs/architecture.md`.
 //! This file only wires state and registers commands; no business rules live here.
+//!
+//! This application ships with no telemetry of any kind: there is no event
+//! collection, no reporting channel and no network call outside AI requests.
 
-// `pub` so integration tests can drive the real service/repository APIs
-// (see docs/architecture.md, 验证入口).
 pub mod commands;
 pub mod db;
 pub mod domain;
@@ -12,10 +13,6 @@ pub mod error;
 pub mod events;
 pub mod repository;
 pub mod service;
-pub mod telemetry;
-
-use std::sync::Arc;
-use std::time::Duration;
 
 use tauri::Manager;
 
@@ -25,23 +22,6 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = db::init(&handle)?;
-
-            // Telemetry stays off unless the persisted switch says otherwise.
-            // The sink is unconfigured until an endpoint ships with the AI
-            // change; batches are dropped silently in the meantime.
-            let reporter = telemetry::Reporter::spawn(
-                Arc::new(telemetry::UnconfiguredSink),
-                64,
-                8,
-                Duration::from_secs(10),
-            );
-            let enabled = telemetry::is_enabled(&state).unwrap_or(false);
-            reporter.set_enabled(enabled);
-            let errors = telemetry::ErrorCategories::default();
-            errors.set_enabled(enabled);
-
-            app.manage(reporter);
-            app.manage(errors);
             app.manage(state);
             Ok(())
         })
@@ -83,12 +63,9 @@ pub fn run() {
             commands::repeats::add_repeat,
             commands::repeats::update_repeat,
             commands::repeats::stop_repeat,
-            // settings & telemetry
+            // settings
             commands::settings::get_settings,
             commands::settings::set_week_start_day,
-            commands::settings::get_telemetry_settings,
-            commands::settings::set_telemetry_enabled,
-            commands::settings::export_diagnostics,
             // maintenance
             commands::maintenance::get_schema_version,
             commands::maintenance::export_backup,

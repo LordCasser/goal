@@ -24,4 +24,4 @@
 - 新增：本机数据库文件与应用配置文件（非仓库内容）
 - 依赖：Tauri 2、React 19、Vite、Tailwind、rusqlite（bundled）、r2d2
 - 不受影响：`openspec/specs/` 下的既有规范（本变更不修改任何需求）
-- 后续：`add-review-retrospective`、`add-local-llm-provider`、`add-calendar-time-view`、`add-reminders-notifications` 四个变更都建立在本变更之上
+- 后续：`add-ai-access-and-voice`（已并入原 `add-local-llm-provider`）、`add-review-retrospective`、`add-calendar-time-view`、`add-reminders-notifications` 建立在本变更之上

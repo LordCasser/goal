@@ -1,97 +1,103 @@
 ## Purpose
 
-定义 AI 能力的授权与供应商选择。规划器本身永久免费、无订阅；AI 只有「内置额度（限时）+ 自带凭据」两种状态，两种模式在 agent、语音等上层能力上必须表现一致。
+定义 AI 能力的接入方式：AI 完全通过用户自带凭据（BYOK）接入任意兼容供应商。系统不提供订阅、试用、托管额度或设备授权；AI 缺失或失败不影响任何本地功能。
+
+> 本规范于 2026-09-14 随产品决定清理：移除订阅与授权机制（设备指纹、授权令牌、试用/付费状态、托管 AI 通道）、OpenRouter 特化路径与语音相关条目；供应商模型泛化为 BYOK（三种 API 格式）。实现载体为 `openspec/changes/add-ai-access-and-voice/`（已并入原 `add-local-llm-provider`）。
 
 ## Requirements
 
-### Requirement: 无订阅的授权模型
+### Requirement: 无订阅与托管额度
 
-系统 MUST NOT 提供可购买的订阅、付费档位或 AI 额度包。授权的唯一作用是**控制内置 AI 额度的可用性**，MUST NOT 限制规划器本身的功能。
+系统 MUST NOT 提供订阅、付费档位、AI 额度包、内置托管 AI 或设备授权机制。AI 的唯一来源是用户自行配置的 BYOK 供应商。
 
-#### Scenario: 授权无效时的本地能力
-- **WHEN** 内置额度已用尽且未配置任何自带凭据
-- **THEN** 周期、任务、专注块、工作台、链接可视化等全部本地功能照常可用，不出现付费提示
-
-#### Scenario: 不存在购买入口
+#### Scenario: 不存在购买或授权入口
 - **WHEN** 用户查看设置
-- **THEN** 只有「内置 AI」与「自带凭据」两类配置项，没有购买、升级或额度包入口
+- **THEN** 只有供应商配置项，没有购买、升级、额度包、试用或账号登录入口
 
-#### Scenario: 额度用尽不阻断已达成的数据
-- **WHEN** 内置额度用尽
-- **THEN** 既有数据、未确认改动与历史会话全部保留且可继续操作
+#### Scenario: 未配置供应商
+- **WHEN** 用户未配置任何供应商
+- **THEN** 全部本地功能照常可用，AI 入口以可发现的方式引导到设置
 
-### Requirement: 设备绑定的授权令牌
+### Requirement: 供应商配置
 
-系统 SHALL 使用一个自包含的授权令牌表达权限状态，令牌 MUST 绑定设备指纹，包含签发时间、过期时间、状态与试用到期时间，状态取值限定为 `trial` / `paid` / `blocked`。设备指纹 SHALL 由硬件标识派生并加盐，MUST NOT 明文暴露原始硬件序列号。
+系统 SHALL 允许用户配置任意数量的自定义供应商，每条包含名称、Base URL、API 格式、API Key（可为空）与模型列表。API 格式 SHALL 限定为 Anthropic Messages（`/v1/messages`）、Chat Completions（`/v1/chat/completions`）、Responses（`/responses`）三种之一。同一配置模型 MUST 同时覆盖云端与本地端点，MUST NOT 为特定厂商或本地运行时设置专用接入路径。
 
-#### Scenario: 首次启动
-- **WHEN** 应用首次运行且本地无令牌
-- **THEN** 系统以设备指纹换取一条 `trial` 状态令牌并持久化
+#### Scenario: 添加供应商
+- **WHEN** 用户填写名称、Base URL、API 格式并至少添加一个模型后保存
+- **THEN** 配置持久化并出现在供应商列表
 
-#### Scenario: 令牌校验失败
-- **WHEN** 令牌的设备指纹与当前设备不匹配
-- **THEN** 判定为无效，界面提示 "Could not verify access. Check your connection and try again."
+#### Scenario: 本地运行时即普通供应商
+- **WHEN** 用户把 Base URL 指向本机端点（如 Ollama / LM Studio）并留空 API Key
+- **THEN** 保存成功，且该供应商在其他方面与云端供应商行为一致
 
-#### Scenario: 离线启动
-- **WHEN** 应用启动时无法连接授权服务且本地存在未过期令牌
-- **THEN** 应用按本地令牌状态继续运行，不阻断主流程
+#### Scenario: 校验失败
+- **WHEN** Base URL 不是 http(s) 或供应商没有任何模型
+- **THEN** 保存被拒并给出行内原因
 
-### Requirement: 供应商选择
+### Requirement: 供应商切换与解析
 
-系统 SHALL 在两个 AI 供应商之间切换：内置托管（`hyperfocus`）与用户自带 OpenRouter（`openrouter`）。切换后上层 agent 行为 MUST 保持一致。
+系统 SHALL 支持在已配置供应商之间切换激活项，切换后上层 agent 行为 MUST 保持一致。激活项的解析 MUST 是确定性的：有激活项时使用激活项；没有时 AI 不可用并给出配置路径，MUST NOT 自动挑选替代供应商。
 
-#### Scenario: 默认使用内置 AI
-- **WHEN** 用户在试用期内且未配置自有凭据
-- **THEN** 所有 agent 请求走托管后端
+#### Scenario: 切换激活供应商
+- **WHEN** 用户将另一供应商设为激活
+- **THEN** 后续 AI 请求走新供应商，界面标记该选项为已选
 
-#### Scenario: 切换到自有凭据
-- **WHEN** 用户选择 OpenRouter 并成功保存 API key
-- **THEN** 后续 agent 请求走 OpenRouter，设置界面标记该选项为已选
+#### Scenario: 删除激活供应商
+- **WHEN** 用户删除的正是激活供应商
+- **THEN** AI 回到未配置状态并引导到设置，不自动切换到其他供应商
 
 #### Scenario: 供应商状态不可读
 - **WHEN** 读取供应商配置失败
 - **THEN** 界面降级为未知状态并记录错误，不崩溃
 
+### Requirement: 模型元数据与显式降级
+
+每个模型 SHALL 携带用户声明的元数据：上下文窗口、最大输出 Token、输入/输出类型（文本必选）与工具调用支持。工具调用不受支持的模型 MUST 显式降级为「只能对话」的模式并在界面可见，MUST NOT 静默失败。
+
+#### Scenario: 声明模型元数据
+- **WHEN** 用户添加模型
+- **THEN** 填写模型 ID、上下文窗口、最大输出 Token、输入/输出类型与工具调用开关
+
+#### Scenario: 不支持工具调用
+- **WHEN** 激活模型的工具调用为关闭
+- **THEN** agent 保留对话与澄清能力，写操作入口停用并说明原因
+
+#### Scenario: 声明与实际不符
+- **WHEN** 实际请求因能力不满足而失败
+- **THEN** 错误显式呈现，系统不自动改写元数据
+
 ### Requirement: 凭据安全存储
 
-用户凭据 SHALL 存入系统钥匙串，MUST NOT 写入明文配置文件或日志。凭据的读取与删除 SHALL 有独立命令。
+用户凭据 SHALL 按供应商存入系统钥匙串，MUST NOT 写入明文配置文件或日志。本地端点 SHALL 允许空凭据。凭据的保存与删除 SHALL 有独立命令。
 
 #### Scenario: 保存 key
-- **WHEN** 用户提交 OpenRouter API key
-- **THEN** key 写入钥匙串，界面提示保存成功，配置文件不出现该 key
+- **WHEN** 用户提交某供应商的 API Key
+- **THEN** Key 写入钥匙串，配置文件与日志不出现该 Key
 
 #### Scenario: 移除 key
-- **WHEN** 用户移除凭据
-- **THEN** 钥匙串条目被删除且供应商切回可用状态
+- **WHEN** 用户移除某供应商的凭据
+- **THEN** 钥匙串条目被删除，该供应商回到未配置凭据状态
 
-#### Scenario: 通过 OAuth 连接
-- **WHEN** 用户选择通过 OpenRouter 账号授权
-- **THEN** 系统走 PKCE 授权码流程（本地回调 + 取消支持），成功后把换取到的凭据写入钥匙串
+#### Scenario: 删除供应商
+- **WHEN** 用户删除一个供应商
+- **THEN** 其钥匙串条目一并清除
 
-### Requirement: 试用结束后的降级行为
+#### Scenario: 缺少凭据
+- **WHEN** 激活供应商需要 Key 但尚未配置
+- **THEN** 请求前给出明确提示，不发送无凭据请求（允许空 Key 的本地端点除外）
 
-试用到期后，系统 SHALL 保留本地规划能力，仅停用依赖 AI 的能力，并给出明确的可恢复路径。
+### Requirement: AI 失败不伤及本地
 
-#### Scenario: 试用过期后使用 agent
-- **WHEN** 令牌状态不再是有效试用且未配置自有凭据
-- **THEN** agent 入口提示 "Included AI access has ended. Connect AI provider in Settings to continue."
+AI 请求失败、供应商不可达或配置缺失 MUST NOT 影响本地功能与数据完整性。错误 SHALL 以稳定 code 加可读消息呈现，密钥 MUST NOT 出现在错误信息中。
 
-#### Scenario: 试用过期后的语音
-- **WHEN** 试用已结束
-- **THEN** 语音听写入口停用并提示 "Voice dictation is unavailable after included AI access ends."
+#### Scenario: 请求失败
+- **WHEN** 一次采样请求失败或超时
+- **THEN** 既有数据不变、会话可继续、错误信息可读
 
-#### Scenario: 本地数据不受影响
-- **WHEN** 授权无效或服务不可达
-- **THEN** 周期、任务、专注块等本地能力全部可用，数据不丢失
+#### Scenario: 断网时本地端点可用
+- **WHEN** 设备离线且激活供应商指向本机端点
+- **THEN** AI 能力照常可用，不产生外部网络请求
 
-### Requirement: 托管后端的凭据隔离
-
-使用托管后端时，第三方服务凭据（如语音转写）SHALL 由后端换取短期 token 下发，客户端 MUST NOT 持有第三方长期密钥。
-
-#### Scenario: 获取语音 token
-- **WHEN** 用户开始语音听写且使用托管后端
-- **THEN** 客户端向后端申请一次性 token 与有效期，再用该 token 连接转写服务
-
-#### Scenario: 使用自有 OpenRouter
-- **WHEN** 用户切换到 OpenRouter 且尝试语音听写
-- **THEN** 系统按无托管凭据处理并给出提示，不尝试使用用户的 LLM key 去换语音服务
+#### Scenario: 认证失败
+- **WHEN** 供应商返回认证失败
+- **THEN** 错误信息提示检查凭据，且不包含 Key 明文
