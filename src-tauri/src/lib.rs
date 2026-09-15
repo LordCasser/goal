@@ -25,6 +25,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let state = db::init(&handle)?;
@@ -122,6 +123,7 @@ pub fn run() {
             commands::reviews::apply_review_disposition,
             commands::reviews::get_review_summary,
             commands::reviews::export_cycle_review_markdown,
+            commands::reviews::save_cycle_review_markdown,
             // calendar view (add-calendar-time-view)
             commands::calendar_view::get_calendar_range,
             commands::calendar_view::move_day_cycle,

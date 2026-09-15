@@ -22,6 +22,7 @@ export const commands = {
   applyReviewDisposition: "apply_review_disposition",
   getReviewSummary: "get_review_summary",
   exportCycleReviewMarkdown: "export_cycle_review_markdown",
+  saveCycleReviewMarkdown: "save_cycle_review_markdown",
 } as const;
 
 /** One answer on the wire (`{ id, status: answered|skipped, text }`). */
@@ -151,6 +152,10 @@ export function getReviewSummary(): Promise<ReviewSummaryPoint[]> {
 }
 
 /** Markdown string; the UI decides where it goes (clipboard / save dialog). */
+export function saveCycleReviewMarkdown(cycleId: string, targetPath: string): Promise<void> {
+  return invoke(commands.saveCycleReviewMarkdown, { cycle_id: cycleId, target_path: targetPath });
+}
+
 export function exportCycleReviewMarkdown(cycle_id: string): Promise<string> {
   return invoke<string>(commands.exportCycleReviewMarkdown, { cycle_id });
 }

@@ -87,9 +87,12 @@ function InlineError({ error }: { error: unknown }) {
 export function SettingsDialog({
   open,
   onClose,
+  onPreviewExitPoll,
 }: {
   open: boolean;
   onClose: () => void;
+  /** 主动触发退出调查（onboarding §3.6 菜单入口的设置页形态）。 */
+  onPreviewExitPoll?: () => void;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
   const weekStartId = useId();
@@ -264,6 +267,15 @@ export function SettingsDialog({
           >
             模型设置…
           </Button>
+          {onPreviewExitPoll && (
+            <Button
+              variant="ghost"
+              size="compact"
+              onClick={onPreviewExitPoll}
+            >
+              反馈：退出调查…
+            </Button>
+          )}
         </section>
 
         <section className="flex flex-col gap-2">

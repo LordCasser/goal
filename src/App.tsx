@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgentPanel } from "./features/agent/AgentPanel";
+import { ExitPollDialog, type ExitPollResolution } from "./features/onboarding/ExitPollDialog";
+import { markExitPollListenerReady } from "./features/onboarding/api";
 import CalendarView from "./features/calendar/CalendarView";
 import { MissedSummary } from "./features/reminders/MissedSummary";
 import { IssuePanel } from "./features/agent/IssuePanel";
@@ -26,6 +28,20 @@ export default function App() {
   // Right-side context panel (design.md §3.1): the coach conversation or the
   // planning-issue report, both scoped to the cycle the workspace targets.
   const [rightPanel, setRightPanel] = useState<"agent" | "issues" | null>(null);
+  // Exit survey (onboarding §3): the backend only answers once the frontend
+  // signals readiness, so late-arriving decisions are never lost. A manual
+  // trigger can force the survey for feedback purposes.
+  const [exitPollOpen, setExitPollOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    markExitPollListenerReady()
+      .then((presentation) => {
+        if (!cancelled && presentation.show) setExitPollOpen(true);
+      })
+      .catch(() => { /* survey is never load-bearing */ });
+    return () => { cancelled = true; };
+  }, []);
+
   // Top-level view switch (calendar change §5.7): workspace or calendar grid.
   const [view, setView] = useState<"workspace" | "calendar">(() =>
     (localStorage.getItem("planner.preferred-view") as "workspace" | "calendar" | null) ?? "workspace",
@@ -120,7 +136,20 @@ export default function App() {
           <IssuePanel cycleId={activeCycleId} onClose={() => setRightPanel(null)} />
         )}
       </div>
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onPreviewExitPoll={() => setExitPollOpen(true)}
+      />
+      <ExitPollDialog
+        open={exitPollOpen}
+        onClose={(resolution: ExitPollResolution) => {
+          setExitPollOpen(false);
+          // "continued" keeps the app alive; the other resolutions were
+          // recorded by the dialog itself and the window close proceeds.
+          if (resolution !== "continued") window.close();
+        }}
+      />
     </div>
   );
 }

@@ -29,6 +29,7 @@ import {
   getCycleReview,
   reviewQk,
   saveCycleReview,
+  saveCycleReviewMarkdown,
   REVIEW_QUESTIONS,
   type CycleReviewFacts,
   type Disposition,
@@ -123,13 +124,24 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
 
   const [exportNote, setExportNote] = useState<string | null>(null);
   const exportMarkdown = useMutation({
-    mutationFn: () => exportCycleReviewMarkdown(cycleId),
-    onSuccess: async (markdown) => {
+    // 系统保存对话框优先（tasks §7.2）；对话框不可用（如前端测试环境）时
+    // 退回剪贴板，两条路径都拿到同一段 Markdown。
+    mutationFn: async () => {
+      const markdown = await exportCycleReviewMarkdown(cycleId);
       try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const target = await save({
+          defaultPath: `review-${cycleId}.md`,
+          filters: [{ name: "Markdown", extensions: ["md"] }],
+        });
+        if (!target) return markdown; // user cancelled — nothing to report
+        await saveCycleReviewMarkdown(cycleId, target);
+        setExportNote(`Saved to ${target}`);
+        return markdown;
+      } catch {
         await navigator.clipboard.writeText(markdown);
         setExportNote("Markdown copied to clipboard");
-      } catch {
-        setExportNote("Could not access the clipboard");
+        return markdown;
       }
     },
     onError: () => setExportNote("Export failed: save a review first"),

@@ -79,3 +79,23 @@ pub fn get_review_summary(db: State<'_, Db>) -> AppResult<Vec<ReviewSummaryPoint
 pub fn export_cycle_review_markdown(db: State<'_, Db>, cycle_id: String) -> AppResult<String> {
     reviews::export_cycle_review_markdown(&db, &cycle_id)
 }
+
+/// Writes the exported Markdown to a user-chosen path (tasks §7.2). The save
+/// dialog picks the path on the frontend; the write itself belongs here so
+/// no JS-side filesystem permission is needed.
+#[tauri::command]
+pub fn save_cycle_review_markdown(
+    db: State<'_, Db>,
+    cycle_id: String,
+    target_path: String,
+) -> AppResult<()> {
+    if target_path.trim().is_empty() {
+        return Err(crate::error::AppError::validation(
+            "invalid_target_path",
+            "a save path is required",
+        ));
+    }
+    let markdown = export_cycle_review_markdown(db, cycle_id)?;
+    std::fs::write(&target_path, markdown)
+        .map_err(|e| crate::error::AppError::Internal(format!("cannot write export: {e}")))
+}

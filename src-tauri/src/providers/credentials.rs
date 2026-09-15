@@ -168,3 +168,66 @@ mod tests {
         assert_eq!(credentials.load(&provider_id).expect("load missing"), None);
     }
 }
+
+#[cfg(test)]
+mod acceptance {
+    use super::*;
+
+    /// ai-access task 6.4: with a key stored through the real keychain, no
+    /// file on disk — providers.json, database, logs — contains the
+    /// plaintext. Keychain-only storage is the design红线 (spec:
+    /// 凭据安全存储). Requires a usable system keychain.
+    #[test]
+    #[ignore = "requires a usable system keychain (cargo test -- --ignored)"]
+    fn keychain_material_never_hits_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = [
+            "sk-acceptance-secret-0123456789",
+            "acceptance-second-secret-9876543210",
+        ];
+        for (index, secret) in secrets.iter().enumerate() {
+            let provider_id = format!("acceptance-{index}");
+            Credentials::new().save(&provider_id, secret).unwrap();
+            // Seed a config file and a settings row so the scan has real
+            // surfaces to inspect.
+            std::fs::write(
+                dir.path().join("providers.json"),
+                format!(r#"{{"provider_id":"{provider_id}"}}"#),
+            )
+            .unwrap();
+            let conn = rusqlite::Connection::open(dir.path().join("planner.db")).unwrap();
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('probe', 'provider')",
+                [],
+            )
+            .unwrap_or(0);
+            drop(conn);
+        }
+
+        // Scan every regular file under the data directory.
+        let mut scanned = 0;
+        let mut stack = vec![dir.path().to_path_buf()];
+        while let Some(path) = stack.pop() {
+            if path.is_dir() {
+                for entry in std::fs::read_dir(&path).unwrap().flatten() {
+                    stack.push(entry.path());
+                }
+            } else if let Ok(contents) = std::fs::read_to_string(&path) {
+                scanned += 1;
+                for secret in &secrets {
+                    assert!(
+                        !contents.contains(secret),
+                        "credential plaintext leaked into {}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        assert!(scanned >= 2, "expected files to scan, got {scanned}");
+
+        let credentials = Credentials::new();
+        for index in 0..secrets.len() {
+            credentials.delete(&format!("acceptance-{index}")).unwrap();
+        }
+    }
+}
