@@ -1,0 +1,40 @@
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+.artifacts/
+
+# Node
+node_modules/
+dist/
+*.local
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+coverage/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Local database files (never commit user data)
+*.db
+*.db-shm
+*.db-wal
+
+# Editor / AI tooling
+.vscode/
+.idea/
+.agents/
+.atlas/
+
+# Release output and private signing material
+release-artifacts/
+*.p12
+*.pfx
+*.key
+private-key.pem

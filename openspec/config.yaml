@@ -1,0 +1,32 @@
+schema: spec-driven
+
+# Project context — shown to AI tools when creating artifacts.
+context: |
+  项目：planner —— 一个本地优先（local-first）的个人规划桌面应用。
+  产品链路：Long-term cycle(1/3/6 月) → Week → Day → Session(专注块)，外加 Do Later 暂存容器。
+
+  技术栈：Tauri 2 + Rust（后端）+ React 19 + TypeScript + Vite（前端）+ SQLite（rusqlite, bundled）+ Tailwind。
+  测试：cargo test（Rust）、vitest（前端）。
+  架构权威来源：docs/architecture.md。需求权威来源：openspec/specs/。
+
+  领域约束（重要）：
+  - 所有规则尽量下沉到 SQLite schema（CHECK / 触发器 / 部分唯一索引），不只写在应用层。
+  - 数据库是唯一真相源；Rust → 前端的事件只做缓存失效通知，不携带业务数据。
+  - AI 的任何写入必须先进入预览态（proposal），由用户显式 Keep 才成为正式数据。
+  - 日期身份用本地日期字符串，不用 UTC 时间戳；`domain/calendar.rs` 是唯一处理日期的地方。
+  - 密钥类数据只进系统钥匙串，不进数据库/配置文件/日志。
+
+  规范组织：openspec/specs/<capability>/spec.md，能力按职责切分（周期、任务、agent 会话、提议、澄清、优先级、计划问题、AI 访问、语音、引导、生命周期、本地存储、本地日志、工作台）。
+
+rules:
+  proposal:
+    - 用中文书写；技术标识符、命令名、字段名保持英文并加反引号。
+    - 说明该变更是新增能力还是修改既有能力，并列出受影响的既有规范路径。
+    - 明确写出前置依赖的变更（多数扩展建立在 rebuild-baseline 之上）。
+  specs:
+    - 需求用 `系统 SHALL/MUST` 句式；场景用 `#### Scenario:` + `WHEN/THEN` 子弹。
+    - 每条需求至少两个场景，且场景必须可被自动化测试或手工步骤证伪。
+    - 不写实现细节（表名、函数名、类名），只写可观察行为。
+  tasks:
+    - 任务按「数据/后端/前端/验收」分组，每项可独立验证。
+    - 每组的最后至少有一条测试或手工验收项。

@@ -1,0 +1,236 @@
+/**
+ * Do Later 暂存项的一行（design.md 3.2 Later 行、5.1 任务条目）。
+ *
+ * 完成框 + 行内标题编辑 + hover/键盘关注时显露的 Promote 与删除。标题是
+ * 无边线的行内编辑器（ui/Input 自带控件边框，不适合此形态，这里用语义
+ * token 自绘）；Enter 在下方再开一条空行保持连续输入，失焦提交标题。
+ * 输入法组合期间的 Enter 只确认候选，不触发提交（design.md 5.1）。
+ */
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  addTask,
+  deleteTask,
+  patchTask,
+  promoteLaterGoal,
+  LATER_CYCLE_ID,
+  type Cycle,
+  type TaskNode,
+} from "../../lib/ipc";
+import { qk } from "../../lib/events";
+import { Button, Checkbox, Popover, PopoverItem, cn } from "../../ui";
+
+export type LaterTaskRowProps = {
+  task: TaskNode;
+  /** 0 = 顶层暂存目标；同周期子步骤每层缩进约 20px（design.md 4.3）。 */
+  depth: number;
+  /** Promote 的候选目标：长期（month）周期，不含 Later 容器自身。 */
+  monthCycles: Cycle[];
+  /** 新建行落座后把焦点移入标题，连续输入不中断（design.md 5.1）。 */
+  autoFocusTitle: boolean;
+  /** Enter 新建行成功后把新任务 id 报回面板，用于聚焦那一行。 */
+  onRowCreated: (taskId: string) => void;
+};
+
+export function LaterTaskRow({
+  task,
+  depth,
+  monthCycles,
+  autoFocusTitle,
+  onRowCreated,
+}: LaterTaskRowProps) {
+  const queryClient = useQueryClient();
+  const preview = task.proposal != null;
+  const [title, setTitle] = useState(task.title);
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const promoteAnchor = useRef<HTMLSpanElement>(null);
+
+  // 提交后的数据回流同步标题；正在输入的草稿不会被触碰——task.title 没变
+  // 时这个 effect 不执行（design.md 5.2「编辑中」）。
+  useEffect(() => {
+    setTitle(task.title);
+  }, [task.id, task.title]);
+
+  const invalidateLater = () => {
+    void queryClient.invalidateQueries({ queryKey: qk.editorWorkspace(LATER_CYCLE_ID) });
+  };
+
+  const commitTitle = useMutation({
+    mutationFn: (next: string) => patchTask(task.id, { title: next }),
+    onSuccess: invalidateLater,
+  });
+  const toggleCompleted = useMutation({
+    mutationFn: (completed: boolean) => patchTask(task.id, { completed }),
+    onSuccess: invalidateLater,
+  });
+  const addBelow = useMutation({
+    // add_task 不校验空标题：Enter 只是“在下方再开一条可继续输入的空行”，
+    // 与顶部的 add_later_goal（拒绝空标题）是两条不同路径。
+    mutationFn: () =>
+      addTask({
+        cycle_id: LATER_CYCLE_ID,
+        title: "",
+        parent_id: task.parent_id,
+        position: task.position + 1,
+      }),
+    onSuccess: (created) => {
+      invalidateLater();
+      onRowCreated(created.id);
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => deleteTask(task.id),
+    onSuccess: invalidateLater,
+  });
+  const promote = useMutation({
+    mutationFn: (targetCycleId: string) => promoteLaterGoal(task.id, targetCycleId),
+    onSuccess: () => {
+      // 任务离开 Later 进入目标周期，两边的查询都要失效。
+      void queryClient.invalidateQueries({ queryKey: qk.editorWorkspace(LATER_CYCLE_ID) });
+      void queryClient.invalidateQueries({ queryKey: qk.plannerState() });
+    },
+  });
+
+  /** 失焦/Enter 提交标题；空标题不发送（后端拒绝），恢复为已保存值。 */
+  const commit = () => {
+    if (preview) return;
+    const next = title.trim();
+    if (!next || next === task.title) {
+      setTitle(task.title);
+      return;
+    }
+    commitTitle.mutate(next);
+  };
+
+  const onTitleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (preview || e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    commit();
+    addBelow.mutate();
+  };
+
+  /** 只有一个长期周期时直接提升；多个用小菜单点名目标（design.md 9.2）。 */
+  const onPromote = () => {
+    if (monthCycles.length === 1) {
+      const sole = monthCycles[0];
+      if (sole) promote.mutate(sole.id);
+      return;
+    }
+    setPromoteOpen((open) => !open);
+  };
+
+  return (
+    <div
+      data-proposal={task.proposal ?? undefined}
+      title={preview ? "预览已锁定，请在 Coach 中确认或放弃" : undefined}
+      className={cn("group flex items-start gap-1 rounded-md py-0.5", preview && "bg-focus-surface/60 ring-1 ring-inset ring-focus/15")}
+      style={{ paddingLeft: depth * 20 }}
+    >
+      <Checkbox
+        checked={task.completed}
+        onChange={(completed) => toggleCompleted.mutate(completed)}
+        disabled={preview || toggleCompleted.isPending}
+        aria-label={task.title ? `Complete ${task.title}` : "Complete task"}
+      />
+      {/* 行内标题编辑器：无边线，完成态用提示文字色 + 删除线（design.md 5.2）。 */}
+      <input
+        autoFocus={autoFocusTitle}
+        value={preview ? task.title : title}
+        readOnly={preview}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={onTitleKeyDown}
+        onBlur={commit}
+        aria-label="Task title"
+        placeholder={depth === 0 ? "New parked goal" : "New step"}
+        className={cn(
+          "h-7 min-w-0 flex-1 rounded-sm bg-transparent px-1 text-body text-primary",
+          "placeholder:text-hint",
+          (task.completed || task.proposal === "delete") && "text-secondary line-through",
+        )}
+      />
+      {preview && <span className="h-7 shrink-0 pr-2 text-[11px] leading-7 text-secondary">{task.proposal === "delete" ? "待删除 · 已锁定" : "预览 · 已锁定"}</span>}
+      {/* 行内动作在 hover 或键盘进入条目时显露（design.md 5.1/10）。 */}
+      <div className={preview ? "hidden" : "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"}>
+        <span ref={promoteAnchor} className="inline-flex">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onPromote}
+            disabled={preview || monthCycles.length === 0 || promote.isPending}
+            aria-haspopup={monthCycles.length > 1 ? "menu" : undefined}
+            aria-expanded={monthCycles.length > 1 ? promoteOpen : undefined}
+            aria-label="Promote to a long-term cycle"
+            title="Promote to a long-term cycle"
+          >
+            <PromoteIcon />
+          </Button>
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => remove.mutate()}
+          disabled={preview || remove.isPending}
+          aria-label="Delete parked goal"
+          title="Delete parked goal"
+        >
+          <DeleteIcon />
+        </Button>
+      </div>
+      <Popover
+        open={!preview && promoteOpen}
+        onClose={() => setPromoteOpen(false)}
+        anchorRef={promoteAnchor}
+        label="Promote to long-term cycle"
+      >
+        {monthCycles.map((cycle) => (
+          <PopoverItem
+            key={cycle.id}
+            onSelect={() => {
+              setPromoteOpen(false);
+              promote.mutate(cycle.id);
+            }}
+          >
+            {cycle.title}
+          </PopoverItem>
+        ))}
+      </Popover>
+    </div>
+  );
+}
+
+/** 细线几何图标：16px、1.5 描边（design.md 4.3 图标语言）。 */
+function PromoteIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-4 w-4 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4.5 11.5 11.5 4.5" />
+      <path d="M6 4.5h5.5V10" />
+    </svg>
+  );
+}
+
+function DeleteIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-4 w-4 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 4.5h10" />
+      <path d="M6.5 4.5V3h3v1.5" />
+      <path d="M4.5 4.5 5.2 13h5.6l.7-8.5" />
+    </svg>
+  );
+}

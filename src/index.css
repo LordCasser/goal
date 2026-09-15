@@ -1,0 +1,338 @@
+/* IBM Plex Sans 400/500/600/700，woff2 随应用本地加载，离线可用（design.md 4.2）。 */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "tailwindcss";
+
+/* WKWebView needs a stable element drag target, including button handles. */
+[draggable="true"] { -webkit-user-drag: element; }
+.task-drag-handle { user-select: none; }
+@source "../node_modules/streamdown/dist/*.js";
+
+/*
+ * 设计 token（design.md §4）。两个浅色主题——白底与灰底——通过 <html
+ * data-theme="white|gray"> 切换；组件只消费下面的语义 token 或其 Tailwind
+ * 工具类，不得硬编码色值。数值为本仓库设计基线自有取值，非原应用样式表。
+ */
+
+:root {
+  /* 表面 */
+  --surface-canvas: #ffffff; /* 工作台与窗口栏共用画布（3.4） */
+  --surface-content: #ffffff; /* 计划正文、面板、菜单、弹窗的阅读面 */
+  --surface-subtle: #fafbfc; /* 小范围辅助说明 */
+  --surface-hover: #f5f7f8; /* 仅覆盖正在操作的按钮或条目 */
+
+  /* 文字 */
+  --text-primary: #25292f;
+  --text-secondary: #616974;
+  --text-hint: #6b727b;
+
+  /* 边界 */
+  --border-light: #edf0f2; /* 装饰性分隔，不承担控件识别 */
+  --border-frame: transparent; /* 白底主题计划面只用必要分隔 */
+  --border-control: #858c96; /* 完成框等有操作含义的边界 */
+
+  /* 焦点与导航选中 */
+  --color-focus: #2f62a3;
+  --surface-focus: #eef5ff;
+
+  /* 暖色强调、危险、待确认 */
+  --color-accent: #e85c2a;
+  --color-accent-strong: #bd4520; /* 小字暖色，保对比度 */
+  --color-danger: #d92d20;
+  --surface-danger: #fff0ee;
+  --surface-proposal: #fdf3ec;
+
+  /* The native title bar, where present, sits outside this client height. */
+  --app-header-height: 44px;
+}
+
+:root[data-platform="macos"] { --app-header-height: 52px; }
+
+.window-bar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: var(--app-header-height);
+  min-width: 0;
+  padding-right: 16px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--surface-canvas);
+  user-select: none;
+}
+.window-bar > button, .window-bar > [role="tablist"], .window-bar > [role="group"] { flex-shrink: 0; }
+.window-safe-area { width: 16px; height: 100%; flex-shrink: 0; }
+.window-bar[data-platform="macos"] { height: 52px; }
+.window-bar[data-platform="macos"][data-fullscreen="false"] .window-safe-area { width: 104px; }
+.window-drag-area { height: 100%; min-width: 64px; flex: 1; }
+.window-bar[data-platform="windows"]:not([data-shell="native"]) { padding-right: 0; }
+.window-controls { display: flex; height: 44px; margin-left: 16px; align-self: flex-start; }
+.window-controls button {
+  display: flex; width: 46px; height: 44px; align-items: center; justify-content: center;
+  flex-shrink: 0; padding: 0; border: 0; border-radius: 0;
+  color: var(--text-primary); background: transparent;
+  transition: color 100ms, background-color 100ms;
+}
+.window-controls svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1; }
+.window-controls button:hover, .window-controls button[data-hovered="true"] { background: var(--surface-hover); }
+.window-controls button:active, .window-controls button[data-pressed="true"] { background: var(--border-light); }
+.window-controls .window-close:hover { background: #c42b1c; color: white; }
+.window-controls .window-close:active { background: #a92317; color: white; }
+.window-controls button:focus-visible { outline-offset: -3px; }
+.window-bar[data-focused="false"] .window-controls button { color: var(--text-hint); }
+.window-bar[data-focused="false"] .window-close:hover { color: white; }
+.window-pending { max-width: 132px; white-space: nowrap; }
+@media (max-width: 1099px) {
+  .window-bar[data-platform="windows"] .window-tool-label { display: none; }
+}
+@media (forced-colors: active) {
+  .window-bar .window-controls button { color: ButtonText; background: Canvas; }
+  .window-bar .window-controls button:hover,
+  .window-bar .window-controls button[data-hovered="true"],
+  .window-bar .window-controls button[data-pressed="true"] {
+    color: HighlightText; background: Highlight; forced-color-adjust: none;
+  }
+  .window-bar[data-focused="false"] .window-controls button { color: GrayText; }
+  .window-bar[data-focused="false"] .window-controls button:hover { color: HighlightText; }
+  .window-controls button:focus-visible { outline-color: Highlight; }
+}
+
+/* 灰底主题只覆盖画布、轻量表面、hover、提示文字与边界；内容面、文字主色、
+ * 控件边界、焦点与暖色不变，保证切换时内容几何不动（4.4）。 */
+:root[data-theme="gray"] {
+  --surface-canvas: #f6f6f6;
+  --surface-subtle: #f0f0f0;
+  --surface-hover: #e8e8e8;
+  --text-hint: #666e78;
+  --border-light: #e2e2e2;
+  --border-frame: #e3e3e3; /* 灰底用白色内容面四边细框承托 */
+}
+
+/* 静态主题：字体、字号、间距节奏与动画命名。 */
+@theme {
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* 字号 / 行高（4.2），行高按中文阅读调整 */
+  --text-caption: 0.75rem; /* 12/16 日期、状态、快捷键 */
+  --text-caption--line-height: 1rem;
+  --text-menu: 0.8125rem; /* 13/20 菜单与次要正文 */
+  --text-menu--line-height: 1.25rem;
+  --text-body: 0.875rem; /* 14/22 任务与会话正文 */
+  --text-body--line-height: 1.375rem;
+  --text-block-title: 0.875rem; /* 14/20 块标题，靠字重区分 */
+  --text-block-title--line-height: 1.25rem;
+  --text-section-title: 1rem; /* 16/20 计划区标题 */
+  --text-section-title--line-height: 1.25rem;
+  --text-timer: 1rem; /* 16/20 运行计时，等宽数字 */
+  --text-timer--line-height: 1.25rem;
+  --text-dialog-title: 1.125rem; /* 18/24 弹窗主标题 */
+  --text-dialog-title--line-height: 1.5rem;
+
+  /* 布局间距：辅助面板与计划内容面默认宽度（3.3） */
+  --spacing-panel: 424px;
+  --spacing-plan: 512px;
+
+  --animate-fade-in: ui-fade-in 160ms ease-out;
+  --animate-pop-in: ui-pop-in 180ms ease-out;
+  --animate-dot-pulse: ui-dot-pulse 1.6s ease-in-out infinite;
+}
+
+/* 语义色映射到运行时 CSS 变量；用 inline 让工具类直接引用变量值，
+ * data-theme 切换即可全局生效，无需重建任何组件。 */
+@theme inline {
+  --color-canvas: var(--surface-canvas);
+  --color-content: var(--surface-content);
+  --color-subtle: var(--surface-subtle);
+  --color-hover: var(--surface-hover);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-hint: var(--text-hint);
+
+  --color-light: var(--border-light);
+  --color-frame: var(--border-frame);
+  --color-control: var(--border-control);
+
+  --color-focus: var(--color-focus);
+  --color-focus-surface: var(--surface-focus);
+
+  --color-accent: var(--color-accent);
+  --color-accent-strong: var(--color-accent-strong);
+
+  --color-danger: var(--color-danger);
+  --color-danger-surface: var(--surface-danger);
+  --color-proposal: var(--surface-proposal);
+}
+
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes ui-dot-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--surface-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 22px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 全局键盘焦点轮廓（4.1 焦点色）；组件不另行降低它的可见性 */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 1px;
+  }
+
+  /* 减少动效：去掉位移、脉冲与重复动画（design.md 10） */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .cycle-nav-add {
+    @apply shrink-0 rounded-md px-2 py-2 text-left text-caption text-secondary transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-45;
+  }
+}
+
+/* One first-line alignment for the handle, checkbox, ownership slot and title. */
+.task-check { height: 28px; padding: 0; align-items: center; }
+.task-check > span:first-child { margin-top: 0; }
+.task-color-control { display: inline-flex; flex-shrink: 0; width: 20px; height: 28px; align-items: center; justify-content: center; border-radius: 4px; }
+button.task-color-control:hover { background: var(--surface-hover); }
+.task-color-slot { width: 6px; height: 14px; border: 1px solid var(--border-control); border-radius: 3px; transition: background-color 150ms, border-color 150ms; }
+.task-row[data-related] { background: color-mix(in srgb, var(--task-color) 7%, var(--surface-content)); }
+.task-row[data-selected] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--task-color) 22%, transparent); }
+.plan-enter, .connection-bar { animation: ui-fade-in 180ms ease-out; }
+.plan-ai-entry { visibility: hidden; opacity: 0; transform: translateY(2px); transition: opacity 150ms ease, transform 150ms ease, visibility 150ms; }
+.plan-ai-scope:hover .plan-ai-entry, .plan-ai-scope:focus-within .plan-ai-entry { visibility: visible; opacity: 1; transform: none; }
+/* Keep dates readable; native scroll boundaries leave Monday/Sunday at the edge. */
+.calendar-week-grid {
+  --calendar-day-width: 280px;
+  width: max-content;
+  grid-template-columns: repeat(7, var(--calendar-day-width));
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 8px;
+  padding-inline: 16px;
+}
+.view-switch-thumb {
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: calc((100% - 4px) / 2);
+  border-radius: 6px;
+  background: var(--surface-content);
+  box-shadow: 0 1px 3px #0000000d;
+  transition: transform 220ms cubic-bezier(.2,.75,.25,1);
+  pointer-events: none;
+}
+.view-switch[data-view="calendar"] .view-switch-thumb { transform: translateX(100%); }
+.view-page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-canvas);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-8px);
+  transition: opacity 160ms ease-out, transform 220ms cubic-bezier(.2,.75,.25,1), visibility 0s 220ms;
+}
+.view-page[data-view="calendar"] { transform: translateX(8px); }
+.view-page[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  z-index: 1;
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .view-page, .view-switch-thumb { transition: none; }
+  .view-page { transform: none; }
+}
+.relation-line { animation: ui-fade-in 180ms ease-out; }
+.panel-motion { display: grid; grid-template-columns: 0fr; flex-shrink: 0; transition: grid-template-columns 200ms cubic-bezier(.2,.7,.2,1); }
+.panel-motion[data-open="true"] { grid-template-columns: 1fr; }
+.panel-motion-content { opacity: 0; transform: translateX(12px); transition: opacity 160ms ease, transform 200ms cubic-bezier(.2,.7,.2,1); }
+.panel-motion[data-side="left"] .panel-motion-content { transform: translateX(-12px); }
+.panel-motion[data-open="true"] .panel-motion-content { opacity: 1; transform: translateX(0); }
+
+.coach-prose { overflow-wrap: anywhere; font-size: var(--text-body); line-height: 1.65; }
+.coach-prose > * + * { margin-top: 10px; }
+.coach-prose strong, .coach-prose :is(h1, h2, h3, h4, h5, h6) { font-weight: 600; }
+.coach-prose :is(h1, h2, h3, h4, h5, h6) { line-height: 1.4; margin-top: 18px; }
+.coach-prose > :first-child { margin-top: 0; }
+.coach-prose h1 { font-size: 17px; }
+.coach-prose h2 { font-size: 16px; }
+.coach-prose :is(h3, h4, h5, h6) { font-size: 14px; }
+.coach-prose ul, .coach-prose ol { padding-left: 20px; }
+.coach-prose ul { list-style: disc; }
+.coach-prose ol { list-style: decimal; }
+.coach-prose li + li { margin-top: 4px; }
+.coach-prose li > :is(p, ul, ol) + * { margin-top: 4px; }
+.coach-prose .contains-task-list { padding-left: 0; list-style: none; }
+.coach-prose .task-list-item input { margin-right: 7px; vertical-align: -1px; accent-color: var(--color-focus); }
+.coach-prose code { border-radius: 3px; background: var(--surface-subtle); padding: 1px 4px; font-size: 12px; }
+.coach-prose pre { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-light); border-radius: 6px; background: var(--surface-subtle); padding: 12px; line-height: 1.6; }
+.coach-prose pre code { padding: 0; }
+.coach-prose blockquote { border-left: 2px solid var(--border-control); padding-left: 12px; color: var(--text-secondary); }
+.coach-prose hr { margin-block: 16px; border-color: var(--border-light); }
+.coach-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-light); border-radius: 6px; overscroll-behavior-x: contain; }
+.coach-table-scroll table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.55; }
+.coach-table-scroll :is(th, td) { min-width: 100px; max-width: 240px; padding: 9px 12px; text-align: left; vertical-align: top; overflow-wrap: break-word; border-bottom: 1px solid var(--border-light); }
+.coach-table-scroll th { font-weight: 500; color: var(--text-secondary); background: var(--surface-subtle); }
+.coach-table-scroll tr:last-child td { border-bottom: 0; }
+.coach-table-scroll :is(th, td) + :is(th, td) { border-left: 1px solid var(--border-light); }
+.coach-table-scroll:focus-visible, .coach-prose pre:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* Chat motion adapted from UI by Halaska (MIT; public/licenses/halaska-ui.txt). */
+@keyframes coach-thinking-dot {
+  0%, 80%, 100% { transform: scale(.55); opacity: .35; }
+  40% { transform: scale(1); opacity: 1; }
+}
+@keyframes coach-message-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.coach-thinking-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: coach-thinking-dot 1.2s cubic-bezier(.4,0,.2,1) infinite both; }
+.coach-message, .coach-thinking, .coach-approval { animation: coach-message-in 250ms cubic-bezier(.2,0,0,1) both; }
+.coach-tool-details { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 250ms cubic-bezier(.2,0,0,1), opacity 150ms ease, visibility 250ms; }
+.coach-tool-details[data-expanded="true"] { grid-template-rows: 1fr; opacity: 1; visibility: visible; }
+@media (prefers-reduced-motion: reduce) {
+  .coach-message, .coach-thinking, .coach-thinking-dot, .coach-approval { animation: none; }
+  .coach-tool-details { transition: none; }
+}

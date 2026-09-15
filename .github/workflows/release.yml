@@ -1,0 +1,222 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# A tag push builds and publishes. A manual run builds and uploads workflow
+# artifacts only; it never creates a public Release.
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22.12.0"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  validate:
+    name: Validate release contract
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Check versions and macOS signing material
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          node scripts/release-artifacts.mjs verify-version --tag "$RELEASE_TAG"
+          test -n "$APPLE_CERTIFICATE" || { echo "APPLE_CERTIFICATE is required for self-signed macOS release" >&2; exit 1; }
+          test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "APPLE_CERTIFICATE_PASSWORD is required for self-signed macOS release" >&2; exit 1; }
+
+  build:
+    name: ${{ matrix.label }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-amd64
+            label: Linux x86_64
+            os: linux
+            platform: linux
+            arch: amd64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - id: linux-arm64
+            label: Linux ARM64
+            os: linux
+            platform: linux
+            arch: arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - id: windows-amd64
+            label: Windows x86_64
+            os: windows
+            platform: windows
+            arch: amd64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - id: windows-arm64
+            label: Windows ARM64
+            os: windows
+            platform: windows
+            arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - id: macos-amd64
+            label: macOS x86_64
+            os: macos
+            platform: macos
+            arch: amd64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - id: macos-arm64
+            label: macOS ARM64
+            os: macos
+            platform: macos
+            arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install Linux Tauri dependencies
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libglib2.0-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libsecret-1-dev \
+            pkg-config \
+            patchelf
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: goal-release-${{ matrix.id }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - run: npm run desktop:config:check -- ${{ matrix.platform }}
+      - name: Rust tests
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      # Self-signed is the only currently implemented macOS mode. The
+      # certificate material is mandatory; there is no ad-hoc unsigned fallback.
+      - name: Require macOS self-signing material
+        if: matrix.os == 'macos'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          test -n "$APPLE_CERTIFICATE" || { echo "APPLE_CERTIFICATE is required for self-signed macOS release" >&2; exit 1; }
+          test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "APPLE_CERTIFICATE_PASSWORD is required for self-signed macOS release" >&2; exit 1; }
+      - name: Prepare macOS signing
+        if: matrix.os == 'macos'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: node scripts/macos-signing.mjs prepare
+      - name: Verify macOS Keychain signing continuity
+        if: matrix.os == 'macos'
+        run: node scripts/macos-keychain-continuity.mjs
+
+      - name: Build macOS app bundle
+        if: matrix.os == 'macos'
+        run: npm run tauri build -- --target ${{ matrix.target }} --bundles app
+      - name: Build native bundle
+        if: matrix.os != 'macos'
+        run: npm run tauri build -- --target ${{ matrix.target }}
+      - name: Sign macOS app
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          app_path="$(find "src-tauri/target/${{ matrix.target }}" -type d -name '*.app' -print -quit)"
+          test -n "$app_path" || { echo "macOS app bundle not found" >&2; exit 1; }
+          node scripts/macos-signing.mjs sign "$app_path"
+          node scripts/macos-signing.mjs verify "$app_path"
+      - name: Package signed macOS app
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          app_path="$(find "src-tauri/target/${{ matrix.target }}" -type d -name '*.app' -print -quit)"
+          dmg_dir="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          mkdir -p "$dmg_dir"
+          node scripts/macos-signing.mjs package "$app_path" "$dmg_dir/Goal-${{ matrix.id }}.dmg"
+      - name: Stage release bundle
+        shell: bash
+        run: |
+          node scripts/release-artifacts.mjs stage \
+            --target "${{ matrix.id }}" \
+            --source-dir src-tauri/target \
+            --output-dir release-artifacts
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-${{ matrix.id }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Clean up macOS signing keychain
+        if: ${{ always() && matrix.os == 'macos' }}
+        run: node scripts/macos-signing.mjs cleanup
+
+  publish:
+    name: Publish complete six-target release
+    needs: [validate, build]
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && needs.validate.result == 'success' && needs.build.result == 'success' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: release-*
+          path: release-artifacts
+          merge-multiple: true
+      - name: Verify every target and create checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="$(node scripts/release-artifacts.mjs verify-version --tag "$RELEASE_TAG")"
+          node scripts/release-artifacts.mjs verify --tag "$RELEASE_TAG" --output-dir release-artifacts
+          node scripts/release-artifacts.mjs checksums --tag "$RELEASE_TAG" --output-dir release-artifacts
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+      - name: Publish public GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --title "Goal $VERSION" \
+            --generate-notes \
+            --notes "macOS signing mode: self-signed (not notarized). Windows packages are unsigned." \
+            release-artifacts/*
