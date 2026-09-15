@@ -14,13 +14,16 @@ import { designatedRequirement } from './macos-signing.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const certificatePath = path.join(root, '.github/signing/macos-release.cer');
 
-function run(command, args) {
+function run(command, args, { redact = [] } = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     timeout: 120_000,
   });
   if (result.error || result.status !== 0) {
-    throw new Error(`${command} failed (${result.error?.code ?? result.status ?? 'unknown'})`);
+    const safeArgs = args.map((arg) => redact.includes(arg) ? '[redacted]' : arg);
+    let detail = `${result.stderr ?? ''}`.trim();
+    for (const value of redact) detail = detail.replaceAll(value, '[redacted]');
+    throw new Error(`${command} ${safeArgs.join(' ')} failed (${result.error?.code ?? result.status ?? 'unknown'})${detail ? `: ${detail}` : ''}`);
   }
   return result;
 }
@@ -64,15 +67,20 @@ static const char *const service = "dev.lordcasser.planner.keychain-continuity-t
 static const char *const account = "synthetic-continuity-account";
 static const char *const password = "synthetic-continuity-value";
 
+static int report_status(const char *operation, OSStatus status, int exit_code) {
+    fprintf(stderr, "keychain continuity %s OSStatus=%d\\n", operation, (int)status);
+    return exit_code;
+}
+
 static int open_keychain(const char *path, SecKeychainRef *keychain) {
-    if (build_marker[0] == '\\0') return 90;
+    if (build_marker[0] == '\\0') return report_status("build-marker", errSecParam, 90);
     return (int)SecKeychainOpen(path, keychain);
 }
 
 static int add_item(const char *path) {
     SecKeychainRef keychain = NULL;
     OSStatus status = (OSStatus)open_keychain(path, &keychain);
-    if (status != errSecSuccess) return 1;
+    if (status != errSecSuccess) return report_status("open-add-keychain", status, 2);
     SecKeychainItemRef item = NULL;
     status = SecKeychainAddGenericPassword(
         keychain,
@@ -92,15 +100,19 @@ static int add_item(const char *path) {
         CFRelease(item);
     }
     CFRelease(keychain);
-    return status == errSecSuccess ? 0 : 1;
+    return status == errSecSuccess ? 0 : report_status("add", status, 1);
 }
 
 static int find_item(const char *path, int should_find) {
     SecKeychainRef keychain = NULL;
     OSStatus status = (OSStatus)open_keychain(path, &keychain);
-    if (status != errSecSuccess) return should_find ? 1 : 0;
+    if (status != errSecSuccess) return report_status("open-find-keychain", status, 2);
     // A successful continuity check must not be satisfied by a UI prompt.
-    SecKeychainSetUserInteractionAllowed(false);
+    status = SecKeychainSetUserInteractionAllowed(false);
+    if (status != errSecSuccess) {
+        CFRelease(keychain);
+        return report_status("disable-keychain-ui", status, 2);
+    }
     UInt32 password_length = 0;
     void *password_data = NULL;
     status = SecKeychainFindGenericPassword(
@@ -111,8 +123,8 @@ static int find_item(const char *path, int should_find) {
     );
     if (password_data != NULL) SecKeychainItemFreeContent(NULL, password_data);
     CFRelease(keychain);
-    if (should_find) return status == errSecSuccess ? 0 : 1;
-    return status == errSecSuccess ? 1 : 0;
+    if (should_find) return status == errSecSuccess ? 0 : report_status("find", status, 1);
+    return status == errSecSuccess ? report_status("unexpected-find-success", status, 1) : 0;
 }
 
 int main(int argc, char **argv) {
@@ -126,13 +138,14 @@ int main(int argc, char **argv) {
 }
 
 function compileBinary(source, output) {
-  run('clang', [source, '-framework', 'Security', '-O0', '-o', output]);
+  run('clang', [source, '-framework', 'Security', '-framework', 'CoreFoundation', '-O0', '-o', output]);
 }
 
-function signBinary(binary, identity, keychain, requirement) {
+function signBinary(binary, identity, keychain, identifier, requirement) {
   run('codesign', [
     '--force',
     '--sign', identity,
+    '--identifier', identifier,
     '--keychain', keychain,
     '--timestamp=none',
     '--requirements', `=${requirement}`,
@@ -141,8 +154,8 @@ function signBinary(binary, identity, keychain, requirement) {
   run('codesign', ['--verify', '--strict', binary]);
 }
 
-function signAdHoc(binary) {
-  run('codesign', ['--force', '--sign', '-', '--timestamp=none', binary]);
+function signAdHoc(binary, identifier) {
+  run('codesign', ['--force', '--sign', '-', '--identifier', identifier, '--timestamp=none', binary]);
   run('codesign', ['--verify', '--strict', binary]);
 }
 
@@ -156,9 +169,9 @@ function cdHash(binary) {
 function makeKeychain(directory) {
   const keychain = path.join(directory, 'continuity-test.keychain-db');
   const password = crypto.randomBytes(24).toString('base64url');
-  run('security', ['create-keychain', '-p', password, keychain]);
+  run('security', ['create-keychain', '-p', password, keychain], { redact: [password] });
   run('security', ['set-keychain-settings', '-lut', '21600', keychain]);
-  run('security', ['unlock-keychain', '-p', password, keychain]);
+  run('security', ['unlock-keychain', '-p', password, keychain], { redact: [password] });
   return keychain;
 }
 
@@ -166,7 +179,11 @@ function main() {
   if (process.platform !== 'darwin') throw new Error('macOS Keychain continuity requires a macOS host');
   const signingState = readSigningState();
   const fingerprint = certificateFingerprint();
+  const stableIdentifier = 'dev.lordcasser.planner';
   const stableRequirement = designatedRequirement(fingerprint);
+  if (!stableRequirement.includes(`identifier "${stableIdentifier}"`)) {
+    throw new Error('Stable signing requirement identifier does not match the continuity fixture');
+  }
   const wrongIdentifierRequirement = stableRequirement.replace(
     'dev.lordcasser.planner',
     'dev.lordcasser.planner.keychain-negative',
@@ -182,24 +199,24 @@ function main() {
     const v2 = path.join(directory, 'continuity-v2');
     const wrongIdentifier = path.join(directory, 'continuity-wrong-identifier');
     const wrongSignature = path.join(directory, 'continuity-wrong-signature');
-    fs.writeFileSync(sourceV1, sourceFor('goal-keychain-continuity-v1')); 
-    fs.writeFileSync(sourceV2, sourceFor('goal-keychain-continuity-v2')); 
+    fs.writeFileSync(sourceV1, sourceFor('goal-keychain-continuity-v1'));
+    fs.writeFileSync(sourceV2, sourceFor('goal-keychain-continuity-v2'));
     compileBinary(sourceV1, v1);
     compileBinary(sourceV2, v2);
     fs.copyFileSync(v2, wrongIdentifier);
     fs.copyFileSync(v2, wrongSignature);
 
-    signBinary(v1, fingerprint, signingState.keychain, stableRequirement);
-    signBinary(v2, fingerprint, signingState.keychain, stableRequirement);
+    signBinary(v1, fingerprint, signingState.keychain, stableIdentifier, stableRequirement);
+    signBinary(v2, fingerprint, signingState.keychain, stableIdentifier, stableRequirement);
     if (cdHash(v1) === cdHash(v2)) throw new Error('Continuity fixtures unexpectedly share a CDHash');
 
     run(v1, ['add', keychain]);
     run(v2, ['find', keychain]);
 
-    signBinary(wrongIdentifier, fingerprint, signingState.keychain, wrongIdentifierRequirement);
+    signBinary(wrongIdentifier, fingerprint, signingState.keychain, 'dev.lordcasser.planner.keychain-negative', wrongIdentifierRequirement);
     run(wrongIdentifier, ['deny', keychain]);
 
-    signAdHoc(wrongSignature);
+    signAdHoc(wrongSignature, stableIdentifier);
     run(wrongSignature, ['deny', keychain]);
     console.log('macOS Keychain continuity passed: stable DR allowed access; wrong identifier and signature were denied.');
   } finally {
