@@ -12,6 +12,7 @@ type ViteConfigWithTests = UserConfig & {
     environment?: "node" | "jsdom" | "happy-dom";
     globals?: boolean;
     setupFiles?: string | string[];
+    include?: string[];
   };
 };
 
@@ -52,6 +53,7 @@ const config: ViteConfigWithTests = {
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
   },
 };
 

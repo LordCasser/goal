@@ -122,24 +122,6 @@ jobs:
           cache-on-failure: true
       - run: npm ci
       - run: npm run desktop:config:check -- ${{ matrix.platform }}
-      - name: Rust tests
-        if: matrix.os == 'linux'
-        env:
-          CARGO_PROFILE_DEV_DEBUG: "0"
-          CARGO_PROFILE_TEST_DEBUG: "0"
-        shell: bash
-        run: |
-          dbus-run-session -- bash -euo pipefail -c '
-            printf "%s\\n" "goal-ci-test-keyring-password" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
-            cargo test --manifest-path src-tauri/Cargo.toml --locked
-          '
-      - name: Rust tests
-        if: matrix.os != 'linux'
-        env:
-          CARGO_PROFILE_DEV_DEBUG: "0"
-          CARGO_PROFILE_TEST_DEBUG: "0"
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
-
       # Self-signed is the only currently implemented macOS mode. The
       # certificate material is mandatory; there is no ad-hoc unsigned fallback.
       - name: Require macOS self-signing material
@@ -160,6 +142,24 @@ jobs:
         if: matrix.os == 'macos'
         timeout-minutes: 3
         run: node scripts/macos-keychain-continuity.mjs
+
+      - name: Rust tests
+        if: matrix.os == 'linux'
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+        shell: bash
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "%s\\n" "goal-ci-test-keyring-password" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            cargo test --manifest-path src-tauri/Cargo.toml --locked
+          '
+      - name: Rust tests
+        if: matrix.os != 'linux'
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build macOS app bundle
         if: matrix.os == 'macos'
