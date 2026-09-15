@@ -18,3 +18,9 @@ v0.1.1 的以下验收项尚未全部完成，发布时保留这些限制，后�
 语音输入不属于 v0.1.1 交付范围。它的规范保留为后续能力，是否实现及其实现载体另行决定。
 
 最终 macOS ARM64 自签名 Goal.app（0.1.1）在约 1000×625 原生窗口完成中英切换、选择器定位、底部周起始日菜单向上翻转、两级 Escape、API 格式选择与通知系统管理状态检查。当前没有已保存的 provider/model，激活选择器保持空态；没有发送 LLM 请求。语言最终恢复简体中文。
+
+## 已发布产物验收
+
+[v0.1.1 Release](https://github.com/LordCasser/goal/releases/tag/v0.1.1) 已发布。[六目标流水线](https://github.com/LordCasser/goal/actions/runs/35001301041) 的原生测试、构建、架构检查与上传全部成功。发布代码为 `5cf5988`，正式 tag 保持不变。
+
+从公开下载地址获取的八个安装包全部匹配 `SHA256SUMS`。两份 macOS DMG 额外通过固定签名身份、Goal 产品名、0.1.1 版本、13.3 最低系统版本和各自架构检查；Linux AppImage 的 ELF 架构以及 Debian 包架构/版本元数据一致。Windows 安装包完成下载校验，其应用二进制架构已由对应 CI runner 验证；此记录不代表 Windows/Linux 的人工桌面验收。
