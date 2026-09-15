@@ -46,7 +46,7 @@
 - [x] 6.2 合并语义：`null` 清除、缺省保留；空更新返回 `empty_update`
 - [x] 6.3 缺失字段计算（至少覆盖 `context.clarification` / `output.value` / `outcome.value` / `outcome.verification_method`）
 - [x] 6.4 清晰度标记推导：`needs_refinement` 与 `needs_breakdown` 的清除条件分开
-- [ ] 6.5 `update_goal_breakdown` 工具 + 返回 `TaskContextSnapshot`
+- [x] 6.5 `update_goal_breakdown` 工具 + 返回 `TaskContextSnapshot`
 - [x] 6.6 测试：部分更新不清空其他字段；显式 `null` 清除；空更新被拒；四种标题精炼情形各一例
 
 ## 7. 优先级引擎
@@ -77,9 +77,9 @@
 
 ## 10. 验收
 
-- [ ] 10.1 `cargo test` 全绿，且四个能力的测试全部用 `FakeProvider` 离线运行
+- [x] 10.1 `cargo test` 全绿，且四个能力的测试全部用 `FakeProvider` 离线运行
 - [ ] 10.2 手工（配好真实供应商）：在一个长目标上走完澄清——agent 一次问一个问题、标题被精炼、步骤经确认后写回
-- [ ] 10.3 手工：agent 的每一次写入都出现在待确认列表，Revert 后数据完全还原
+- [x] 10.3 手工：agent 的每一次写入都出现在待确认列表，Revert 后数据完全还原
 - [ ] 10.4 手工：故意写一个模糊目标，确认就地出现审查提示且不打断输入
-- [ ] 10.5 手工：关掉 AI 供应商，确认审查静默跳过、其余功能正常
-- [ ] 10.6 更新 `docs/architecture.md` 的 IPC 契约与模块图
+- [x] 10.5 手工：关掉 AI 供应商，确认审查静默跳过、其余功能正常
+- [x] 10.6 更新 `docs/architecture.md` 的 IPC 契约与模块图
