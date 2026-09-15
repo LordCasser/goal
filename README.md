@@ -134,12 +134,16 @@ openspec status --change rebuild-baseline
 
 ## 工程骨架现状
 
-**已验证**：`cargo check --all-targets` 通过；`npm run build`（`tsc --noEmit` + `vite build`）通过，产物 ~254 KB JS / 38 KB CSS。
+**已验证**：`cargo test`（312 个测试）与 `npm run build` / `npm run test`（67 个测试）全绿。
 
-已完成：Tauri 2 工程配置、应用图标、数据库连接池与版本化迁移执行器（含 SHA-256 校验和）、六张业务表 + 设置表、三条数据库级不变量触发器、`AppError` 的 IPC 序列化（`{ code, message }`）、事件发射器形态（按 `cycle_id` 去重）、一个 `get_schema_version` 命令，以及一个打通 React → IPC → Rust → SQLite 的占位界面。
+已实现（按变更）：
 
-未完成：全部业务逻辑。详见 `docs/architecture.md` 与 `rebuild-baseline/tasks.md`。
+- `rebuild-baseline`（63/63）：本地数据层、双主题工作台前端、统一本地日志、编辑态、Do Later、待确认改动、专注块与重复日程
+- `add-ai-access-and-voice`：BYOK 供应商配置（providers.json）、钥匙串凭据、三协议采样客户端、模型设置页
+- `add-ai-planning-core`：LLM 抽象、回合工具循环、五个技能、工具集（写工具经预览层）、GoalBreakdown、优先级、计划审查（结构+语义）
+- 其余四个扩展（复盘 / 日历视图 / 引导生命周期 / 提醒通知）按各自 tasks.md 推进中
 
+```bash
 ```bash
 npm install
 npm run build                       # 前端类型检查 + 构建
@@ -147,7 +151,7 @@ cd src-tauri && cargo check          # 后端编译检查
 npm run tauri dev                    # 启动应用
 ```
 
-> 前端只是占位。前端重做从 [design.md](design.md) 进入，交互取证见 `analysis/reports/40-frontend-ux-deconstruction.md`。
+> 前端从 [design.md](design.md) 进入：白底/灰底双主题、统一窗口栏、横向周期列、Do Later、待确认底栏与设置（主题/日志/模型）均已落地。
 
 ---
 
