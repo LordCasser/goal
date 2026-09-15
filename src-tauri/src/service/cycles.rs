@@ -461,6 +461,28 @@ pub fn start_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cycl
     crate::domain::cycle::transition(state, LifecycleAction::Start)
         .map_err(|e| AppError::conflict(e.code, e.message))?;
     repo::set_lifecycle(&tx, cycle_id, true, false, Some(now), None)?;
+
+    // A focus block's due notice rides the reminders scheduler: the row is
+    // created in the same transaction as the start, and the backend thread
+    // delivers it whether or not the app is in the foreground
+    // (add-onboarding-and-lifecycle §6.4 / add-reminders-notifications §3.4).
+    // quiet_ok = 0 — the end of a focus block is a hard time point.
+    if target.cycle_type == CycleType::Session {
+        if let Some(duration) = target.duration.filter(|d| *d > 0) {
+            crate::repository::reminders::insert(
+                &tx,
+                &crate::repository::reminders::NewReminder {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    target_kind: crate::repository::reminders::TargetKind::Session,
+                    target_id: cycle_id.to_string(),
+                    fire_at: now + duration,
+                    quiet_ok: false,
+                    created_at: now,
+                },
+            )?;
+        }
+    }
+
     let updated = repo::require(&tx, cycle_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let mut mutation = Mutation::new(updated);

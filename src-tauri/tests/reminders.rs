@@ -806,3 +806,43 @@ fn day_target_requires_a_day_cycle() {
     .unwrap_err();
     assert!(matches!(err, planner_lib::error::AppError::NotFound { .. }));
 }
+
+/// onboarding §6.4: starting a focus block schedules its due notice on the
+/// backend inside the start transaction, so it fires through the scheduler
+/// whether or not the app is in the foreground — no frontend timer involved.
+#[test]
+fn session_start_schedules_background_due_notice() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let week = create_week(&db.db, &month.id, TODAY);
+    let day = create_day(&db.db, &week.id, TODAY, NOW);
+    let session = cycles::add_session(
+        &db.db,
+        &cycles::AddSessionArgs {
+            day_cycle_id: day.id.clone(),
+            title: "background block".into(),
+            duration_ms: Some(900_000),
+            position: None,
+        },
+        NOW,
+    )
+    .unwrap()
+    .value;
+    let started_at = NOW + 5_000;
+    cycles::start_cycle(&db.db, &session.id, started_at).unwrap();
+
+    let notifier = notifier_granted();
+    // Not due yet: the notice must not fire one minute before the end.
+    let early = reconcile_with(&db.db, notifier.as_ref(), started_at + 60_000 - 1);
+    assert_eq!(early.notified, 0);
+
+    // At started_at + duration the backend scheduler delivers by itself.
+    let pass = reconcile_with(&db.db, notifier.as_ref(), started_at + 900_000);
+    assert_eq!(pass.notified, 1, "fires without any frontend involvement");
+    assert_eq!(notifier.notifications()[0].target_kind, "session");
+
+    // Finishing afterwards stays silent; the fired reminder never rearms.
+    cycles::finish_cycle(&db.db, &session.id, started_at + 1_800_000).unwrap();
+    let after = reconcile_with(&db.db, notifier.as_ref(), started_at + 3_600_000);
+    assert_eq!(after.notified, 0);
+}
