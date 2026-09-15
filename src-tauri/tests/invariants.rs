@@ -19,13 +19,13 @@ fn migrations_apply_idempotently_and_version_is_stable() {
     {
         let mut first = rusqlite::Connection::open(&path).unwrap();
         migrations::apply(&mut first).unwrap();
-        assert_eq!(migrations::current_version(&first).unwrap(), 5);
+        assert_eq!(migrations::current_version(&first).unwrap(), 8);
     }
     {
         // Opening the same file runs apply again — no error, same version.
         let mut second = rusqlite::Connection::open(&path).unwrap();
         migrations::apply(&mut second).unwrap();
-        assert_eq!(migrations::current_version(&second).unwrap(), 5);
+        assert_eq!(migrations::current_version(&second).unwrap(), 8);
     }
 }
 
@@ -69,7 +69,7 @@ fn empty_database_reaches_latest_version_in_order() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
 }
 
 #[test]

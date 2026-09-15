@@ -45,6 +45,21 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "ai planning",
         sql: M0005_AI_PLANNING,
     },
+    Migration {
+        version: 6,
+        description: "cycle reviews",
+        sql: M0006_CYCLE_REVIEWS,
+    },
+    Migration {
+        version: 7,
+        description: "reminders",
+        sql: M0007_REMINDERS,
+    },
+    Migration {
+        version: 8,
+        description: "session schedule",
+        sql: M0008_SESSION_SCHEDULE,
+    },
 ];
 
 fn checksum(sql: &str) -> String {
@@ -476,3 +491,75 @@ mod tests {
         assert_eq!(dismissals, 0, "dismissals cascade with their cycle");
     }
 }
+
+// Extension changes (review / reminders / calendar) land as separate,
+// append-only migrations so each capability owns exactly one version.
+
+const M0006_CYCLE_REVIEWS: &str = r#"
+-- Review-retrospective (change: add-review-retrospective §1). One review per
+-- cycle; the snapshot columns freeze facts/answers at save time.
+CREATE TABLE cycle_reviews (
+    id           TEXT PRIMARY KEY,
+    cycle_id     TEXT NOT NULL UNIQUE REFERENCES cycles(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL,
+    is_final     INTEGER NOT NULL DEFAULT 0,
+    facts_json   TEXT NOT NULL,
+    answers_json TEXT NOT NULL,
+    snapshot_at  INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL
+);
+
+CREATE TABLE cycle_review_dispositions (
+    review_id   TEXT NOT NULL REFERENCES cycle_reviews(id) ON DELETE CASCADE,
+    task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    disposition TEXT NOT NULL CHECK (disposition IN ('carry','later','drop')),
+    UNIQUE (review_id, task_id)
+);
+
+-- The review skill joins the persisted skill set: SQLite cannot alter a
+-- CHECK, so the table is rebuilt and the rows carried over.
+CREATE TABLE agent_conversations_new (
+    id             TEXT PRIMARY KEY,
+    cycle_id       TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
+    active_turn_id TEXT,
+    revision       INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    active_skill   TEXT CHECK (active_skill IS NULL OR active_skill IN
+                     ('goal_setting','long_term_planning','short_term_planning','prioritization','review')),
+    last_error     TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO agent_conversations_new
+    SELECT id, cycle_id, active_turn_id, revision, active_skill, last_error, created_at, updated_at
+    FROM agent_conversations;
+DROP TABLE agent_conversations;
+ALTER TABLE agent_conversations_new RENAME TO agent_conversations;
+CREATE INDEX ix_agent_conversations_updated ON agent_conversations(updated_at);
+"#;
+
+const M0007_REMINDERS: &str = r#"
+-- Reminders (change: add-reminders-notifications §1). Polymorphic targets
+-- (task/session/day/cycle) — SQLite cannot foreign-key a union, so cleanup
+-- on target deletion is a service-layer duty guarded by tests.
+CREATE TABLE reminders (
+    id           TEXT PRIMARY KEY,
+    target_kind  TEXT NOT NULL CHECK (target_kind IN ('task','session','day','cycle')),
+    target_id    TEXT NOT NULL,
+    fire_at      INTEGER NOT NULL,
+    quiet_ok     INTEGER NOT NULL DEFAULT 0,
+    fired_at     INTEGER,
+    dismissed_at INTEGER,
+    created_at   INTEGER NOT NULL,
+    UNIQUE (target_kind, target_id, fire_at)
+);
+
+CREATE INDEX ix_reminders_due ON reminders(fire_at) WHERE fired_at IS NULL;
+"#;
+
+const M0008_SESSION_SCHEDULE: &str = r#"
+-- Calendar-time-view (change: add-calendar-time-view §3): a session's planned
+-- wall-clock start. Lifecycle `started_at` keeps its meaning; this column is
+-- the schedule the timeline renders and the budget aggregates.
+ALTER TABLE cycles ADD COLUMN scheduled_start_at INTEGER;
+"#;
