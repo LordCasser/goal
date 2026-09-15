@@ -2,7 +2,11 @@
 //! planning engines (change: `add-ai-planning-core`).
 //!
 //! Layering: `llm` is the provider-facing abstraction over the sampling
-//! layer; agent conversation, skills and engines arrive with later tasks and
-//! will live beside it.
+//! layer; `breakdown` is the deterministic GoalBreakdown engine (structure,
+//! merging, clarity derivation); the remaining engines arrive with their
+//! tasks and will live beside them.
 
+pub mod agent;
+pub mod breakdown;
 pub mod llm;
+pub mod prioritization;

@@ -87,7 +87,10 @@ impl LlmProvider for FakeProvider {
         })
     }
 
-    fn generate_json<'a>(&'a self, _req: LlmRequest) -> BoxFuture<'a, Result<serde_json::Value, AgentError>> {
+    fn generate_json<'a>(
+        &'a self,
+        _req: LlmRequest,
+    ) -> BoxFuture<'a, Result<serde_json::Value, AgentError>> {
         Box::pin(async move {
             self.json
                 .clone()

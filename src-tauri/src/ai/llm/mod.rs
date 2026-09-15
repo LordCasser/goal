@@ -12,7 +12,7 @@ mod fake;
 mod real;
 mod resolved;
 mod tools;
-mod types;
+pub mod types;
 
 pub use fake::{FakeProvider, FakeTurn};
 pub use real::RealProvider;
@@ -88,10 +88,7 @@ mod tests {
     fn agent_error_codes_map_to_ipc_tokens() {
         assert_eq!(AgentError::NoActiveProvider.code(), "no_active_provider");
         assert_eq!(AgentError::UnsupportedTools.code(), "unsupported_tools");
-        assert_eq!(
-            AgentError::Internal("x".into()).code(),
-            "internal"
-        );
+        assert_eq!(AgentError::Internal("x".into()).code(), "internal");
         let unreachable = AgentError::Provider(SamplingError::ProviderUnreachable {
             message: "refused".into(),
         });

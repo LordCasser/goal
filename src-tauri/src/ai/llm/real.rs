@@ -283,10 +283,12 @@ impl ResponseAggregator {
             SamplingEvent::Usage {
                 input_tokens,
                 output_tokens,
-            } => self.usage = Some(Usage {
-                input_tokens,
-                output_tokens,
-            }),
+            } => {
+                self.usage = Some(Usage {
+                    input_tokens,
+                    output_tokens,
+                })
+            }
             SamplingEvent::Finished { .. } => {}
         }
     }
@@ -472,7 +474,10 @@ mod tests {
         assert_eq!(response.text, "hello");
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].id, "call_9");
-        assert_eq!(response.tool_calls[0].arguments, serde_json::json!({ "title": "x" }));
+        assert_eq!(
+            response.tool_calls[0].arguments,
+            serde_json::json!({ "title": "x" })
+        );
         assert_eq!(
             response.usage,
             Some(Usage {
@@ -512,7 +517,10 @@ mod tests {
             parse_json_output("```\n[1, 2]\n```").unwrap(),
             serde_json::json!([1, 2])
         );
-        assert_eq!(parse_json_output("  \n 42 \n ").unwrap(), serde_json::json!(42));
+        assert_eq!(
+            parse_json_output("  \n 42 \n ").unwrap(),
+            serde_json::json!(42)
+        );
 
         let error = parse_json_output("I think clarity is fairly good.").unwrap_err();
         assert!(matches!(error, AgentError::Internal(_)));

@@ -62,10 +62,7 @@ fn resolve_provider(
         .cloned()
         .or_else(|| provider.models.first().cloned())
         .ok_or_else(|| {
-            AgentError::Internal(format!(
-                "active provider '{}' has no models",
-                provider.name
-            ))
+            AgentError::Internal(format!("active provider '{}' has no models", provider.name))
         })?;
     let tools_supported = model.supports_tools;
     Ok(ResolvedProvider {

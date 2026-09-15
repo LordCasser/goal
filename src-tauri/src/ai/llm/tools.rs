@@ -84,7 +84,11 @@ mod tests {
             "required": ["cycle_key"],
             "additionalProperties": false
         });
-        let def = ToolDef::new("get_cycle_context", "Read the cycle context", schema.clone());
+        let def = ToolDef::new(
+            "get_cycle_context",
+            "Read the cycle context",
+            schema.clone(),
+        );
         let spec = to_spec(&def);
         assert_eq!(spec.name, "get_cycle_context");
         assert_eq!(spec.description, "Read the cycle context");

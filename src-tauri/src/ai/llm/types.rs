@@ -195,8 +195,7 @@ mod tests {
         assert!(value.get("tool_calls").is_none());
         // Old payloads without the optional fields still parse.
         let legacy: AgentMessage =
-            serde_json::from_value(serde_json::json!({ "role": "user", "content": "hi" }))
-                .unwrap();
+            serde_json::from_value(serde_json::json!({ "role": "user", "content": "hi" })).unwrap();
         assert_eq!(legacy, plain);
     }
 
@@ -214,8 +213,8 @@ mod tests {
                 output_tokens: None,
             }),
         };
-        let back: AgentResponse = serde_json::from_value(serde_json::to_value(&response).unwrap())
-            .unwrap();
+        let back: AgentResponse =
+            serde_json::from_value(serde_json::to_value(&response).unwrap()).unwrap();
         assert_eq!(back, response);
     }
 }
