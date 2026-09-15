@@ -6,6 +6,7 @@
 //! This application ships with no telemetry of any kind: there is no event
 //! collection, no reporting channel and no network call outside AI requests.
 
+pub mod ai;
 pub mod commands;
 pub mod db;
 pub mod domain;

@@ -1,53 +1,53 @@
 ## 1. 供应商配置层
 
-- [ ] 1.1 `providers` 配置文件（`providers.json`，与 `planner.db` 同目录）：供应商/模型两层结构（`design.md` D1），非敏感元数据 only；读写受互斥保护，损坏时按空配置可写回
-- [ ] 1.2 配置 CRUD：添加/编辑/删除供应商；id 用 uuid 且稳定；归档语义不需要——删除即移除
-- [ ] 1.3 校验：名称非空；Base URL 为 http(s)（本地 http 合法）；每个供应商至少一个模型；模型 ID 非空；上下文窗口/最大输出为正整数
-- [ ] 1.4 模型元数据：上下文窗口、最大输出 Token、输入/输出类型（文本锁定必选）、`supports_tools`（默认 true）
-- [ ] 1.5 激活供应商：确定性解析——使用激活项；无激活项时 AI 不可用并给出配置路径；删除激活项后回到未配置状态，不自动挑选替代
-- [ ] 1.6 测试：CRUD 往返；校验拒绝路径（坏 URL/无模型/空名称）；损坏文件恢复；激活项删除后的解析状态
+- [x] 1.1 `providers` 配置文件（`providers.json`，与 `planner.db` 同目录）：供应商/模型两层结构（`design.md` D1），非敏感元数据 only；读写受互斥保护，损坏时按空配置可写回
+- [x] 1.2 配置 CRUD：添加/编辑/删除供应商；id 用 uuid 且稳定；归档语义不需要——删除即移除
+- [x] 1.3 校验：名称非空；Base URL 为 http(s)（本地 http 合法）；每个供应商至少一个模型；模型 ID 非空；上下文窗口/最大输出为正整数
+- [x] 1.4 模型元数据：上下文窗口、最大输出 Token、输入/输出类型（文本锁定必选）、`supports_tools`（默认 true）
+- [x] 1.5 激活供应商：确定性解析——使用激活项；无激活项时 AI 不可用并给出配置路径；删除激活项后回到未配置状态，不自动挑选替代
+- [x] 1.6 测试：CRUD 往返；校验拒绝路径（坏 URL/无模型/空名称）；损坏文件恢复；激活项删除后的解析状态
 
 ## 2. 凭据存储
 
-- [ ] 2.1 `credentials`：钥匙串读写封装，service 固定为应用标识，account 为 `provider:{id}`；保存/读取/删除
-- [ ] 2.2 删除供应商时级联清除其钥匙串条目（先取 id 再删配置，或删除后清理，保证不留孤儿条目）
-- [ ] 2.3 本地端点允许空凭据：不写钥匙串条目，状态记为「无凭据（本地）」
-- [ ] 2.4 读取失败与「未配置」区分（前者是错误，后者是正常空状态）
-- [ ] 2.5 保证凭据不出现在数据库、配置文件、日志、错误信息中
-- [ ] 2.6 测试：保存后可读；删除后读为空；删除供应商后条目清除；序列化设置时不含凭据；序列化输出不含 Key 明文
+- [x] 2.1 `credentials`：钥匙串读写封装，service 固定为应用标识，account 为 `provider:{id}`；保存/读取/删除
+- [x] 2.2 删除供应商时级联清除其钥匙串条目（先取 id 再删配置，或删除后清理，保证不留孤儿条目）
+- [x] 2.3 本地端点允许空凭据：不写钥匙串条目，状态记为「无凭据（本地）」
+- [x] 2.4 读取失败与「未配置」区分（前者是错误，后者是正常空状态）
+- [x] 2.5 保证凭据不出现在数据库、配置文件、日志、错误信息中
+- [x] 2.6 测试：保存后可读；删除后读为空；删除供应商后条目清除；序列化设置时不含凭据；序列化输出不含 Key 明文
 
 ## 3. 三协议采样客户端
 
-- [ ] 3.1 统一采样抽象：请求（base_url + api_format + model + key + 消息 + 工具定义）与事件流（文本增量、工具调用、用量、终止原因、失败）；工具调用在流结束后统一交付
-- [ ] 3.2 `anthropic_messages` 适配器：`POST {base}/messages`；`x-api-key` + 固定 `anthropic-version` 头；`max_tokens` 在请求与模型配置都没有时由适配器补默认值；SSE 解析
-- [ ] 3.3 `openai_chat_completions` 适配器：`POST {base}/chat/completions`；`Bearer` 认证；SSE 解析（工具调用增量拼接）
-- [ ] 3.4 `openai_responses` 适配器：`POST {base}/responses`；`Bearer` 认证；SSE 解析
-- [ ] 3.5 错误分类映射（`design.md` D3）：401/403→`auth_failed`；其他 4xx→`invalid_request`；连接失败/超时→`provider_unreachable`/`timeout`；429→`rate_limited`；协议不符→`protocol_error`（不重试）；配置缺失→`no_active_provider`/`credentials_missing`（不发请求）
-- [ ] 3.6 超时分层：连接/空闲超时（默认 30s）与生成超时（默认 300s，可配置）
-- [ ] 3.7 采样偏好缺省不设（temperature/top_p 留给上游默认；`max_tokens` 按 byok-sampling.md 的解析顺序）；本地安全控制（截断、超时）不属于采样偏好
-- [ ] 3.8 测试：本地假服务器回放三种协议的事件序列（文本、工具调用、用量、终止）；认证头断言；错误分类断言；协议坏响应不重试；密钥不进日志与错误
+- [x] 3.1 统一采样抽象：请求（base_url + api_format + model + key + 消息 + 工具定义）与事件流（文本增量、工具调用、用量、终止原因、失败）；工具调用在流结束后统一交付
+- [x] 3.2 `anthropic_messages` 适配器：`POST {base}/messages`；`x-api-key` + 固定 `anthropic-version` 头；`max_tokens` 在请求与模型配置都没有时由适配器补默认值；SSE 解析
+- [x] 3.3 `openai_chat_completions` 适配器：`POST {base}/chat/completions`；`Bearer` 认证；SSE 解析（工具调用增量拼接）
+- [x] 3.4 `openai_responses` 适配器：`POST {base}/responses`；`Bearer` 认证；SSE 解析
+- [x] 3.5 错误分类映射（`design.md` D3）：401/403→`auth_failed`；其他 4xx→`invalid_request`；连接失败/超时→`provider_unreachable`/`timeout`；429→`rate_limited`；协议不符→`protocol_error`（不重试）；配置缺失→`no_active_provider`/`credentials_missing`（不发请求）
+- [x] 3.6 超时分层：连接/空闲超时（默认 30s）与生成超时（默认 300s，可配置）
+- [x] 3.7 采样偏好缺省不设（temperature/top_p 留给上游默认；`max_tokens` 按 byok-sampling.md 的解析顺序）；本地安全控制（截断、超时）不属于采样偏好
+- [x] 3.8 测试：本地假服务器回放三种协议的事件序列（文本、工具调用、用量、终止）；认证头断言；错误分类断言；协议坏响应不重试；密钥不进日志与错误
 
 ## 4. IPC 与设置命令
 
-- [ ] 4.1 命令：`get_ai_settings`（激活项、供应商列表与状态、各供应商凭据「已配置」布尔）/ `save_provider` / `delete_provider` / `set_active_provider` / `save_provider_api_key` / `remove_provider_api_key` / `test_provider_connection`
-- [ ] 4.2 `test_provider_connection`：向所选供应商发一次极小真实请求（收紧 max_tokens），返回延迟或分类错误（`design.md` D7）
-- [ ] 4.3 `get_ai_settings` 不含 Key 明文、不含完整请求头；删除供应商走 2.2 的级联清理
-- [ ] 4.4 命令级测试：主路径 + 错误 code 与 `design.md` D3 一一对应；摘要序列化不含敏感串
+- [x] 4.1 命令：`get_ai_settings`（激活项、供应商列表与状态、各供应商凭据「已配置」布尔）/ `save_provider` / `delete_provider` / `set_active_provider` / `save_provider_api_key` / `remove_provider_api_key` / `test_provider_connection`
+- [x] 4.2 `test_provider_connection`：向所选供应商发一次极小真实请求（收紧 max_tokens），返回延迟或分类错误（`design.md` D7）
+- [x] 4.3 `get_ai_settings` 不含 Key 明文、不含完整请求头；删除供应商走 2.2 的级联清理
+- [x] 4.4 命令级测试：主路径 + 错误 code 与 `design.md` D3 一一对应；摘要序列化不含敏感串
 
 ## 5. 前端设置页（布局参考 zcode「模型设置」，样式按根目录 `design.md`）
 
-- [ ] 5.1 页面骨架：说明行（当前接入与费用来源）+ 左栏供应商列表（每项状态点、添加入口）+ 右栏详情/表单；1px 边界、方角、ink 色阶、深底主按钮
-- [ ] 5.2 添加/编辑供应商表单：名称 / Base URL / API Key（密码型，保存后不回显，只显示「已配置」与移除入口）/ API 格式三选下拉（显示端点路径）/ 模型列表
-- [ ] 5.3 校验与主按钮：名称、URL、至少一个模型不满足时主按钮禁用 + 底部行内提示
-- [ ] 5.4 「添加模型」对话框（约 420px）：模型 ID / 上下文窗口 / 最大输出 Token / 输入类型（文本锁定）/ 输出类型（文本锁定）/ 工具调用开关；取消/保存
-- [ ] 5.5 供应商操作：设为激活、删除（确认弹窗：对象名称 + 钥匙串一并清除的说明）、连接测试（结果行内反馈）
-- [ ] 5.6 状态与可读性：状态点附文字说明（不只靠颜色）；AI 未配置时工作台 AI 入口引导到设置；工具调用关闭的降级在会话侧可见（该提示的触发由 `add-ai-planning-core` 消费）
-- [ ] 5.7 键盘与焦点按 `design.md` §10；数据经事件失效刷新
-- [ ] 5.8 前端测试：空态、校验禁用、Key 不回显、删除确认文案
+- [x] 5.1 页面骨架：说明行（当前接入与费用来源）+ 左栏供应商列表（每项状态点、添加入口）+ 右栏详情/表单；1px 边界、方角、ink 色阶、深底主按钮
+- [x] 5.2 添加/编辑供应商表单：名称 / Base URL / API Key（密码型，保存后不回显，只显示「已配置」与移除入口）/ API 格式三选下拉（显示端点路径）/ 模型列表
+- [x] 5.3 校验与主按钮：名称、URL、至少一个模型不满足时主按钮禁用 + 底部行内提示
+- [x] 5.4 「添加模型」对话框（约 420px）：模型 ID / 上下文窗口 / 最大输出 Token / 输入类型（文本锁定）/ 输出类型（文本锁定）/ 工具调用开关；取消/保存
+- [x] 5.5 供应商操作：设为激活、删除（确认弹窗：对象名称 + 钥匙串一并清除的说明）、连接测试（结果行内反馈）
+- [x] 5.6 状态与可读性：状态点附文字说明（不只靠颜色）；AI 未配置时工作台 AI 入口引导到设置；工具调用关闭的降级在会话侧可见（该提示的触发由 `add-ai-planning-core` 消费）
+- [x] 5.7 键盘与焦点按 `design.md` §10；数据经事件失效刷新
+- [x] 5.8 前端测试：空态、校验禁用、Key 不回显、删除确认文案
 
 ## 6. 验收
 
-- [ ] 6.1 `cargo test` 全绿；三协议用本地假服务器回放，不依赖真实端点
+- [x] 6.1 `cargo test` 全绿；三协议用本地假服务器回放，不依赖真实端点
 - [ ] 6.2 手工：配置一个真实供应商（三种格式各一次）→ 连接测试通过 → 断言错误场景（错 Key、错 URL）code 与文案正确
 - [ ] 6.3 手工：本地端点供应商（Ollama/LM Studio 任一）→ 连接测试通过 → 断网后 AI 仍可用且零外部出网
 - [ ] 6.4 确认钥匙串之外（配置文件、数据库、日志）搜不到凭据明文

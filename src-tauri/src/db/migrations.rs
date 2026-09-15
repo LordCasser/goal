@@ -40,6 +40,11 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "repeats",
         sql: M0004_REPEATS,
     },
+    Migration {
+        version: 5,
+        description: "ai planning",
+        sql: M0005_AI_PLANNING,
+    },
 ];
 
 fn checksum(sql: &str) -> String {
@@ -272,3 +277,205 @@ CREATE INDEX ix_cycles_repeat ON cycles(repeat_id);
 -- upstream seed data (see docs/architecture.md, "Do Later 容器").
 UPDATE cycles SET duration = 0 WHERE id = 'later' AND duration IS NULL;
 "#;
+
+// AI planning core (change: add-ai-planning-core, tasks §7.1 and §8.4).
+//
+// `cycles.prioritization_breakdown` stores the five-bucket prioritization
+// conclusion as one JSON document (design D6): it is always read and written
+// as a whole, and NULL means "not prioritized yet". Structure is validated on
+// the Rust side, not by SQL.
+//
+// `planning_issue_dismissals` records dismissed review issues. `issue_type`
+// is one of the six review issue types, validated in the domain layer — no
+// SQL CHECK, so future issue types stay forward-compatible. `task_id` NULL
+// means a cycle-level dismissal. SQLite treats NULLs as mutually distinct in
+// UNIQUE indexes, so the table constraint below only enforces uniqueness for
+// rows with a non-NULL `task_id`; cycle-level uniqueness (NULL `task_id`) is
+// guaranteed by the service layer, which keeps at most one row per
+// (cycle_id, issue_type) pair.
+const M0005_AI_PLANNING: &str = r#"
+ALTER TABLE cycles ADD COLUMN prioritization_breakdown TEXT;  -- JSON, NULL = not prioritized
+
+CREATE TABLE planning_issue_dismissals (
+    id         TEXT PRIMARY KEY,
+    cycle_id   TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
+    issue_type TEXT NOT NULL,
+    task_id    TEXT REFERENCES tasks(id) ON DELETE CASCADE,  -- NULL = cycle-level dismissal
+    reason     TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (cycle_id, issue_type, task_id)
+);
+
+CREATE INDEX ix_dismissals_cycle ON planning_issue_dismissals(cycle_id);
+"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Applies only migrations up to `max_version`, the state a database
+    /// created by an older binary is in (the runner itself has no "stop at"
+    /// knob and must not grow one).
+    fn apply_up_to(conn: &mut Connection, max_version: i64) {
+        ensure_ledger(conn).expect("ledger");
+        for migration in MIGRATIONS.iter().filter(|m| m.version <= max_version) {
+            let tx = conn.transaction().expect("transaction");
+            tx.execute_batch(migration.sql).unwrap_or_else(|e| {
+                panic!("migration {} failed: {e}", migration.version)
+            });
+            tx.execute(
+                "INSERT INTO schema_migrations (version, description, checksum, applied_at)
+                 VALUES (?1, ?2, ?3, unixepoch() * 1000)",
+                rusqlite::params![
+                    migration.version,
+                    migration.description,
+                    checksum(migration.sql)
+                ],
+            )
+            .expect("record migration");
+            tx.commit().expect("commit");
+        }
+    }
+
+    fn columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("pragma");
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("rows")
+    }
+
+    fn table_exists(conn: &Connection, table: &str) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [table],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("sqlite_master")
+            == 1
+    }
+
+    #[test]
+    fn fresh_database_carries_the_ai_planning_schema() {
+        let mut conn = Connection::open_in_memory().expect("open");
+        apply(&mut conn).expect("apply");
+        assert_eq!(
+            current_version(&conn).expect("version"),
+            MIGRATIONS.last().expect("non-empty list").version
+        );
+
+        assert!(
+            columns(&conn, "cycles")
+                .contains(&"prioritization_breakdown".to_string()),
+            "the new cycles column exists"
+        );
+        assert!(
+            table_exists(&conn, "planning_issue_dismissals"),
+            "the dismissals table exists"
+        );
+
+        // The breakdown column is a nullable JSON document; NULL means the
+        // cycle was never prioritized.
+        conn.execute(
+            "INSERT INTO cycles (id, title, type, position) VALUES ('c1', 'Day', 'day', 0)",
+            [],
+        )
+        .expect("insert cycle");
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT prioritization_breakdown FROM cycles WHERE id = 'c1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("select");
+        assert_eq!(stored, None);
+
+        conn.execute(
+            "UPDATE cycles SET prioritization_breakdown = '{\"must\":[{\"task_id\":\"t1\"}]}' \
+             WHERE id = 'c1'",
+            [],
+        )
+        .expect("update");
+        let raw: String = conn
+            .query_row(
+                "SELECT prioritization_breakdown FROM cycles WHERE id = 'c1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("select");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("valid JSON stored");
+        assert_eq!(value["must"][0]["task_id"], "t1");
+    }
+
+    #[test]
+    fn database_at_0004_upgrades_to_0005_without_data_loss() {
+        let mut conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk");
+        apply_up_to(&mut conn, 4);
+        assert_eq!(current_version(&conn).unwrap(), 4);
+        assert!(
+            !columns(&conn, "cycles")
+                .contains(&"prioritization_breakdown".to_string()),
+            "the column does not exist yet at 0004"
+        );
+
+        conn.execute(
+            "INSERT INTO cycles (id, title, type, position) VALUES ('c1', 'Week', 'week', 0)",
+            [],
+        )
+        .expect("insert cycle");
+        conn.execute(
+            "INSERT INTO tasks (id, cycle_id, title, position) VALUES ('t1', 'c1', 'keep me', 0)",
+            [],
+        )
+        .expect("insert task");
+
+        apply(&mut conn).expect("upgrade");
+        assert_eq!(
+            current_version(&conn).unwrap(),
+            MIGRATIONS.last().unwrap().version
+        );
+
+        let title: String = conn
+            .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .expect("task survived");
+        assert_eq!(title, "keep me");
+
+        // Task-level duplicates are rejected by the UNIQUE constraint.
+        conn.execute(
+            "INSERT INTO planning_issue_dismissals (id, cycle_id, issue_type, task_id, reason) \
+             VALUES ('d1', 'c1', 'too_many_goals', 't1', 'resolved')",
+            [],
+        )
+        .expect("insert dismissal");
+        let duplicate = conn.execute(
+            "INSERT INTO planning_issue_dismissals (id, cycle_id, issue_type, task_id) \
+             VALUES ('d2', 'c1', 'too_many_goals', 't1')",
+            [],
+        );
+        assert!(
+            duplicate.is_err(),
+            "UNIQUE (cycle_id, issue_type, task_id) rejects duplicates"
+        );
+
+        // Cycle-level dismissals carry a NULL task_id; SQLite treats NULLs as
+        // distinct, so their uniqueness is the service layer's contract.
+        conn.execute(
+            "INSERT INTO planning_issue_dismissals (id, cycle_id, issue_type) \
+             VALUES ('d3', 'c1', 'not_sure_what_to_do_next')",
+            [],
+        )
+        .expect("cycle-level dismissal");
+
+        conn.execute("DELETE FROM cycles WHERE id = 'c1'", [])
+            .expect("delete cycle");
+        let dismissals: i64 = conn
+            .query_row("SELECT COUNT(*) FROM planning_issue_dismissals", [], |r| {
+                r.get(0)
+            })
+            .expect("count");
+        assert_eq!(dismissals, 0, "dismissals cascade with their cycle");
+    }
+}

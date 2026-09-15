@@ -13,6 +13,7 @@ import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
+import { AiSettingsPage } from "../ai-settings/AiSettingsPage";
 import { Button, Dialog, cn } from "../../ui";
 import { qk } from "../../lib/events";
 import {
@@ -157,6 +158,8 @@ export function SettingsDialog({
   const [openingLogs, setOpeningLogs] = useState(false);
   const [logDir, setLogDir] = useState<string | null>(null);
   const [logDirError, setLogDirError] = useState<unknown>(null);
+  // 模型设置二级弹窗：设置弹窗保持打开，AI 页在上层展示。
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   const selectedTheme = settingsQuery.data?.theme ?? "white";
   const weekStartDay = settingsQuery.data?.week_start_day ?? 1;
@@ -247,10 +250,20 @@ export function SettingsDialog({
           </div>
         </section>
 
-        {/* AI 分区按 §9.3 预留：只说明接入状态，不渲染占位配置或假数据。 */}
+        {/* AI 分区（§9.3）：先说明接入状态，管理入口打开模型设置页。 */}
         <section className="flex flex-col gap-2">
           <h3 className="text-block-title font-semibold text-primary">AI</h3>
-          <p className="text-caption text-secondary">尚未接入 AI 供应商；接入后在此管理连接。</p>
+          <p className="text-caption text-secondary">
+            Bring your own key — requests go directly to your provider, and you
+            pay your provider directly.
+          </p>
+          <Button
+            variant="secondary"
+            size="compact"
+            onClick={() => setAiSettingsOpen(true)}
+          >
+            模型设置…
+          </Button>
         </section>
 
         <section className="flex flex-col gap-2">
@@ -294,6 +307,16 @@ export function SettingsDialog({
           )}
         </section>
       </div>
+      {aiSettingsOpen && (
+        <Dialog
+          open
+          wide
+          title="AI models"
+          onClose={() => setAiSettingsOpen(false)}
+        >
+          <AiSettingsPage />
+        </Dialog>
+      )}
     </Dialog>
   );
 }

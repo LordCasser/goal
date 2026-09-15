@@ -240,3 +240,88 @@ export const ROOT_COLOR_KEYS = [
 ] as const;
 
 export type RootColorKey = (typeof ROOT_COLOR_KEYS)[number];
+
+// ---------------------------------------------------------------------------
+// AI provider settings (change: add-ai-access-and-voice). Derived 1:1 from
+// src-tauri/src/providers/config.rs and src-tauri/src/commands/ai_settings.rs:
+// serde keeps snake_case field names and snake_case enum wire values, and
+// `ProviderSummary` flattens `ProviderConfig` to one level.
+// ---------------------------------------------------------------------------
+
+/** `providers::config::ApiFormat` — decides endpoint path, auth header and SSE decoding. */
+export type ApiFormat =
+  | "anthropic_messages"
+  | "openai_chat_completions"
+  | "openai_responses";
+
+/** `providers::config::InputType`. `text` is mandatory for every model. */
+export type InputType = "text" | "image" | "video" | "pdf";
+
+/** `providers::config::OutputType` — text is the only variant today. */
+export type OutputType = "text";
+
+/** `providers::config::ExtraHeader` — non-sensitive custom header, never credentials. */
+export interface ExtraHeader {
+  name: string;
+  value: string;
+}
+
+/** `providers::config::ModelConfig` — user-declared capability metadata. */
+export interface ModelConfig {
+  /** Identifier sent to the API (e.g. `llama3`, `claude-sonnet-4`). */
+  model_id: string;
+  /** Informational (compaction decisions); not enforced by the sampler. */
+  context_window: number;
+  max_output_tokens: number;
+  /** Must include "text". */
+  input_types: InputType[];
+  /** Can only be ["text"]. */
+  output_types: OutputType[];
+  /** User-declared (design D1); defaults to true when omitted on the wire. */
+  supports_tools: boolean;
+}
+
+/** `providers::config::ProviderConfig`. Empty `id` means "add" (store assigns id). */
+export interface ProviderConfig {
+  id: string;
+  name: string;
+  /** Scheme included; may carry a path prefix (e.g. `https://host/v1`). */
+  base_url: string;
+  api_format: ApiFormat;
+  extra_headers: ExtraHeader[];
+  models: ModelConfig[];
+  /** Unix epoch milliseconds. */
+  created_at: number;
+  /** Forward-compat only; deletion removes entries outright. */
+  archived: boolean;
+}
+
+/**
+ * `commands::ai_settings::ProviderSummary` — `ProviderConfig` is
+ * `#[serde(flatten)]`ed, so its fields sit at the same level as the two
+ * derived booleans. `has_api_key` is the keychain entry's existence only;
+ * key material never crosses IPC in this direction.
+ */
+export interface ProviderSummary extends ProviderConfig {
+  /** False for local endpoints without credentials — a normal state (design D4). */
+  has_api_key: boolean;
+  is_active: boolean;
+}
+
+/** `commands::ai_settings::AiSettingsSummary` — the `get_ai_settings` snapshot. */
+export interface AiSettingsSummary {
+  /** Resolved active provider; null when nothing is active or the id dangles. */
+  active_provider: ProviderSummary | null;
+  providers: ProviderSummary[];
+  /** True iff the active provider exists; a keyless local endpoint counts. */
+  ai_available: boolean;
+}
+
+/** `commands::ai_settings::ConnectionTestResult` — the design-D7 probe outcome. */
+export interface ConnectionTestResult {
+  ok: boolean;
+  latency_ms: number | null;
+  /** Stable design-D3 classification (`auth_failed`, `provider_unreachable`, …). */
+  error_code: string | null;
+  error_message: string | null;
+}

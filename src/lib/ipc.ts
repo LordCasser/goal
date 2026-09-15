@@ -17,6 +17,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AddSessionArgs,
   AddTaskArgs,
+  AiSettingsSummary,
+  ConnectionTestResult,
   CreateCycleArgs,
   Cycle,
   CycleDeletionPreview,
@@ -24,6 +26,7 @@ import type {
   LogLevel,
   PlannerState,
   PreviewSummary,
+  ProviderConfig,
   Repeat,
   RepeatPatch,
   Settings,
@@ -91,6 +94,14 @@ export const commands = {
   setLogLevel: "set_log_level",
   getAppFlag: "get_app_flag",
   setAppFlag: "set_app_flag",
+  // ai settings (change: add-ai-access-and-voice)
+  getAiSettings: "get_ai_settings",
+  saveProvider: "save_provider",
+  deleteProvider: "delete_provider",
+  setActiveProvider: "set_active_provider",
+  saveProviderApiKey: "save_provider_api_key",
+  removeProviderApiKey: "remove_provider_api_key",
+  testProviderConnection: "test_provider_connection",
   // maintenance
   getSchemaVersion: "get_schema_version",
   exportBackup: "export_backup",
@@ -328,4 +339,47 @@ export function exportBackup(target_path: string): Promise<void> {
 /** Absolute path of the debug log directory, for the settings entry point. */
 export function getDebugLogDir(): Promise<string> {
   return invoke<string>(commands.getDebugLogDir);
+}
+
+// --- ai settings (change: add-ai-access-and-voice) ---------------------------
+//
+// Shapes mirror src-tauri/src/commands/ai_settings.rs 1:1 (snake_case keys).
+// `provider` is a whole-struct parameter, so it travels nested under its own
+// name like `args`/`patch`. Summaries never contain key material; the key
+// crosses IPC only as the input of saveProviderApiKey. No AI settings event
+// exists, so every mutator's caller invalidates the settings page query
+// itself (features/ai-settings/AiSettingsPage.tsx).
+
+/** Snapshot for the AI settings page; never contains key material. */
+export function getAiSettings(): Promise<AiSettingsSummary> {
+  return invoke<AiSettingsSummary>(commands.getAiSettings);
+}
+
+/** Empty id adds (the store assigns id/created_at); non-empty id updates. */
+export function saveProvider(provider: ProviderConfig): Promise<ProviderConfig> {
+  return invoke<ProviderConfig>(commands.saveProvider, { provider });
+}
+
+/** Also cascades the keychain entry away; deleting the active provider clears activation. */
+export function deleteProvider(provider_id: string): Promise<void> {
+  return invoke<void>(commands.deleteProvider, { provider_id });
+}
+
+export function setActiveProvider(provider_id: string): Promise<void> {
+  return invoke<void>(commands.setActiveProvider, { provider_id });
+}
+
+/** The only path key material takes into the backend; it is never read back. */
+export function saveProviderApiKey(provider_id: string, api_key: string): Promise<void> {
+  return invoke<void>(commands.saveProviderApiKey, { provider_id, api_key });
+}
+
+/** Idempotent keychain cleanup for an existing provider. */
+export function removeProviderApiKey(provider_id: string): Promise<void> {
+  return invoke<void>(commands.removeProviderApiKey, { provider_id });
+}
+
+/** One minimal real request (design D7); classified failures come back as the result. */
+export function testProviderConnection(provider_id: string): Promise<ConnectionTestResult> {
+  return invoke<ConnectionTestResult>(commands.testProviderConnection, { provider_id });
 }
