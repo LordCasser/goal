@@ -12,7 +12,7 @@ const certificatePath = path.join(root, '.github/signing/macos-release.cer');
 const identifier = 'dev.lordcasser.planner';
 const secrets = new Set();
 function run(command, args, { allowFailure = false } = {}) {
-  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120_000 });
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120_000, killSignal: 'SIGKILL' });
   if (result.error || result.status !== 0) {
     if (allowFailure) return result;
     let detail = result.error?.message ?? result.stderr ?? '';

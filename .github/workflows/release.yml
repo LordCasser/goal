@@ -87,6 +87,7 @@ jobs:
             runner: macos-15
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -102,6 +103,8 @@ jobs:
             libssl-dev \
             libdbus-1-dev \
             libsecret-1-dev \
+            gnome-keyring \
+            dbus-x11 \
             pkg-config \
             patchelf
 
@@ -116,9 +119,22 @@ jobs:
         with:
           prefix-key: goal-release-${{ matrix.id }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           workspaces: src-tauri -> target
+          cache-on-failure: true
       - run: npm ci
       - run: npm run desktop:config:check -- ${{ matrix.platform }}
       - name: Rust tests
+        if: matrix.os == 'linux'
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+        shell: bash
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "%s\\n" "goal-ci-test-keyring-password" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            cargo test --manifest-path src-tauri/Cargo.toml --locked
+          '
+      - name: Rust tests
+        if: matrix.os != 'linux'
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
           CARGO_PROFILE_TEST_DEBUG: "0"
@@ -142,14 +158,15 @@ jobs:
         run: node scripts/macos-signing.mjs prepare
       - name: Verify macOS Keychain signing continuity
         if: matrix.os == 'macos'
+        timeout-minutes: 3
         run: node scripts/macos-keychain-continuity.mjs
 
       - name: Build macOS app bundle
         if: matrix.os == 'macos'
-        run: npm run tauri build -- --target ${{ matrix.target }} --bundles app
+        run: npm run tauri -- build --target ${{ matrix.target }} --bundles app
       - name: Build native bundle
         if: matrix.os != 'macos'
-        run: npm run tauri build -- --target ${{ matrix.target }}
+        run: npm run tauri -- build --target ${{ matrix.target }}
       - name: Sign macOS app
         if: matrix.os == 'macos'
         shell: bash
@@ -166,6 +183,30 @@ jobs:
           dmg_dir="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
           mkdir -p "$dmg_dir"
           node scripts/macos-signing.mjs package "$app_path" "$dmg_dir/Goal-${{ matrix.id }}.dmg"
+      - name: Verify native architecture and Linux package metadata
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            app_path="$(find "src-tauri/target/${{ matrix.target }}" -type d -name '*.app' -print -quit)"
+            test -n "$app_path" || { echo "macOS app bundle not found" >&2; exit 1; }
+            native_path="$app_path/Contents/MacOS/planner"
+          elif [ "${{ matrix.os }}" = "windows" ]; then
+            native_path="src-tauri/target/${{ matrix.target }}/release/planner.exe"
+          else
+            native_path="src-tauri/target/${{ matrix.target }}/release/planner"
+          fi
+          node scripts/release-artifacts.mjs verify-binary \
+            --target "${{ matrix.id }}" \
+            --binary "$native_path"
+          if [ "${{ matrix.os }}" = "linux" ]; then
+            deb_path="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/deb" -type f -name '*.deb' -print -quit)"
+            test -n "$deb_path" || { echo "Linux deb bundle not found" >&2; exit 1; }
+            deb_arch="$(dpkg-deb -f "$deb_path" Architecture)"
+            test "$deb_arch" = "${{ matrix.arch }}" || {
+              echo "Debian metadata architecture $deb_arch does not match ${{ matrix.arch }}" >&2
+              exit 1
+            }
+          fi
       - name: Stage release bundle
         shell: bash
         run: |
@@ -181,6 +222,7 @@ jobs:
           retention-days: 14
       - name: Clean up macOS signing keychain
         if: ${{ always() && matrix.os == 'macos' }}
+        timeout-minutes: 3
         run: node scripts/macos-signing.mjs cleanup
 
   publish:

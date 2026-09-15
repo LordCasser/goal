@@ -18,6 +18,7 @@ function run(command, args, { redact = [] } = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     timeout: 120_000,
+    killSignal: 'SIGKILL',
   });
   if (result.error || result.status !== 0) {
     const safeArgs = args.map((arg) => redact.includes(arg) ? '[redacted]' : arg);
@@ -90,13 +91,8 @@ static int add_item(const char *path) {
         &item
     );
     if (status == errSecSuccess && item != NULL) {
-        // SecKeychainAddGenericPassword's default ACL trusts only the
-        // creating application. Set it explicitly so this test exercises
-        // the same generic-password ACL boundary as the app's keyring.
-        SecAccessRef access = NULL;
-        status = SecAccessCreate(CFSTR("Goal Keychain continuity fixture"), NULL, &access);
-        if (status == errSecSuccess) status = SecKeychainItemSetAccess(item, access);
-        if (access != NULL) CFRelease(access);
+        // Keep SecKeychainAddGenericPassword's default ACL. It models the
+        // app keyring path and avoids replacing access, which can request UI.
         CFRelease(item);
     }
     CFRelease(keychain);
@@ -129,6 +125,12 @@ static int find_item(const char *path, int should_find) {
 
 int main(int argc, char **argv) {
     if (argc != 3) return 90;
+    // Never let a fixture pass by displaying a Keychain authorization dialog.
+    // The caller must observe an OSStatus instead, including for Add/Open.
+    OSStatus interaction_status = SecKeychainSetUserInteractionAllowed(false);
+    if (interaction_status != errSecSuccess) {
+        return report_status("disable-keychain-ui", interaction_status, 2);
+    }
     if (strcmp(argv[1], "add") == 0) return add_item(argv[2]);
     if (strcmp(argv[1], "find") == 0) return find_item(argv[2], 1);
     if (strcmp(argv[1], "deny") == 0) return find_item(argv[2], 0);

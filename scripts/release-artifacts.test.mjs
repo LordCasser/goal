@@ -6,6 +6,7 @@ import {
   RELEASE_TARGETS,
   assertProductVersion,
   stageTarget,
+  verifyBinaryArchitecture,
   verifyReleaseDirectory,
   writeChecksums,
 } from "./release-artifacts.mjs";
@@ -32,6 +33,36 @@ function writeBundles(rootDir, targetId) {
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(path.join(directory, `Planner-0.1.0${bundle.extension}`), `${targetId}:${bundle.directory}`);
   }
+}
+
+function writeNativeFixture(filePath, bytes) {
+  fs.writeFileSync(filePath, bytes);
+  return filePath;
+}
+
+function elfHeader(machine) {
+  const header = Buffer.alloc(64);
+  header.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1], 0);
+  header.writeUInt16LE(machine, 18);
+  return header;
+}
+
+function peHeader(machine) {
+  const header = Buffer.alloc(0x120);
+  header.write("MZ", 0, "ascii");
+  header.writeUInt32LE(0x80, 0x3c);
+  header.set([0x50, 0x45, 0, 0], 0x80);
+  header.writeUInt16LE(machine, 0x84);
+  header.writeUInt16LE(0x70, 0x94);
+  header.writeUInt16LE(0x20b, 0x98);
+  return header;
+}
+
+function machOHeader(cpuType) {
+  const header = Buffer.alloc(32);
+  header.writeUInt32LE(0xfeedfacf, 0);
+  header.writeUInt32LE(cpuType, 4);
+  return header;
 }
 
 afterEach(() => {
@@ -78,5 +109,23 @@ describe("release artifact contract", () => {
     writeBundles(rootDir, "linux-amd64");
     stageTarget({ rootDir, targetId: "linux-amd64", outputDir });
     expect(() => verifyReleaseDirectory({ rootDir, outputDir })).toThrow(/six-target set/);
+  });
+
+  it("checks ELF, PE, and Mach-O architecture headers and rejects invalid targets", () => {
+    const rootDir = temporaryDirectory();
+    const elf = writeNativeFixture(path.join(rootDir, "planner-linux"), elfHeader(62));
+    const pe = writeNativeFixture(path.join(rootDir, "planner-windows.exe"), peHeader(0xaa64));
+    const machO = writeNativeFixture(path.join(rootDir, "planner-macos"), machOHeader(0x01000007));
+
+    expect(verifyBinaryArchitecture({ targetId: "linux-amd64", binaryPath: elf })).toBe("amd64");
+    expect(verifyBinaryArchitecture({ targetId: "windows-arm64", binaryPath: pe })).toBe("arm64");
+    expect(verifyBinaryArchitecture({ targetId: "macos-amd64", binaryPath: machO })).toBe("amd64");
+
+    const truncated = writeNativeFixture(path.join(rootDir, "truncated"), Buffer.from([0x7f, 0x45, 0x4c]));
+    expect(() => verifyBinaryArchitecture({ targetId: "linux-amd64", binaryPath: truncated })).toThrow(/Truncated/);
+    const wrongArchitecture = writeNativeFixture(path.join(rootDir, "wrong-architecture"), elfHeader(183));
+    expect(() => verifyBinaryArchitecture({ targetId: "linux-amd64", binaryPath: wrongArchitecture })).toThrow(/expected amd64 binary, found arm64/);
+    const fat = writeNativeFixture(path.join(rootDir, "fat-macos"), Buffer.from([0xca, 0xfe, 0xba, 0xbe]));
+    expect(() => verifyBinaryArchitecture({ targetId: "macos-amd64", binaryPath: fat })).toThrow(/Universal Mach-O/);
   });
 });

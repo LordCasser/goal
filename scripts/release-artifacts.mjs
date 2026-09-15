@@ -93,6 +93,84 @@ function targetFor(targetId) {
   return target;
 }
 
+function readUInt32(buffer, offset, littleEndian) {
+  if (offset < 0 || offset + 4 > buffer.length) throw new Error("Truncated native binary header");
+  return littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset);
+}
+
+function readUInt16(buffer, offset, littleEndian) {
+  if (offset < 0 || offset + 2 > buffer.length) throw new Error("Truncated native binary header");
+  return littleEndian ? buffer.readUInt16LE(offset) : buffer.readUInt16BE(offset);
+}
+
+function architectureForElf(buffer) {
+  if (buffer.length < 20) throw new Error("Truncated ELF header");
+  const dataEncoding = buffer[5];
+  if (buffer[4] !== 2) throw new Error("Only 64-bit ELF binaries are supported");
+  if (dataEncoding !== 1) throw new Error("Only little-endian ELF binaries are supported");
+  if (buffer[6] !== 1) throw new Error("ELF header has an invalid version");
+  const machine = readUInt16(buffer, 18, true);
+  if (machine === 62) return "amd64";
+  if (machine === 183) return "arm64";
+  throw new Error(`Unsupported ELF machine ${machine}`);
+}
+
+function architectureForPe(buffer) {
+  if (buffer.length < 0x40 || buffer.toString("ascii", 0, 2) !== "MZ") throw new Error("Invalid PE header");
+  const peOffset = readUInt32(buffer, 0x3c, true);
+  const peSignature = Buffer.from([0x50, 0x45, 0, 0]);
+  if (peOffset + 24 > buffer.length || !buffer.subarray(peOffset, peOffset + 4).equals(peSignature)) {
+    throw new Error("Invalid or truncated PE header");
+  }
+  const machine = readUInt16(buffer, peOffset + 4, true);
+  const optionalHeaderSize = readUInt16(buffer, peOffset + 20, true);
+  if (optionalHeaderSize < 2 || peOffset + 24 + optionalHeaderSize > buffer.length) {
+    throw new Error("Truncated PE optional header");
+  }
+  const optionalMagic = readUInt16(buffer, peOffset + 24, true);
+  if (optionalMagic !== 0x20b) throw new Error("Only 64-bit PE binaries are supported");
+  if (machine === 0x8664) return "amd64";
+  if (machine === 0xaa64) return "arm64";
+  throw new Error(`Unsupported PE machine 0x${machine.toString(16)}`);
+}
+
+function architectureForMachO(buffer) {
+  if (buffer.length < 4) throw new Error("Truncated Mach-O header");
+  const littleMagic = readUInt32(buffer, 0, true);
+  const bigMagic = readUInt32(buffer, 0, false);
+  if ([0xcafebabe, 0xcafebabf].includes(littleMagic) || [0xcafebabe, 0xcafebabf].includes(bigMagic)) {
+    throw new Error("Universal Mach-O binaries are not allowed; build one target per artifact");
+  }
+  if (littleMagic !== 0xfeedfacf) {
+    if (littleMagic === 0xfeedface || bigMagic === 0xfeedface || bigMagic === 0xfeedfacf) {
+      throw new Error("Only 64-bit little-endian Mach-O binaries are supported");
+    }
+    throw new Error("Unknown native binary format");
+  }
+  if (buffer.length < 32) throw new Error("Truncated Mach-O header");
+  const cpuType = readUInt32(buffer, 4, true);
+  if (cpuType === 0x01000007) return "amd64";
+  if (cpuType === 0x0100000c) return "arm64";
+  throw new Error(`Unsupported Mach-O CPU type 0x${cpuType.toString(16)}`);
+}
+
+function detectBinaryArchitecture(buffer) {
+  if (buffer.length >= 4 && buffer[0] === 0x7f && buffer.toString("ascii", 1, 4) === "ELF") return architectureForElf(buffer);
+  if (buffer.length >= 2 && buffer.toString("ascii", 0, 2) === "MZ") return architectureForPe(buffer);
+  return architectureForMachO(buffer);
+}
+
+export function verifyBinaryArchitecture({ targetId, binaryPath } = {}) {
+  if (!binaryPath) throw new Error("A native binary path is required");
+  const target = targetFor(targetId);
+  const binary = fs.readFileSync(binaryPath);
+  const actual = detectBinaryArchitecture(binary);
+  if (actual !== target.arch) {
+    throw new Error(`${targetId} expected ${target.arch} binary, found ${actual}: ${binaryPath}`);
+  }
+  return actual;
+}
+
 function walk(directory) {
   if (!fs.existsSync(directory)) return [];
   const entries = fs.readdirSync(directory, { withFileTypes: true });
@@ -185,7 +263,7 @@ function parseOptions(args) {
 
 function usage() {
   console.error(
-    "Usage: node scripts/release-artifacts.mjs <verify-version|stage|verify|checksums> [--tag TAG] [--target TARGET] [--source-dir DIR] [--output-dir DIR] [--version VERSION]",
+    "Usage: node scripts/release-artifacts.mjs <verify-version|verify-binary|stage|verify|checksums> [--tag TAG] [--target TARGET] [--binary FILE] [--source-dir DIR] [--output-dir DIR] [--version VERSION]",
   );
 }
 
@@ -195,6 +273,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const options = parseOptions(args);
     if (command === "verify-version") {
       console.log(assertProductVersion({ tag: options.tag }));
+    } else if (command === "verify-binary") {
+      console.log(verifyBinaryArchitecture({ targetId: options.target, binaryPath: options.binary }));
     } else if (command === "stage") {
       const version = assertProductVersion({ tag: options.tag });
       const files = stageTarget({

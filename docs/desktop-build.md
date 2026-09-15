@@ -11,8 +11,10 @@ npm test
 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 # 由 Tauri 注入目标环境；不要手工把 DESKTOP_PLATFORM 当原生目标来源
-npm run tauri build -- --target <rust-target>
+npm run tauri -- build --target <rust-target>
 ```
+
+Linux 的 secure store 测试需要真实的 Secret Service。CI 在独立的 `dbus-run-session` 中以一次性测试密码启动 `gnome-keyring-daemon --unlock --components=secrets`，再运行上述 `cargo test`；其他平台直接在本机 secure store 上测试。Linux 发布 runner 同时安装 `gnome-keyring` 和 `dbus-x11`。
 
 构建 hook 会清除并重建当前目标的 `dist`，写入只含 `platform` 和产品 `version` 的 `dist/desktop-build.json`，打包前再次核对目标与版本。Tauri 的 JSON Merge Patch 按平台合并以下文件：
 
@@ -28,7 +30,7 @@ npm run tauri build -- --target <rust-target>
 
 ## 发布矩阵
 
-`.github/workflows/release.yml` 是发布入口。它固定使用 Node 22.12.0、Rust 1.88.0，并以六个独立的原生 runner 构建；每个 job 都重新执行 `npm ci`、目标配置检查和 Tauri 构建。Linux runner 需要 WebKitGTK 4.1、GTK 3、GLib、librsvg、OpenSSL、DBus、libsecret、pkg-config 和 patchelf；Windows runner 依赖 MSVC、WebView2 和 NSIS；macOS runner 依赖系统 SDK。
+`.github/workflows/release.yml` 是发布入口。它固定使用 Node 22.12.0、Rust 1.88.0，并以六个独立的原生 runner 构建；每个 job 都重新执行 `npm ci`、目标配置检查和 Tauri 构建。Linux runner 需要 WebKitGTK 4.1、GTK 3、GLib、librsvg、OpenSSL、DBus、libsecret、gnome-keyring、dbus-x11、pkg-config 和 patchelf；Windows runner 依赖 MSVC、WebView2 和 NSIS；macOS runner 依赖系统 SDK。
 
 | 发布 ID | runner | Rust target | 产物 |
 | --- | --- | --- | --- |
@@ -80,7 +82,7 @@ cargo clean --manifest-path src-tauri/Cargo.toml
 只验证本机应用时使用以下命令，避免启动 DMG 的 Finder 布局脚本：
 
 ```sh
-CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 npm run tauri build -- --debug --bundles app
+CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 npm run tauri -- build --debug --bundles app
 ```
 
 不要在并行构建仍运行时清理共享 target。
