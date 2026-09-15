@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AgentPanel } from "./features/agent/AgentPanel";
+import { IssuePanel } from "./features/agent/IssuePanel";
 import { LaterPanel } from "./features/later/LaterPanel";
 import { PlannerWorkspace } from "./features/planner/PlannerWorkspace";
 import { ProposalsBar } from "./features/proposals/ProposalsBar";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
-import { getSettings } from "./lib/ipc";
+import { getPlannerState, getSettings, LATER_CYCLE_ID } from "./lib/ipc";
 import { initEventInvalidation, qk } from "./lib/events";
 import { applyTheme, isTheme } from "./lib/theme";
 
@@ -19,6 +21,18 @@ export default function App() {
   const queryClient = useQueryClient();
   const [laterOpen, setLaterOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Right-side context panel (design.md §3.1): the coach conversation or the
+  // planning-issue report, both scoped to the cycle the workspace targets.
+  const [rightPanel, setRightPanel] = useState<"agent" | "issues" | null>(null);
+
+  // The panel targets the plan the user is working in: the most recent day
+  // column, falling back to week, then long-term (never the Later container).
+  const { data: state } = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
+  const cycles = state?.cycles ?? [];
+  const days = cycles.filter((c) => c.type === "day");
+  const weeks = cycles.filter((c) => c.type === "week");
+  const months = cycles.filter((c) => c.type === "month" && c.id !== LATER_CYCLE_ID);
+  const activeCycleId = days.at(-1)?.id ?? weeks.at(-1)?.id ?? months.at(-1)?.id ?? null;
 
   // Backend events → react-query invalidation. The unlisten cleanup is async
   // because the listeners themselves are registered asynchronously.
@@ -63,7 +77,11 @@ export default function App() {
     <div className="flex h-full flex-col bg-canvas">
       <WindowBar
         laterActive={laterOpen}
+        agentActive={rightPanel === "agent"}
+        issuesActive={rightPanel === "issues"}
         onToggleLater={() => setLaterOpen((open) => !open)}
+        onToggleAgent={() => setRightPanel((p) => (p === "agent" ? null : "agent"))}
+        onToggleIssues={() => setRightPanel((p) => (p === "issues" ? null : "issues"))}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <div className="flex min-h-0 flex-1">
@@ -74,6 +92,12 @@ export default function App() {
           </div>
           <ProposalsBar />
         </main>
+        {rightPanel === "agent" && activeCycleId && (
+          <AgentPanel cycleId={activeCycleId} onClose={() => setRightPanel(null)} />
+        )}
+        {rightPanel === "issues" && activeCycleId && (
+          <IssuePanel cycleId={activeCycleId} onClose={() => setRightPanel(null)} />
+        )}
       </div>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
@@ -87,18 +111,25 @@ export default function App() {
  */
 function WindowBar({
   laterActive,
+  agentActive,
+  issuesActive,
   onToggleLater,
+  onToggleAgent,
+  onToggleIssues,
   onOpenSettings,
 }: {
   laterActive: boolean;
+  agentActive: boolean;
+  issuesActive: boolean;
   onToggleLater: () => void;
+  onToggleAgent: () => void;
+  onToggleIssues: () => void;
   onOpenSettings: () => void;
 }) {
   const buttonBase =
     "flex h-8 items-center gap-1.5 rounded-sm px-2 text-menu font-medium text-primary";
-  const buttonHover = laterActive
-    ? "bg-focus-surface text-focus"
-    : "hover:bg-hover";
+  const active = "bg-focus-surface text-focus";
+  const hover = "hover:bg-hover";
 
   return (
     <header className="flex h-[var(--app-header-height)] shrink-0 items-center border-b border-light bg-canvas pr-4">
@@ -108,7 +139,7 @@ function WindowBar({
         type="button"
         aria-pressed={laterActive}
         title="Do Later (⌘⇧L)"
-        className={`${buttonBase} ${buttonHover}`}
+        className={`${buttonBase} ${laterActive ? active : hover}`}
         onClick={onToggleLater}
       >
         <ClockIcon />
@@ -118,8 +149,28 @@ function WindowBar({
       <div className="h-full min-w-4 flex-1" data-tauri-drag-region />
       <button
         type="button"
+        aria-pressed={agentActive}
+        title="Plan with AI"
+        className={`${buttonBase} ${agentActive ? active : hover}`}
+        onClick={onToggleAgent}
+      >
+        <CoachIcon />
+        Coach
+      </button>
+      <button
+        type="button"
+        aria-pressed={issuesActive}
+        title="Planning issues"
+        className={`${buttonBase} ${issuesActive ? active : hover}`}
+        onClick={onToggleIssues}
+      >
+        <FlagIcon />
+        Issues
+      </button>
+      <button
+        type="button"
         title="Settings"
-        className={`${buttonBase} hover:bg-hover`}
+        className={`${buttonBase} ${hover}`}
         onClick={onOpenSettings}
       >
         <GearIcon />
@@ -134,6 +185,23 @@ function ClockIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3.5 2" />
+    </svg>
+  );
+}
+
+function CoachIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 11.5a8.4 8.4 0 0 1-8.7 8.3 9 9 0 0 1-3.9-.9L3 20l1.2-4.1a8 8 0 0 1-1-3.9A8.4 8.4 0 0 1 12 3.7a8.4 8.4 0 0 1 9 7.8Z" />
+    </svg>
+  );
+}
+
+function FlagIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 21V4" />
+      <path d="M5 4h13l-2.5 4L18 12H5" />
     </svg>
   );
 }
