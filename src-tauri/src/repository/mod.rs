@@ -4,6 +4,8 @@
 pub mod agent;
 pub mod cycles;
 pub mod proposals;
+pub mod reminders;
 pub mod repeats;
+pub mod reviews;
 pub mod settings;
 pub mod tasks;

@@ -582,6 +582,11 @@ pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
     }
     let subtree = repo::subtree_ids(&tx, cycle_id)?;
     let parent = target.parent_id.clone();
+    // Reminders are polymorphic (no FK to the cycles subtree); clean every
+    // reminder attached to the deleted pages and their tasks BEFORE the
+    // delete — the FK cascade would remove the subtree rows and orphan the
+    // lookup (change: add-reminders-notifications §1.3).
+    crate::service::reminders::purge_for_cycle(&tx, cycle_id)?;
     repo::delete(&tx, cycle_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 

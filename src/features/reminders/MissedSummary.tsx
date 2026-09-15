@@ -1,0 +1,101 @@
+/**
+ * 启动补偿摘要（change: add-reminders-notifications §5.5）。
+ *
+ * 挂载时调用 get_missed_summary——第一次调用即完成「收集并标记」；后端缓存
+ * 同一份摘要，StrictMode 双挂载与聚焦重取都不会重复计数或弄丢摘要。
+ * total = 0 不渲染任何东西（spec: 没有错过提醒）。关闭 → acknowledge 把
+ * 全部 ids（含折叠的）标记已处理（spec: 摘要被关闭）。
+ */
+import { useState } from "react";
+import type { JSX } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { Button } from "../../ui";
+import {
+  acknowledgeMissedSummary,
+  formatFireAt,
+  getMissedSummary,
+  reminderKeys,
+  useRemindersChanged,
+} from "./api";
+
+const TARGET_KIND_LABEL = {
+  task: "任务",
+  session: "专注块",
+  day: "日计划",
+  cycle: "周期",
+} as const;
+
+export function MissedSummary(): JSX.Element | null {
+  const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  useRemindersChanged(queryClient);
+
+  const summaryQuery = useQuery({
+    queryKey: reminderKeys.missedSummary(),
+    queryFn: getMissedSummary,
+  });
+  const summary = summaryQuery.data;
+
+  const acknowledge = useMutation({
+    mutationFn: () => acknowledgeMissedSummary(summary?.ids ?? []),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: reminderKeys.missedSummary(),
+      });
+      void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+    },
+  });
+
+  if (!summary || summary.total === 0) return null;
+
+  return (
+    <aside
+      aria-label="错过的提醒"
+      className="flex flex-col gap-2 rounded-sm border border-light bg-content p-3"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-caption text-primary">
+          您离开时有 {summary.total} 条提醒到期
+        </p>
+        <span className="flex shrink-0 gap-1">
+          <Button
+            variant="ghost"
+            size="compact"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? "收起" : "展开"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="compact"
+            loading={acknowledge.isPending}
+            onClick={() => acknowledge.mutate()}
+          >
+            全部标为已读
+          </Button>
+        </span>
+      </div>
+      {expanded && (
+        <ul className="flex flex-col gap-1">
+          {summary.items.map((item) => (
+            <li key={item.id} className="text-caption text-secondary">
+              {TARGET_KIND_LABEL[item.target_kind]} ·{" "}
+              {item.title ?? item.target_id.slice(0, 8)} ·{" "}
+              {formatFireAt(item.fire_at)}
+            </li>
+          ))}
+          {summary.has_more && (
+            <li className="text-caption text-hint">
+              …以及其余 {summary.total - summary.items.length} 条
+            </li>
+          )}
+        </ul>
+      )}
+      {acknowledge.isError && (
+        <p className="text-caption text-danger">操作失败，请重试</p>
+      )}
+    </aside>
+  );
+}

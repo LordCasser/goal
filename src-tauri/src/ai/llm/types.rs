@@ -8,11 +8,11 @@
 use serde::{Deserialize, Serialize};
 
 /// The skill driving an agent conversation (spec: agent-conversation,
-/// 技能激活). Four skills are persisted on the conversation row plus the
+/// 技能激活). Five skills are persisted on the conversation row plus the
 /// `none` fallback that guides the model to pick a `start_*` tool first.
 ///
 /// Persistence note: the `agent_conversations.active_skill` CHECK allows the
-/// four skill values plus NULL — `None` is expressed as NULL and never stored
+/// five skill values plus NULL — `None` is expressed as NULL and never stored
 /// as the string `"none"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,6 +22,7 @@ pub enum AgentSkill {
     LongTermPlanning,
     ShortTermPlanning,
     Prioritization,
+    Review,
 }
 
 impl AgentSkill {
@@ -33,6 +34,7 @@ impl AgentSkill {
             Self::LongTermPlanning => "long_term_planning",
             Self::ShortTermPlanning => "short_term_planning",
             Self::Prioritization => "prioritization",
+            Self::Review => "review",
         }
     }
 
@@ -44,6 +46,7 @@ impl AgentSkill {
             "long_term_planning" => Some(Self::LongTermPlanning),
             "short_term_planning" => Some(Self::ShortTermPlanning),
             "prioritization" => Some(Self::Prioritization),
+            "review" => Some(Self::Review),
             _ => None,
         }
     }
@@ -162,6 +165,21 @@ mod tests {
         }
         assert_eq!(AgentSkill::parse("bogus"), None);
         assert_eq!(AgentSkill::parse(""), None);
+    }
+
+    #[test]
+    fn review_skill_wire_value_round_trips() {
+        // add-review-retrospective: the fifth persisted skill.
+        assert_eq!(AgentSkill::Review.as_str(), "review");
+        assert_eq!(AgentSkill::parse("review"), Some(AgentSkill::Review));
+        assert_eq!(
+            serde_json::to_value(AgentSkill::Review).unwrap(),
+            serde_json::json!("review")
+        );
+        assert_eq!(
+            serde_json::from_value::<AgentSkill>(serde_json::json!("review")).unwrap(),
+            AgentSkill::Review
+        );
     }
 
     #[test]

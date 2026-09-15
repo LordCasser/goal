@@ -22,6 +22,7 @@ pub fn build_system_instruction(skill: AgentSkill) -> String {
         AgentSkill::LongTermPlanning => LONG_TERM_PLANNING_PROMPT,
         AgentSkill::ShortTermPlanning => SHORT_TERM_PLANNING_PROMPT,
         AgentSkill::Prioritization => PRIORITIZATION_PROMPT,
+        AgentSkill::Review => REVIEW_PROMPT,
     };
     format!("{COMMON}\n{skill_text}")
 }
@@ -126,6 +127,37 @@ Only send buckets that change in one update — buckets you leave out keep their
 current content.
 ";
 
+/// add-review-retrospective §5.2: the review skill walks the fixed question
+/// set from `service::reviews::REVIEW_QUESTIONS` (the ids below are the same
+/// wire keys the saved answers carry), one question per message, with
+/// candidate answers, skipping allowed — and the hard rule that facts are
+/// system data the model may quote but never recompute or rewrite.
+const REVIEW_PROMPT: &str = "\
+You are a cycle-review coach. The `start_review` tool result contains this \
+cycle's facts (completion, focused time, linked lower-level items, the \
+unfinished list) and, when one exists, the most recent previous review's \
+conclusion. Ask the user about the judgment questions below and help them \
+decide every unfinished item's outcome.
+
+The facts are system data. Quote the numbers exactly as the tool reported \
+them; never recompute, round, embellish or invent any fact.
+
+Walk the fixed question set in this order, one question per message:
+1. `what_went_well` — what went well this cycle?
+2. `what_held_you_back` — what held the user back?
+3. `where_plan_diverged` — where did the plan and reality diverge?
+4. `one_change_next` — the one thing to change next cycle?
+
+For each question offer two or three candidate answers drawn from the facts \
+and what the user has said; the user may always answer in their own words \
+instead. If the user does not want to answer, record the question as skipped \
+(a short reason may be recorded too) and move on — never press twice. Once \
+every question is answered or skipped, help the user decide an outcome for \
+each unfinished item, one item at a time: carry it into the next cycle, move \
+it back to Do Later, or drop it. Suggest, never decide.
+
+";
+
 /// `start_planning` dispatch (task 3.4): the cycle type decides the skill.
 /// Sessions are rejected by the caller — agent mutations are not supported
 /// for focus blocks (spec: 对专注块启动规划).
@@ -211,5 +243,45 @@ mod tests {
         );
         let error = planning_skill_for_cycle("session").unwrap_err();
         assert!(error.contains("not supported for session"), "{error}");
+    }
+
+    // -- review skill (add-review-retrospective §5.2) --------------------------
+
+    #[test]
+    fn review_prompt_carries_the_fixed_question_set_one_question_at_a_time() {
+        let prompt = build_system_instruction(AgentSkill::Review);
+        assert!(!prompt.trim().is_empty());
+        // Every canonical question id (and its topic) appears, in asking order.
+        let mut position = 0usize;
+        for question in crate::service::reviews::REVIEW_QUESTIONS {
+            let at = prompt
+                .find(question.id)
+                .unwrap_or_else(|| panic!("missing question id {}", question.id));
+            assert!(at >= position, "questions out of order at {}", question.id);
+            position = at;
+        }
+        assert!(prompt.contains("one question per message"));
+    }
+
+    #[test]
+    fn review_prompt_allows_skipping_and_candidate_answers() {
+        let prompt = build_system_instruction(AgentSkill::Review);
+        assert!(prompt.contains("skipped"));
+        assert!(prompt.contains("candidate answers"));
+    }
+
+    #[test]
+    fn review_prompt_forbids_rewriting_facts() {
+        let prompt = build_system_instruction(AgentSkill::Review);
+        assert!(prompt.contains("never recompute, round, embellish or invent"));
+        assert!(prompt.contains("Quote the numbers exactly"));
+    }
+
+    #[test]
+    fn review_prompt_keeps_the_shared_contract_rules() {
+        let prompt = build_system_instruction(AgentSkill::Review);
+        assert!(prompt.contains("always return success"));
+        assert!(prompt.contains("Never invent metrics"));
+        assert!(prompt.contains("Ask at most one question per message."));
     }
 }

@@ -13,6 +13,10 @@ use r2d2_sqlite::SqliteConnectionManager;
 use tauri::{Manager, Runtime};
 
 /// Process-wide database handle stored in Tauri managed state.
+///
+/// `Clone` is cheap (the pool is `Arc`-backed) and exists so the reminders
+/// scheduler thread can hold its own handle (change: add-reminders-notifications).
+#[derive(Clone)]
 pub struct Db {
     pool: Pool<SqliteConnectionManager>,
     path: PathBuf,

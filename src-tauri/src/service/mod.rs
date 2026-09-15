@@ -5,10 +5,14 @@
 //! ([`Mutation`]) and the command layer turns that into event emissions. The
 //! payload contract stays "invalidation notice only".
 
+pub mod calendar;
 pub mod cycles;
 pub mod editor;
+pub mod onboarding;
 pub mod proposals;
+pub mod reminders;
 pub mod repeats;
+pub mod reviews;
 pub mod settings;
 pub mod tasks;
 

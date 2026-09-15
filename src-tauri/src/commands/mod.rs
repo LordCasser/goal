@@ -4,12 +4,16 @@
 
 pub mod agent;
 pub mod ai_settings;
+pub mod calendar_view;
 pub mod cycles;
 pub mod editor;
 pub mod later;
 pub mod maintenance;
+pub mod onboarding;
 pub mod proposals;
+pub mod reminders;
 pub mod repeats;
+pub mod reviews;
 pub mod settings;
 pub mod tasks;
 

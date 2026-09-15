@@ -59,6 +59,7 @@ use crate::repository::{cycles as cycles_repo, tasks as tasks_repo};
 use crate::service::cycles as cycles_service;
 use crate::service::now_ms;
 use crate::service::proposals::{self, TaskInput};
+use crate::service::reviews as reviews_service;
 
 /// Sentinel addressing the session-bound cycle. This is the only cycle the
 /// §5 tools can address: `day:`/`week:`/`long-term:` key resolution is the
@@ -99,6 +100,10 @@ struct StartGoalSettingArgs {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StartPrioritizationArgs {}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartReviewArgs {}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -180,9 +185,12 @@ impl ToolExecutor for ToolRegistry {
     ///   `none` system prompt tells the model to activate a skill first and
     ///   must not be undermined by write tools being reachable pre-activation.
     /// * any activated skill — the full non-activation set (2 read + 6
-    ///   write/analysis tools). Per-skill narrowing would duplicate the
-    ///   prompts' behavioural constraints; the prompts stay the single place
-    ///   that steers which tools a skill uses.
+    ///   write/analysis tools + `start_review`). Per-skill narrowing would
+    ///   duplicate the prompts' behavioural constraints; the prompts stay the
+    ///   single place that steers which tools a skill uses. `start_review`
+    ///   (add-review-retrospective §5.1) joins this shared set: it is an
+    ///   activation-style pivot reachable once a skill is active, and reviews
+    ///   the session-bound cycle.
     fn definitions(&self, skill: AgentSkill, tools_supported: bool) -> Vec<ToolDef> {
         if !tools_supported {
             return Vec::new();
@@ -196,7 +204,8 @@ impl ToolExecutor for ToolRegistry {
             AgentSkill::GoalSetting
             | AgentSkill::LongTermPlanning
             | AgentSkill::ShortTermPlanning
-            | AgentSkill::Prioritization => vec![
+            | AgentSkill::Prioritization
+            | AgentSkill::Review => vec![
                 def_get_cycle_context(),
                 def_get_task_details(),
                 def_create_goal(),
@@ -205,6 +214,7 @@ impl ToolExecutor for ToolRegistry {
                 def_move_goal(),
                 def_update_goal_breakdown(),
                 def_update_prioritization_breakdown(),
+                def_start_review(),
             ],
         }
     }
@@ -275,6 +285,15 @@ impl ToolRegistry {
                     start_prioritization(db, cycle_id)?,
                     Some(AgentSkill::Prioritization),
                 ))
+            }
+            "start_review" => {
+                let _: StartReviewArgs = parse_args(call)?;
+                let result = start_review(db, cycle_id)?;
+                let skill = result
+                    .get("activated_skill")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(AgentSkill::parse);
+                Ok((result, skill))
             }
             // -- writes, all preview-backed (5.3) --------------------------
             "create_goal" => {
@@ -483,6 +502,32 @@ fn start_goal_setting(db: &Db, args: &StartGoalSettingArgs) -> AppResult<serde_j
         "activated_skill": AgentSkill::GoalSetting.as_str(),
         "task": task_details(&task),
         "message": "Goal clarification activated.",
+    }))
+}
+
+/// `start_review` (add-review-retrospective §5.1–§5.3) — activates the
+/// review skill for the bound cycle. Session cycles answer with the stable
+/// `unsupported_cycle_type` code and never activate the skill. The result
+/// carries the query-derived facts of the cycle (the model quotes them, it
+/// never computes them) plus the **most recent** other review's conclusion —
+/// one review, never the full history. The turn executor persists the skill
+/// on the conversation; this layer does not write `active_skill`.
+fn start_review(db: &Db, cycle_id: &str) -> AppResult<serde_json::Value> {
+    let conn = db.pool().get()?;
+    let cycle = cycles_repo::require(&conn, cycle_id)?;
+    if cycle.cycle_type == CycleType::Session {
+        return Err(AppError::validation(
+            "unsupported_cycle_type",
+            "Reviews are not supported for session cycles.",
+        ));
+    }
+    let facts = reviews_service::compute_facts(&conn, cycle_id)?;
+    let previous_review = reviews_service::latest_review_context(&conn, cycle_id)?;
+    Ok(json!({
+        "activated_skill": AgentSkill::Review.as_str(),
+        "facts": facts,
+        "previous_review": previous_review,
+        "message": "Review activated.",
     }))
 }
 
@@ -798,6 +843,18 @@ fn def_start_prioritization() -> ToolDef {
         "start_prioritization",
         "Activate prioritization: load the cycle's five-bucket breakdown and the \
          tasks still awaiting classification.",
+        object_schema(json!({}), &[]),
+    )
+}
+
+fn def_start_review() -> ToolDef {
+    ToolDef::new(
+        "start_review",
+        "Activate the cycle review for the current cycle: receive its facts \
+         (completion, focused time, linked lower-level items, unfinished items) \
+         and the most recent previous review's conclusion, then walk the user \
+         through the fixed review questions one at a time. Focus blocks \
+         (sessions) do not support reviews.",
         object_schema(json!({}), &[]),
     )
 }
@@ -1616,6 +1673,104 @@ mod tests {
         );
     }
 
+    // -- start_review (add-review-retrospective §5) ----------------------------
+
+    #[test]
+    fn start_review_activates_the_review_skill_with_facts_and_latest_conclusion() {
+        let (_dir, db) = db();
+        let older = month_cycle(&db);
+        let current = month_cycle_of(&db, 3);
+        task(&db, &current, "current item");
+        let older_task = task(&db, &older, "older item");
+        crate::service::tasks::patch_task(
+            &db,
+            &older_task,
+            &crate::service::tasks::TaskPatch {
+                completed: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // An older review (not the one under review) plus an even older one:
+        // the context must carry only the most recent other review.
+        let oldest = month_cycle_of(&db, 6);
+        crate::service::reviews::save_cycle_review(
+            &db,
+            &crate::service::reviews::SaveReviewArgs {
+                cycle_id: oldest,
+                answers: vec![],
+            },
+            100,
+        )
+        .unwrap();
+        crate::service::reviews::save_cycle_review(
+            &db,
+            &crate::service::reviews::SaveReviewArgs {
+                cycle_id: older.clone(),
+                answers: vec![crate::service::reviews::ReviewAnswerInput {
+                    id: "what_went_well".into(),
+                    status: "answered".into(),
+                    text: "steady shipping".into(),
+                }],
+            },
+            200,
+        )
+        .unwrap();
+
+        let outcome = run(&db, &current, "start_review", json!({}));
+        assert!(!outcome.is_error);
+        assert_eq!(outcome.activated_skill, Some(AgentSkill::Review));
+        assert_eq!(outcome.result["activated_skill"], "review");
+
+        // Facts of the bound cycle, query-derived.
+        let facts = &outcome.result["facts"];
+        assert_eq!(facts["cycle_id"], current.as_str());
+        assert_eq!(facts["total_items"], serde_json::json!(1));
+        assert_eq!(facts["completed_items"], serde_json::json!(0));
+        assert_eq!(facts["incomplete"][0]["title"], "current item");
+
+        // Exactly one previous review — the most recent one, not the history.
+        let previous = &outcome.result["previous_review"];
+        assert_eq!(previous["cycle_id"], older.as_str());
+        let answers = previous["answers"].as_array().unwrap();
+        assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0]["text"], "steady shipping");
+    }
+
+    #[test]
+    fn start_review_has_no_previous_review_on_the_first_cycle() {
+        let (_dir, db) = db();
+        let cycle = month_cycle(&db);
+        let outcome = run(&db, &cycle, "start_review", json!({}));
+        assert!(!outcome.is_error);
+        assert!(outcome.result["previous_review"].is_null());
+        assert_eq!(
+            outcome.result["facts"]["has_content"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn start_review_rejects_session_cycles_without_activating() {
+        let (_dir, db) = db();
+        let session = session_cycle(&db);
+        let outcome = run(&db, &session, "start_review", json!({}));
+        assert_eq!(error_code(&outcome), "unsupported_cycle_type");
+        assert_eq!(outcome.activated_skill, None);
+        assert!(outcome.result["error"]
+            .as_str()
+            .unwrap()
+            .contains("session"));
+    }
+
+    #[test]
+    fn start_review_arguments_are_strict() {
+        let (_dir, db) = db();
+        let cycle = month_cycle(&db);
+        let outcome = run(&db, &cycle, "start_review", json!({ "cycle_key": "x" }));
+        assert_eq!(error_code(&outcome), "invalid_arguments");
+    }
+
     // -- 5.6 strict arguments --------------------------------------------------
 
     #[test]
@@ -1678,7 +1833,9 @@ mod tests {
             assert!(names.contains(&name), "none must offer {name}");
         }
 
-        // Every activated skill gets the full non-activation set.
+        // Every activated skill gets the full non-activation set. §5.1
+        // (add-review-retrospective): start_review joins the shared set for
+        // every skill except None.
         let expected = [
             "get_cycle_context",
             "get_task_details",
@@ -1688,12 +1845,14 @@ mod tests {
             "move_goal",
             "update_goal_breakdown",
             "update_prioritization_breakdown",
+            "start_review",
         ];
         for skill in [
             AgentSkill::GoalSetting,
             AgentSkill::LongTermPlanning,
             AgentSkill::ShortTermPlanning,
             AgentSkill::Prioritization,
+            AgentSkill::Review,
         ] {
             let defs = registry.definitions(skill, true);
             let names: Vec<&str> = defs.iter().map(|def| def.name.as_str()).collect();

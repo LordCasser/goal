@@ -14,7 +14,11 @@ use planner_lib::ai::llm::types::ToolCallRecord;
 use planner_lib::ai::tools::ToolRegistry;
 
 fn call(id: &str, name: &str, arguments: serde_json::Value) -> ToolCallRecord {
-    ToolCallRecord { id: id.into(), name: name.into(), arguments }
+    ToolCallRecord {
+        id: id.into(),
+        name: name.into(),
+        arguments,
+    }
 }
 
 /// §10.3: a tool write lands in the pending list and Revert restores the
@@ -30,7 +34,11 @@ fn agent_write_is_revertible_and_revert_restores_the_data() {
     let outcome = executor.execute(
         &test.db,
         &month.id,
-        &call("c1", "create_goal", serde_json::json!({ "title": "Ship v1", "rationale": "user asked" })),
+        &call(
+            "c1",
+            "create_goal",
+            serde_json::json!({ "title": "Ship v1", "rationale": "user asked" }),
+        ),
     );
     assert!(!outcome.is_error, "{:?}", outcome.result);
     let task_id = outcome.result["task_id"].as_str().unwrap().to_string();
@@ -40,13 +48,14 @@ fn agent_write_is_revertible_and_revert_restores_the_data() {
         planner_lib::service::proposals::get_preview_summary(&test.db, &month.id).unwrap();
     assert_eq!(preview.count, 1);
     let conn = test.db.pool().get().unwrap();
-    let visible = planner_lib::repository::tasks::list_visible_by_cycle(&conn, &month.id)
-        .unwrap();
+    let visible = planner_lib::repository::tasks::list_visible_by_cycle(&conn, &month.id).unwrap();
     assert!(!visible.iter().any(|t| t.id == task_id));
 
     // Revert: the row never existed before, so it disappears entirely.
     planner_lib::service::proposals::undo_task_preview(&test.db, &task_id).unwrap();
-    assert!(planner_lib::repository::tasks::get(&conn, &task_id).unwrap().is_none());
+    assert!(planner_lib::repository::tasks::get(&conn, &task_id)
+        .unwrap()
+        .is_none());
     let preview_after =
         planner_lib::service::proposals::get_preview_summary(&test.db, &month.id).unwrap();
     assert_eq!(preview_after.count, 0);
@@ -73,8 +82,10 @@ fn review_degrades_silently_without_a_provider() {
 
     // Resolving a provider without configuration fails with the stable code
     // the UI maps to the settings entry — and nothing else breaks.
-    let settings =
-        planner_lib::providers::service::AiSettingsState::load(&std::env::temp_dir().join("planner-nonexistent-test")).unwrap();
+    let settings = planner_lib::providers::service::AiSettingsState::load(
+        &std::env::temp_dir().join("planner-nonexistent-test"),
+    )
+    .unwrap();
     let error = planner_lib::ai::llm::resolve(&settings).unwrap_err();
     assert_eq!(error.code(), "no_active_provider");
 }

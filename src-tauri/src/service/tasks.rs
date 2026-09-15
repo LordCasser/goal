@@ -153,6 +153,9 @@ pub fn delete_task(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
     // Children rows and preview snapshots go with the row (FK cascades).
     repo::delete(&tx, task_id)?;
+    // Reminders have no FK to follow (polymorphic target); clean them in the
+    // same transaction (change: add-reminders-notifications §1.3).
+    crate::service::reminders::purge_for_task(&tx, task_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     Ok(Mutation::new(()).touching_tasks(cycle.id))
 }

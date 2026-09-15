@@ -339,3 +339,284 @@ pub fn delete(conn: &Connection, id: &str) -> AppResult<()> {
         .map_err(from_rusqlite)?;
     Ok(())
 }
+
+// --- calendar view (change: add-calendar-time-view) --------------------------
+//
+// Range reads, cross-date move helpers and the session-schedule column.
+// These are appends only: the pre-existing functions above are untouched, so
+// the calendar queries below deliberately re-state `CYCLE_COLUMNS`-shaped
+// selects instead of editing them.
+
+/// Day cycles whose date (`starts_on`) falls in the inclusive range, ordered
+/// by date. The calendar grid maps `starts_on` 1:1 to its cell because a day
+/// cycle's date identity is exactly its `starts_on`.
+pub fn list_day_cycles_in_range(
+    conn: &Connection,
+    start_date: &str,
+    end_date: &str,
+) -> AppResult<Vec<Cycle>> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {CYCLE_COLUMNS} FROM cycles \
+             WHERE archived = 0 AND type = 'day' \
+               AND starts_on IS NOT NULL AND starts_on >= ?1 AND starts_on <= ?2 \
+             ORDER BY starts_on ASC, id ASC"
+        ))
+        .map_err(from_rusqlite)?;
+    let rows = stmt
+        .query_map(params![start_date, end_date], row_to_cycle)
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
+fn placeholder_list(len: usize) -> String {
+    (1..=len)
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Focus blocks of many days in one query: `(parent day id, cycle)` pairs,
+/// column order inside each day (`position, created_at, id`). Avoids the
+/// per-day N queries the calendar would otherwise need.
+pub fn list_sessions_by_days(
+    conn: &Connection,
+    day_ids: &[String],
+) -> AppResult<Vec<(String, Cycle)>> {
+    if day_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        "SELECT {CYCLE_COLUMNS} FROM cycles \
+         WHERE archived = 0 AND type = 'session' AND parent_id IN ({}) \
+         ORDER BY position ASC, created_at ASC, id ASC",
+        placeholder_list(day_ids.len())
+    );
+    let mut stmt = conn.prepare(&sql).map_err(from_rusqlite)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(day_ids.iter()), |row| {
+            Ok((row.get::<_, String>("parent_id")?, row_to_cycle(row)?))
+        })
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
+/// One row of `cycles.scheduled_start_at` (migration 0008) joined with the
+/// duration it schedules. The schedule deliberately travels through this
+/// dedicated projection instead of the `Cycle` struct: adding a field there
+/// would force every existing constructor/row-mapper to change; the calendar
+/// is the only reader today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionScheduleRow {
+    pub day_cycle_id: String,
+    pub session_id: String,
+    /// Epoch milliseconds; always present in this projection.
+    pub starts_at: i64,
+    /// Milliseconds; `None` falls back to zero length at overlap time.
+    pub duration: Option<i64>,
+}
+
+const SCHEDULE_COLUMNS: &str = "parent_id, id, scheduled_start_at, COALESCE(duration, 0)";
+
+fn row_to_schedule(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionScheduleRow> {
+    Ok(SessionScheduleRow {
+        day_cycle_id: row.get(0)?,
+        session_id: row.get(1)?,
+        starts_at: row.get(2)?,
+        duration: Some(row.get(3)?),
+    })
+}
+
+/// Scheduled focus blocks of one day, ordered by start time. Read-only; the
+/// overlap detector and the day aggregate both consume this.
+pub fn list_scheduled_in_day(
+    conn: &Connection,
+    day_cycle_id: &str,
+) -> AppResult<Vec<SessionScheduleRow>> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SCHEDULE_COLUMNS} FROM cycles \
+             WHERE archived = 0 AND type = 'session' AND parent_id = ?1 \
+               AND scheduled_start_at IS NOT NULL \
+             ORDER BY scheduled_start_at ASC, id ASC"
+        ))
+        .map_err(from_rusqlite)?;
+    let rows = stmt
+        .query_map(params![day_cycle_id], row_to_schedule)
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
+/// Scheduled focus blocks of many days in one query (range payload).
+pub fn list_scheduled_in_days(
+    conn: &Connection,
+    day_ids: &[String],
+) -> AppResult<Vec<SessionScheduleRow>> {
+    if day_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        "SELECT {SCHEDULE_COLUMNS} FROM cycles \
+         WHERE archived = 0 AND type = 'session' AND scheduled_start_at IS NOT NULL \
+           AND parent_id IN ({}) \
+         ORDER BY scheduled_start_at ASC, id ASC",
+        placeholder_list(day_ids.len())
+    );
+    let mut stmt = conn.prepare(&sql).map_err(from_rusqlite)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(day_ids.iter()), row_to_schedule)
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
+/// Total scheduled duration (ms) of one day, counting every block that has a
+/// schedule — including not-yet-started ones (spec: 含未开始已排).
+pub fn sum_scheduled_duration(conn: &Connection, day_cycle_id: &str) -> AppResult<i64> {
+    conn.query_row(
+        "SELECT COALESCE(SUM(COALESCE(duration, 0)), 0) FROM cycles \
+         WHERE archived = 0 AND type = 'session' AND parent_id = ?1 \
+           AND scheduled_start_at IS NOT NULL",
+        params![day_cycle_id],
+        |r| r.get(0),
+    )
+    .map_err(from_rusqlite)
+}
+
+/// Writes a focus block's schedule. `scheduled_start_at` is set as given;
+/// `duration` is only touched when `Some` (COALESCE semantics, mirroring
+/// `set_lifecycle`), so callers that only move the start leave the duration.
+pub fn set_session_schedule(
+    conn: &Connection,
+    session_id: &str,
+    scheduled_start_at: i64,
+    duration: Option<i64>,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE cycles SET scheduled_start_at = ?2, duration = COALESCE(?3, duration) \
+         WHERE id = ?1",
+        params![session_id, scheduled_start_at, duration],
+    )
+    .map_err(from_rusqlite)?;
+    Ok(())
+}
+
+/// Sessions that started and have not finished, within `id` or any descendant.
+/// Distinct from `count_started_sessions` (which also counts finished ones):
+/// the cross-date merge must not discard a day with a *running* block, while
+/// a merely historical started block is movable data.
+pub fn count_running_sessions(conn: &Connection, id: &str) -> AppResult<i64> {
+    conn.query_row(
+        "WITH RECURSIVE sub(id) AS (
+             SELECT id FROM cycles WHERE id = ?1
+             UNION ALL
+             SELECT c.id FROM cycles c JOIN sub s ON c.parent_id = s.id
+         )
+         SELECT COUNT(*) FROM cycles
+         WHERE id IN (SELECT id FROM sub) AND type = 'session' \
+           AND started = 1 AND finished = 0",
+        params![id],
+        |r| r.get(0),
+    )
+    .map_err(from_rusqlite)
+}
+
+/// Rewrites a day cycle's date identity. `None` clears the column — the swap
+/// strategy relies on clearing both days first so the partial unique index
+/// (`calendar_key IS NOT NULL`) never sees the collision.
+pub fn set_day_identity(
+    conn: &Connection,
+    id: &str,
+    calendar_key: Option<&str>,
+    starts_on: Option<&str>,
+    ends_on: Option<&str>,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE cycles SET calendar_key = ?2, starts_on = ?3, ends_on = ?4 WHERE id = ?1",
+        params![id, calendar_key, starts_on, ends_on],
+    )
+    .map_err(from_rusqlite)?;
+    Ok(())
+}
+
+pub fn set_title(conn: &Connection, id: &str, title: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE cycles SET title = ?2 WHERE id = ?1",
+        params![id, title],
+    )
+    .map_err(from_rusqlite)?;
+    Ok(())
+}
+
+/// Re-parents a day cycle (and appends it at the end of the new parent's
+/// column) — used when a day takes over a date that lives in another week.
+pub fn reparent(conn: &Connection, id: &str, parent_id: &str, position: i64) -> AppResult<()> {
+    conn.execute(
+        "UPDATE cycles SET parent_id = ?2, position = ?3 WHERE id = ?1",
+        params![id, parent_id, position],
+    )
+    .map_err(from_rusqlite)?;
+    Ok(())
+}
+
+/// Moves every focus block (including archived ones) of one day into another
+/// day. Position renumbering of the visible blocks is the service layer's job
+/// (`reorder`); this only re-parents so nothing is cascade-deleted with the
+/// emptied source day. Returns the moved row count.
+pub fn move_sessions_between_days(
+    conn: &Connection,
+    from_day_id: &str,
+    to_day_id: &str,
+) -> AppResult<u64> {
+    conn.execute(
+        "UPDATE cycles SET parent_id = ?2 WHERE parent_id = ?1 AND type = 'session'",
+        params![from_day_id, to_day_id],
+    )
+    .map(|moved| moved as u64)
+    .map_err(from_rusqlite)
+}
+
+/// Moves every task (and its pending-preview snapshots) of one cycle into
+/// another, keeping the source's relative order: top-level tasks are offset
+/// past the target's current top-level span, so merged tasks append after the
+/// target's own (spec: 合并保持 position 顺序). Returns the moved row count.
+pub fn move_tasks_between_cycles(
+    conn: &Connection,
+    from_cycle_id: &str,
+    to_cycle_id: &str,
+) -> AppResult<u64> {
+    let offset: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM tasks \
+         WHERE cycle_id = ?1 AND parent_id IS NULL",
+            params![to_cycle_id],
+            |r| r.get(0),
+        )
+        .map_err(from_rusqlite)?;
+    conn.execute(
+        "UPDATE tasks SET position = position + ?2 WHERE cycle_id = ?1 AND parent_id IS NULL",
+        params![from_cycle_id, offset],
+    )
+    .map_err(from_rusqlite)?;
+    let moved = conn
+        .execute(
+            "UPDATE tasks SET cycle_id = ?2 WHERE cycle_id = ?1",
+            params![from_cycle_id, to_cycle_id],
+        )
+        .map_err(from_rusqlite)?;
+    // Preview snapshots carry a denormalized cycle_id; keep the cache
+    // pointing at the surviving cycle so pending proposals stay reviewable.
+    conn.execute(
+        "UPDATE task_preview_originals SET cycle_id = ?2 WHERE cycle_id = ?1",
+        params![from_cycle_id, to_cycle_id],
+    )
+    .map_err(from_rusqlite)?;
+    Ok(moved as u64)
+}

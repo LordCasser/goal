@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgentPanel } from "./features/agent/AgentPanel";
+import CalendarView from "./features/calendar/CalendarView";
+import { MissedSummary } from "./features/reminders/MissedSummary";
 import { IssuePanel } from "./features/agent/IssuePanel";
 import { LaterPanel } from "./features/later/LaterPanel";
 import { PlannerWorkspace } from "./features/planner/PlannerWorkspace";
@@ -24,6 +26,14 @@ export default function App() {
   // Right-side context panel (design.md §3.1): the coach conversation or the
   // planning-issue report, both scoped to the cycle the workspace targets.
   const [rightPanel, setRightPanel] = useState<"agent" | "issues" | null>(null);
+  // Top-level view switch (calendar change §5.7): workspace or calendar grid.
+  const [view, setView] = useState<"workspace" | "calendar">(() =>
+    (localStorage.getItem("planner.preferred-view") as "workspace" | "calendar" | null) ?? "workspace",
+  );
+  const switchView = (next: "workspace" | "calendar") => {
+    setView(next);
+    try { localStorage.setItem("planner.preferred-view", next); } catch { /* storage optional */ }
+  };
 
   // The panel targets the plan the user is working in: the most recent day
   // column, falling back to week, then long-term (never the Later container).
@@ -82,15 +92,26 @@ export default function App() {
         onToggleLater={() => setLaterOpen((open) => !open)}
         onToggleAgent={() => setRightPanel((p) => (p === "agent" ? null : "agent"))}
         onToggleIssues={() => setRightPanel((p) => (p === "issues" ? null : "issues"))}
+        view={view}
+        onSwitchView={switchView}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <div className="flex min-h-0 flex-1">
         {laterOpen && <LaterPanel onClose={() => setLaterOpen(false)} />}
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1">
-            <PlannerWorkspace />
-          </div>
-          <ProposalsBar />
+          {view === "calendar" ? (
+            <div className="min-h-0 flex-1">
+              <CalendarView />
+            </div>
+          ) : (
+            <>
+              <MissedSummary />
+              <div className="min-h-0 flex-1">
+                <PlannerWorkspace />
+              </div>
+              <ProposalsBar />
+            </>
+          )}
         </main>
         {rightPanel === "agent" && activeCycleId && (
           <AgentPanel cycleId={activeCycleId} onClose={() => setRightPanel(null)} />
@@ -117,6 +138,8 @@ function WindowBar({
   onToggleAgent,
   onToggleIssues,
   onOpenSettings,
+  view,
+  onSwitchView,
 }: {
   laterActive: boolean;
   agentActive: boolean;
@@ -125,6 +148,8 @@ function WindowBar({
   onToggleAgent: () => void;
   onToggleIssues: () => void;
   onOpenSettings: () => void;
+  view: "workspace" | "calendar";
+  onSwitchView: (view: "workspace" | "calendar") => void;
 }) {
   const buttonBase =
     "flex h-8 items-center gap-1.5 rounded-sm px-2 text-menu font-medium text-primary";
@@ -167,6 +192,20 @@ function WindowBar({
         <FlagIcon />
         Issues
       </button>
+      <div className="mr-2 flex items-center rounded-sm border border-light" role="tablist" aria-label="View">
+        {(["workspace", "calendar"] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            role="tab"
+            aria-selected={view === name}
+            className={`${buttonBase} ${view === name ? active : hover} capitalize`}
+            onClick={() => onSwitchView(name)}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
       <button
         type="button"
         title="Settings"

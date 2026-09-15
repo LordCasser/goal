@@ -129,6 +129,87 @@ pub fn remaining_whole_weeks(today: NaiveDate, ends_on: NaiveDate) -> i64 {
     }
 }
 
+// --- calendar-view grid projection (change: add-calendar-time-view §1) ------
+//
+// Pure helpers for the calendar view's range query. Month and week grids both
+// span whole weeks, so aligning both bounds of the requested range to the
+// setting's week boundaries guarantees the returned cells tile the grid with
+// no holes regardless of which month/week the user is looking at.
+
+/// Expands `[start, end]` to the enclosing whole weeks: `start` back to the
+/// week's first day, `end` forward to the week's last day. A reversed range
+/// (`start > end`) is returned unchanged; the caller rejects it.
+pub fn align_range_to_weeks(
+    start: NaiveDate,
+    end: NaiveDate,
+    week_start_day: u32,
+) -> (NaiveDate, NaiveDate) {
+    if start > end {
+        return (start, end);
+    }
+    let grid_start = start_of_week(start, week_start_day);
+    let grid_end = add_days(start_of_week(end, week_start_day), 6);
+    (grid_start, grid_end)
+}
+
+/// Every date in `[start, end]`, inclusive, in ascending order. An empty or
+/// reversed range yields no dates.
+pub fn dates_between(start: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
+    let mut dates = Vec::new();
+    let mut cursor = start;
+    while cursor <= end {
+        dates.push(cursor);
+        cursor = add_days(cursor, 1);
+    }
+    dates
+}
+
+/// Local-midnight bounds of the day containing the instant `at_ms`:
+/// `(day_start_ms, next_day_start_ms)` in epoch milliseconds. Like
+/// [`today_local`], this is one of the module's few clock-aware reads; every
+/// schedule projection derives from it. Ambiguous local times (DST fold) take
+/// the earlier reading; a nonexistent local time (DST gap, `at_ms` can still
+/// be represented as an instant but its naive fields repeat) falls back to a
+/// UTC interpretation so the function is total.
+pub fn local_day_bounds_ms(at_ms: i64) -> (i64, i64) {
+    use chrono::{LocalResult, TimeZone};
+    let at = match Local.timestamp_millis_opt(at_ms) {
+        LocalResult::Single(at) => at,
+        LocalResult::Ambiguous(at, _) => at,
+        LocalResult::None => return (at_ms, at_ms),
+    };
+    let to_ms = |naive: chrono::NaiveDateTime| -> i64 {
+        match Local.from_local_datetime(&naive) {
+            LocalResult::Single(at) => at.timestamp_millis(),
+            LocalResult::Ambiguous(at, _) => at.timestamp_millis(),
+            LocalResult::None => naive.and_utc().timestamp_millis(),
+        }
+    };
+    let day_start = at.date_naive().and_hms_opt(0, 0, 0).expect("midnight");
+    let next_start = add_days(at.date_naive(), 1)
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight");
+    (to_ms(day_start), to_ms(next_start))
+}
+
+/// Clamps the planned interval `[starts_at, starts_at + duration_ms)` to the
+/// local day that contains `starts_at`, returning `(ends_at, truncated)`.
+/// Cross-midnight schedules stay on their day and are flagged so the timeline
+/// can mark them (spec: 跨午夜按时长截断到当日并标注). Non-positive durations
+/// produce a zero-length interval at `starts_at` (never truncated).
+pub fn truncate_schedule_to_day(starts_at: i64, duration_ms: i64) -> (i64, bool) {
+    if duration_ms <= 0 {
+        return (starts_at, false);
+    }
+    let (_, day_end) = local_day_bounds_ms(starts_at);
+    let raw_end = starts_at.saturating_add(duration_ms);
+    if raw_end > day_end {
+        (day_end, true)
+    } else {
+        (raw_end, false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +355,102 @@ mod tests {
         assert!(is_valid_week_start_day(7));
         assert!(!is_valid_week_start_day(0));
         assert!(!is_valid_week_start_day(8));
+    }
+}
+
+/// Tests for the calendar-view grid projection helpers (change:
+/// add-calendar-time-view §1.3's pure-function share). Kept as a separate
+/// module so the pre-existing `tests` module above stays untouched.
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    fn d(s: &str) -> NaiveDate {
+        parse_date(s).expect("test date parses")
+    }
+
+    #[test]
+    fn align_range_to_weeks_pads_month_edges() {
+        // October 2026: Thu 10-01 … Sat 10-31. Monday weeks → 09-28 … 11-01.
+        let (start, end) = align_range_to_weeks(d("2026-10-01"), d("2026-10-31"), 1);
+        assert_eq!(
+            (format_date(start), format_date(end)),
+            ("2026-09-28".into(), "2026-11-01".into())
+        );
+        // The whole padded range is 5 full weeks — no holes in the grid.
+        assert_eq!(dates_between(start, end).len(), 35);
+    }
+
+    #[test]
+    fn align_range_keeps_aligned_bounds_and_handles_cross_month() {
+        // Already week-aligned: unchanged.
+        let (start, end) = align_range_to_weeks(d("2026-09-14"), d("2026-09-20"), 1);
+        assert_eq!(
+            (format_date(start), format_date(end)),
+            ("2026-09-14".into(), "2026-09-20".into())
+        );
+        // A cross-month week under Sunday start: 2027-01-01 is a Friday, so
+        // the week runs 2026-12-27 … 2027-01-02 (covers the year boundary).
+        let (start, end) = align_range_to_weeks(d("2027-01-01"), d("2027-01-01"), 7);
+        assert_eq!(
+            (format_date(start), format_date(end)),
+            ("2026-12-27".into(), "2027-01-02".into())
+        );
+    }
+
+    #[test]
+    fn dates_between_is_inclusive_and_reversed_is_empty() {
+        let days = dates_between(d("2026-09-30"), d("2026-10-02"));
+        assert_eq!(
+            days.iter().map(|d| format_date(*d)).collect::<Vec<_>>(),
+            ["2026-09-30", "2026-10-01", "2026-10-02"]
+        );
+        assert!(dates_between(d("2026-10-02"), d("2026-09-30")).is_empty());
+        assert_eq!(dates_between(d("2026-09-30"), d("2026-09-30")).len(), 1);
+    }
+
+    #[test]
+    fn schedule_inside_day_is_not_truncated() {
+        let (day_start, day_end) = local_day_bounds_ms(local_noon_ms());
+        let (ends_at, truncated) = truncate_schedule_to_day(day_start + 3 * 3_600_000, 45 * 60_000);
+        assert!(!truncated);
+        assert_eq!(ends_at, day_start + 3 * 3_600_000 + 45 * 60_000);
+        assert!(ends_at <= day_end);
+    }
+
+    #[test]
+    fn cross_midnight_schedule_is_cut_at_midnight_and_flagged() {
+        let (_day_start, day_end) = local_day_bounds_ms(local_noon_ms());
+        // 23:00 for two hours crosses midnight: the end is clipped to the day
+        // boundary and the flag tells the timeline to mark it.
+        let (ends_at, truncated) = truncate_schedule_to_day(day_end - 3_600_000, 2 * 3_600_000);
+        assert!(truncated);
+        assert_eq!(ends_at, day_end);
+        // Exactly reaching midnight is not a truncation.
+        let (ends_at, truncated) = truncate_schedule_to_day(day_end - 3_600_000, 3_600_000);
+        assert!(!truncated);
+        assert_eq!(ends_at, day_end);
+    }
+
+    #[test]
+    fn zero_and_negative_durations_never_truncate() {
+        let now = local_noon_ms();
+        assert_eq!(truncate_schedule_to_day(now, 0), (now, false));
+        assert_eq!(truncate_schedule_to_day(now, -1_000), (now, false));
+    }
+
+    /// A fixed reference instant: local noon of whatever day the test runs on,
+    /// so `local_day_bounds_ms` assertions stay timezone-independent.
+    fn local_noon_ms() -> i64 {
+        use chrono::TimeZone;
+        let noon = chrono::Local::now()
+            .date_naive()
+            .and_hms_opt(12, 0, 0)
+            .expect("noon");
+        Local
+            .from_local_datetime(&noon)
+            .single()
+            .map(|t| t.timestamp_millis())
+            .expect("local noon resolves unambiguously in test timezones")
     }
 }
