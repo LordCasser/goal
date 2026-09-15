@@ -24,3 +24,5 @@ v0.1.1 的以下验收项尚未全部完成，发布时保留这些限制，后�
 [v0.1.1 Release](https://github.com/LordCasser/goal/releases/tag/v0.1.1) 已发布。[六目标流水线](https://github.com/LordCasser/goal/actions/runs/35001301041) 的原生测试、构建、架构检查与上传全部成功。发布代码为 `5cf5988`，正式 tag 保持不变。
 
 从公开下载地址获取的八个安装包全部匹配 `SHA256SUMS`。两份 macOS DMG 额外通过固定签名身份、Goal 产品名、0.1.1 版本、13.3 最低系统版本和各自架构检查；Linux AppImage 的 ELF 架构以及 Debian 包架构/版本元数据一致。Windows 安装包完成下载校验，其应用二进制架构已由对应 CI runner 验证；此记录不代表 Windows/Linux 的人工桌面验收。
+
+公开下载的 macOS ARM64 发布包已实际启动，简体中文偏好保留，工作台、设置及语言菜单正常，没有意外系统弹窗。此 smoke 未配置模型或调用 LLM，不将启动结果表述为真实供应商或钥匙串读取回归。
