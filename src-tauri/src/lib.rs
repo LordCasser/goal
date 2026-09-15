@@ -37,6 +37,9 @@ pub fn run() {
             // half-initialized store.
             let ai_settings = providers::service::AiSettingsState::load(&data_dir)?;
             app.manage(ai_settings);
+            // Planning-issue review cache: keyed by (cycle, content hash), so
+            // repeated editor-triggered reviews stay cheap (design D5).
+            app.manage(ai::review::IssueCache::default());
 
             logging::init(data_dir.join("logs"), initial_level);
             logging::info("app", "app started");
@@ -96,6 +99,17 @@ pub fn run() {
             commands::ai_settings::save_provider_api_key,
             commands::ai_settings::remove_provider_api_key,
             commands::ai_settings::test_provider_connection,
+            // agent conversations & planning issues
+            commands::agent::start_agent_conversation,
+            commands::agent::send_agent_message,
+            commands::agent::get_agent_conversation,
+            commands::agent::get_previous_agent_conversation,
+            commands::agent::start_planning,
+            commands::agent::start_goal_setting,
+            commands::agent::start_prioritization,
+            commands::agent::get_planning_issue_report,
+            commands::agent::dismiss_planning_issue,
+            commands::agent::get_planning_issue_dismissals,
             // maintenance
             commands::maintenance::get_schema_version,
             commands::maintenance::export_backup,

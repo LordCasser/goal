@@ -325,3 +325,75 @@ export interface ConnectionTestResult {
   error_code: string | null;
   error_message: string | null;
 }
+
+/** One stored conversation message, payload parsed for rendering. */
+export interface MessageView {
+  id: string;
+  sequence_number: number;
+  message_type:
+    | "user"
+    | "model_text"
+    | "model_function_call"
+    | "function_result"
+    | "app_tool_result";
+  turn_id: string;
+  payload: MessagePayload;
+}
+
+/** Tagged payloads stored per message type (mirrors turn.rs MessagePayload). */
+export type MessagePayload =
+  | { kind: "text"; text: string }
+  | { kind: "model_text"; text: string }
+  | { kind: "function_call"; id: string; name: string; arguments: unknown }
+  | {
+      kind: "function_result";
+      tool_call_id: string;
+      name: string;
+      result: unknown;
+      is_error: boolean;
+    }
+  | { kind: "app_tool_result"; name: string; result: unknown };
+
+/** `ai::agent::turn::ConversationView` — one cycle's conversation. */
+export interface ConversationView {
+  id: string;
+  cycle_id: string;
+  revision: number;
+  active_skill: string | null;
+  last_error: string | null;
+  messages: MessageView[];
+}
+
+/** `ai::agent::turn::TurnResult` — outcome of one sent message. */
+export interface TurnResult {
+  conversation_id: string;
+  revision: number;
+  active_skill: string | null;
+  reply: string;
+  messages: MessageView[];
+}
+
+/** `ai::review::PlanningIssue` — one diagnosed plan problem. */
+export interface PlanningIssue {
+  issue_type:
+    | "too_many_goals"
+    | "too_many_tasks"
+    | "too_much_work"
+    | "not_sure_what_to_do_next"
+    | "missing_something"
+    | "not_useful_for_needs";
+  cycle_id: string;
+  task_id: string | null;
+  title: string;
+  detail: string;
+}
+
+/** One persisted dismissal (cycle-level when task_id is null). */
+export interface Dismissal {
+  id: string;
+  cycle_id: string;
+  issue_type: string;
+  task_id: string | null;
+  reason: string | null;
+  created_at: string;
+}

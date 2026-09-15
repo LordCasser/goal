@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Local};
+use chrono::Local;
 use rusqlite::Connection;
 
 use crate::domain::calendar;

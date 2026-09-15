@@ -48,6 +48,8 @@ export const qk = {
   editorWorkspaces: (cycleIds: string[]) => ["editor-workspaces", cycleIds] as const,
   previewSummary: (cycleId: string) => ["preview-summary", cycleId] as const,
   sessions: (dayCycleId: string) => ["sessions", dayCycleId] as const,
+  agentConversation: (cycleId: string) => ["agent-conversation", cycleId] as const,
+  issueReport: (cycleId: string) => ["issue-report", cycleId] as const,
   settings: () => ["settings"] as const,
 };
 
@@ -73,6 +75,16 @@ export async function initEventInvalidation(queryClient: QueryClient): Promise<(
       await listen<CycleIdPayload>("proposals:changed", (event) => {
         queryClient.invalidateQueries({ queryKey: qk.previewSummary(event.payload.cycle_id) });
       }),
+    );
+    unlisteners.push(
+      await listen<{ conversation_id: string; cycle_id: string; revision: number }>(
+        "agent:conversation_updated",
+        (event) => {
+          queryClient.invalidateQueries({
+            queryKey: qk.agentConversation(event.payload.cycle_id),
+          });
+        },
+      ),
     );
   } catch (err) {
     // Never leak the listeners acquired before the failure.

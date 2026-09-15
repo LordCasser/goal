@@ -19,11 +19,14 @@ import type {
   AddTaskArgs,
   AiSettingsSummary,
   ConnectionTestResult,
+  ConversationView,
   CreateCycleArgs,
   Cycle,
   CycleDeletionPreview,
+  Dismissal,
   EditorWorkspace,
   LogLevel,
+  PlanningIssue,
   PlannerState,
   PreviewSummary,
   ProviderConfig,
@@ -33,6 +36,7 @@ import type {
   Task,
   TaskPatch,
   Theme,
+  TurnResult,
 } from "./types";
 
 export * from "./types";
@@ -106,6 +110,17 @@ export const commands = {
   getSchemaVersion: "get_schema_version",
   exportBackup: "export_backup",
   getDebugLogDir: "get_debug_log_dir",
+  // agent conversations & planning issues
+  startAgentConversation: "start_agent_conversation",
+  sendAgentMessage: "send_agent_message",
+  getAgentConversation: "get_agent_conversation",
+  getPreviousAgentConversation: "get_previous_agent_conversation",
+  startPlanning: "start_planning",
+  startGoalSetting: "start_goal_setting",
+  startPrioritization: "start_prioritization",
+  getPlanningIssueReport: "get_planning_issue_report",
+  dismissPlanningIssue: "dismiss_planning_issue",
+  getPlanningIssueDismissals: "get_planning_issue_dismissals",
 } as const;
 
 // --- cycles -----------------------------------------------------------------
@@ -382,4 +397,67 @@ export function removeProviderApiKey(provider_id: string): Promise<void> {
 /** One minimal real request (design D7); classified failures come back as the result. */
 export function testProviderConnection(provider_id: string): Promise<ConnectionTestResult> {
   return invoke<ConnectionTestResult>(commands.testProviderConnection, { provider_id });
+}
+
+// --- agent conversations & planning issues ----------------------------------
+
+export function startAgentConversation(cycle_id: string): Promise<ConversationView> {
+  return invoke<ConversationView>(commands.startAgentConversation, { cycle_id });
+}
+
+export function sendAgentMessage(
+  cycle_id: string,
+  text: string,
+  focused_task_id?: string | null,
+): Promise<TurnResult> {
+  return invoke<TurnResult>(commands.sendAgentMessage, {
+    cycle_id,
+    text,
+    focused_task_id: focused_task_id ?? null,
+  });
+}
+
+export function getAgentConversation(cycle_id: string): Promise<ConversationView | null> {
+  return invoke<ConversationView | null>(commands.getAgentConversation, { cycle_id });
+}
+
+export function getPreviousAgentConversation(cycle_id: string): Promise<ConversationView | null> {
+  return invoke<ConversationView | null>(commands.getPreviousAgentConversation, { cycle_id });
+}
+
+export function startPlanning(cycle_id: string): Promise<TurnResult> {
+  return invoke<TurnResult>(commands.startPlanning, { cycle_id });
+}
+
+export function startGoalSetting(cycle_id: string, task_id: string): Promise<TurnResult> {
+  return invoke<TurnResult>(commands.startGoalSetting, { cycle_id, task_id });
+}
+
+export function startPrioritization(cycle_id: string): Promise<TurnResult> {
+  return invoke<TurnResult>(commands.startPrioritization, { cycle_id });
+}
+
+export function getPlanningIssueReport(
+  cycle_id: string,
+  refresh = false,
+): Promise<PlanningIssue[]> {
+  return invoke<PlanningIssue[]>(commands.getPlanningIssueReport, { cycle_id, refresh });
+}
+
+export function dismissPlanningIssue(
+  cycle_id: string,
+  issue_type: string,
+  task_id?: string | null,
+  reason?: string | null,
+): Promise<void> {
+  return invoke<void>(commands.dismissPlanningIssue, {
+    cycle_id,
+    issue_type,
+    task_id: task_id ?? null,
+    reason: reason ?? null,
+  });
+}
+
+export function getPlanningIssueDismissals(cycle_id: string): Promise<Dismissal[]> {
+  return invoke<Dismissal[]>(commands.getPlanningIssueDismissals, { cycle_id });
 }

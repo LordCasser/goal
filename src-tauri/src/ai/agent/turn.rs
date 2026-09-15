@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ai::agent::context::{load_context, render, CycleContext};
+use crate::ai::agent::context::{load_context, render};
 use crate::ai::agent::prompt::build_system_instruction;
 use crate::ai::llm::types::{AgentMessage, AgentRequest, AgentRole, AgentSkill, ToolCallRecord};
 use crate::ai::llm::{AgentError, LlmProvider, ResolvedProvider};
@@ -196,6 +196,11 @@ pub struct MessageView {
     pub payload: serde_json::Value,
 }
 
+/// Public view helper for the command layer (reads pass stored messages).
+pub fn message_view(message: &Message) -> MessageView {
+    view(message)
+}
+
 fn view(message: &Message) -> MessageView {
     MessageView {
         id: message.id.clone(),
@@ -206,11 +211,12 @@ fn view(message: &Message) -> MessageView {
     }
 }
 
-fn app_error(error: AgentError) -> AppError {
+pub fn app_error(error: AgentError) -> AppError {
     AppError::validation(error.code(), error.to_string())
 }
 
 /// Read model for `get_agent_conversation` (task 9.1).
+#[derive(Debug, Clone, Serialize)]
 pub struct ConversationView {
     pub id: String,
     pub cycle_id: String,
@@ -239,7 +245,7 @@ pub fn get_conversation(db: &Db, cycle_id: &str) -> AppResult<Option<Conversatio
 /// Runs one turn end-to-end. Awaited by the Tauri async runtime; the
 /// per-conversation claim makes concurrent entries fail fast, not interleave.
 pub async fn run_turn(
-    db: Arc<Db>,
+    db: &Db,
     provider: Arc<dyn LlmProvider>,
     resolved: ResolvedProvider,
     executor: Arc<dyn ToolExecutor>,
@@ -277,7 +283,7 @@ pub async fn run_turn(
     };
 
     let outcome = drive_turn(
-        &db,
+        db,
         provider.as_ref(),
         &resolved,
         executor.as_ref(),
@@ -410,7 +416,7 @@ async fn drive_turn(
     }
 
     // One ordered write pass (spec: 消息按最终顺序一次性写入).
-    let mut conn = db.pool().get()?;
+    let conn = db.pool().get()?;
     let mut sequence = repo::max_sequence(&conn, conversation_id)?;
     let mut stored_messages: Vec<Message> = Vec::with_capacity(pending.len());
     for payload in &pending {
@@ -449,7 +455,7 @@ pub fn run_app_tool(
     arguments: serde_json::Value,
 ) -> AppResult<TurnResult> {
     let turn_id = uuid::Uuid::new_v4().to_string();
-    let mut conn = db.pool().get()?;
+    let conn = db.pool().get()?;
     let conversation = repo::get_or_create_conversation(&conn, cycle_id, now_ms())?;
     if !repo::claim_turn(&conn, &conversation.id, &turn_id)? {
         return Err(AppError::conflict(
@@ -569,7 +575,7 @@ mod tests {
                 "hello!".into(),
             )]));
         let result = run_turn(
-            db.clone(),
+            &db,
             provider,
             fake_resolved(),
             executor(),
@@ -598,7 +604,7 @@ mod tests {
             FakeTurn::Text("second".into()),
         ]));
         run_turn(
-            db.clone(),
+            &db,
             Arc::new(FakeProvider::with_script(vec![FakeTurn::Text(
                 "first".into(),
             )])),
@@ -628,7 +634,7 @@ mod tests {
             FakeTurn::Text("gave up".into()),
         ]));
         let result = run_turn(
-            db.clone(),
+            &db,
             provider,
             fake_resolved(),
             executor(),
@@ -667,7 +673,7 @@ mod tests {
 
         let provider: Arc<dyn LlmProvider> = Arc::new(FakeProvider::with_script(vec![]));
         let error = run_turn(
-            db.clone(),
+            &db,
             provider,
             fake_resolved(),
             executor(),
@@ -692,7 +698,7 @@ mod tests {
                 AgentError::NoActiveProvider,
             )]));
         let error = run_turn(
-            db.clone(),
+            &db,
             provider,
             fake_resolved(),
             executor(),

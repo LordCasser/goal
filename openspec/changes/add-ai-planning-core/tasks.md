@@ -8,27 +8,27 @@
 
 ## 2. 会话与回合
 
-- [ ] 2.1 `ai/agent/conversation.rs`：按 `cycle_id` 取或建会话（每周期唯一）
-- [ ] 2.2 `ai/agent/service.rs`：回合执行器——组装请求 → 调用 provider → 执行工具 → 回灌结果 → 循环（上限 8 轮）
-- [ ] 2.3 消息落库：回合结束后按最终顺序一次性写入 `agent_messages`，`sequence_number` 连续；失败时只写 `last_error`
-- [ ] 2.4 并发保护：同一会话同时只允许一个进行中的回合，重复触发返回明确错误
-- [ ] 2.5 测试：单回合无工具调用；单回合含一次工具调用；多轮工具调用；达到轮数上限；回合失败后会话可继续且消息不乱序
+- [x] 2.1 `ai/agent/conversation.rs`：按 `cycle_id` 取或建会话（每周期唯一）
+- [x] 2.2 `ai/agent/service.rs`：回合执行器——组装请求 → 调用 provider → 执行工具 → 回灌结果 → 循环（上限 8 轮）
+- [x] 2.3 消息落库：回合结束后按最终顺序一次性写入 `agent_messages`，`sequence_number` 连续；失败时只写 `last_error`
+- [x] 2.4 并发保护：同一会话同时只允许一个进行中的回合，重复触发返回明确错误
+- [x] 2.5 测试：单回合无工具调用；单回合含一次工具调用；多轮工具调用；达到轮数上限；回合失败后会话可继续且消息不乱序
 
 ## 3. 技能与提示
 
-- [ ] 3.1 `ai/agent/prompt.rs`：`build_system_instruction(ActiveAgentSkill)`，返回五套提示之一
-- [ ] 3.2 五个技能的系统提示文本（`none` / `goal_setting` / `long_term_planning` / `short_term_planning` / `prioritization`），行为约束照 `openspec/specs/` 的对应场景
-- [ ] 3.3 技能激活：`start_*` 工具结果携带 `activated_skill`，由回合执行器写入 `agent_conversations.active_skill`；前端无写入路径
-- [ ] 3.4 `start_planning` 的类型分派：`month` → `long_term_planning`；`day|week` → `short_term_planning`；`session` → `unsupported_cycle_type`
-- [ ] 3.5 测试：四个技能各自的激活路径；session 被拒；`active_skill` 只在会话行上被写、且值合法
+- [x] 3.1 `ai/agent/prompt.rs`：`build_system_instruction(ActiveAgentSkill)`，返回五套提示之一
+- [x] 3.2 五个技能的系统提示文本（`none` / `goal_setting` / `long_term_planning` / `short_term_planning` / `prioritization`），行为约束照 `openspec/specs/` 的对应场景
+- [x] 3.3 技能激活：`start_*` 工具结果携带 `activated_skill`，由回合执行器写入 `agent_conversations.active_skill`；前端无写入路径
+- [x] 3.4 `start_planning` 的类型分派：`month` → `long_term_planning`；`day|week` → `short_term_planning`；`session` → `unsupported_cycle_type`
+- [x] 3.5 测试：四个技能各自的激活路径；session 被拒；`active_skill` 只在会话行上被写、且值合法
 
 ## 4. 上下文注入与裁剪
 
-- [ ] 4.1 `ai/agent/context.rs`：构造 `CycleContextPayload`（周期元数据 + 父子键 + 任务快照）
-- [ ] 4.2 三档优先级与裁剪函数（纯函数，可单测）
-- [ ] 4.3 父周期不存在时 `parent_cycle_key` 为 null，且提示要求模型不要取父上下文
-- [ ] 4.4 子任务以 Markdown 渲染
-- [ ] 4.5 测试：裁剪在各预算下的结果；无父周期；空任务列表；子任务渲染
+- [x] 4.1 `ai/agent/context.rs`：构造 `CycleContextPayload`（周期元数据 + 父子键 + 任务快照）
+- [x] 4.2 三档优先级与裁剪函数（纯函数，可单测）
+- [x] 4.3 父周期不存在时 `parent_cycle_key` 为 null，且提示要求模型不要取父上下文
+- [x] 4.4 子任务以 Markdown 渲染
+- [x] 4.5 测试：裁剪在各预算下的结果；无父周期；空任务列表；子任务渲染
 
 ## 5. 工具集
 
@@ -42,21 +42,21 @@
 
 ## 6. GoalBreakdown 引擎
 
-- [ ] 6.1 四部分类型与序列化（`context` / `output` / `outcome` / `scope`）
-- [ ] 6.2 合并语义：`null` 清除、缺省保留；空更新返回 `empty_update`
-- [ ] 6.3 缺失字段计算（至少覆盖 `context.clarification` / `output.value` / `outcome.value` / `outcome.verification_method`）
-- [ ] 6.4 清晰度标记推导：`needs_refinement` 与 `needs_breakdown` 的清除条件分开
+- [x] 6.1 四部分类型与序列化（`context` / `output` / `outcome` / `scope`）
+- [x] 6.2 合并语义：`null` 清除、缺省保留；空更新返回 `empty_update`
+- [x] 6.3 缺失字段计算（至少覆盖 `context.clarification` / `output.value` / `outcome.value` / `outcome.verification_method`）
+- [x] 6.4 清晰度标记推导：`needs_refinement` 与 `needs_breakdown` 的清除条件分开
 - [ ] 6.5 `update_goal_breakdown` 工具 + 返回 `TaskContextSnapshot`
-- [ ] 6.6 测试：部分更新不清空其他字段；显式 `null` 清除；空更新被拒；四种标题精炼情形各一例
+- [x] 6.6 测试：部分更新不清空其他字段；显式 `null` 清除；空更新被拒；四种标题精炼情形各一例
 
 ## 7. 优先级引擎
 
-- [ ] 7.1 五桶类型与持久化（`cycles.prioritization_breakdown`）
-- [ ] 7.2 增量合并：未提交的桶保留，除非显式清空；结构校验失败则拒绝写入
-- [ ] 7.3 `start_prioritization` 返回持久化 breakdown + 尚未分类的候选
-- [ ] 7.4 `update_prioritization_breakdown` 工具：每个落桶项必须带用户给出的理由
-- [ ] 7.5 模型可读渲染（XML 转义）
-- [ ] 7.6 测试：只更新一个桶时其他桶保留；非法结构被拒；转义；无候选任务时的引导
+- [x] 7.1 五桶类型与持久化（`cycles.prioritization_breakdown`）
+- [x] 7.2 增量合并：未提交的桶保留，除非显式清空；结构校验失败则拒绝写入
+- [x] 7.3 `start_prioritization` 返回持久化 breakdown + 尚未分类的候选
+- [x] 7.4 `update_prioritization_breakdown` 工具：每个落桶项必须带用户给出的理由
+- [x] 7.5 模型可读渲染（XML 转义）
+- [x] 7.6 测试：只更新一个桶时其他桶保留；非法结构被拒；转义；无候选任务时的引导
 
 ## 8. 计划审查（边写边审）
 

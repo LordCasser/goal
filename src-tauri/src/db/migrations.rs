@@ -320,9 +320,8 @@ mod tests {
         ensure_ledger(conn).expect("ledger");
         for migration in MIGRATIONS.iter().filter(|m| m.version <= max_version) {
             let tx = conn.transaction().expect("transaction");
-            tx.execute_batch(migration.sql).unwrap_or_else(|e| {
-                panic!("migration {} failed: {e}", migration.version)
-            });
+            tx.execute_batch(migration.sql)
+                .unwrap_or_else(|e| panic!("migration {} failed: {e}", migration.version));
             tx.execute(
                 "INSERT INTO schema_migrations (version, description, checksum, applied_at)
                  VALUES (?1, ?2, ?3, unixepoch() * 1000)",
@@ -367,8 +366,7 @@ mod tests {
         );
 
         assert!(
-            columns(&conn, "cycles")
-                .contains(&"prioritization_breakdown".to_string()),
+            columns(&conn, "cycles").contains(&"prioritization_breakdown".to_string()),
             "the new cycles column exists"
         );
         assert!(
@@ -416,8 +414,7 @@ mod tests {
         apply_up_to(&mut conn, 4);
         assert_eq!(current_version(&conn).unwrap(), 4);
         assert!(
-            !columns(&conn, "cycles")
-                .contains(&"prioritization_breakdown".to_string()),
+            !columns(&conn, "cycles").contains(&"prioritization_breakdown".to_string()),
             "the column does not exist yet at 0004"
         );
 
