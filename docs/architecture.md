@@ -76,6 +76,13 @@ src-tauri/src/
 ├── logging/           统一本地调试日志（级别/滚动/脱敏；纯本地零出网）
 ├── providers/         BYOK 供应商配置（providers.json）与钥匙串凭据
 ├── sampling/          三协议采样客户端（统一事件流 + 错误分类）
+├── ai/                AI 规划能力（add-ai-planning-core）
+│   ├── llm/           LLM 抽象（解析 BYOK 供应商 → 采样请求；FakeProvider 测试）
+│   ├── agent/         技能提示、<context> 注入、回合工具循环
+│   ├── tools.rs       11 个 agent 工具（写工具一律经预览层）
+│   ├── breakdown.rs   GoalBreakdown 引擎（合并/缺字段/清晰度/标题精炼）
+│   ├── prioritization.rs 五桶优先级引擎（JSON 列持久化）
+│   └── review.rs      计划审查（结构+语义两层、缓存、忽略）
 ├── events.rs          CycleEvent / TaskEvent 发射器
 └── commands/
     ├── mod.rs         命令注册清单
@@ -258,6 +265,8 @@ Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日�
 | 设置 | `get_settings` `set_week_start_day` `set_theme` `set_log_level` `get_app_flag` `set_app_flag` |
 | 维护 | `export_backup` `get_schema_version` `get_debug_log_dir` |
 | AI 设置 | `get_ai_settings` `save_provider` `delete_provider` `set_active_provider` `save_provider_api_key` `remove_provider_api_key` `test_provider_connection` |
+| Agent | `start_agent_conversation` `send_agent_message` `get_agent_conversation` `get_previous_agent_conversation` `start_planning` `start_goal_setting` `start_prioritization` |
+| 计划问题 | `get_planning_issue_report` `dismiss_planning_issue` `get_planning_issue_dismissals` |
 
 事件（Rust → 前端）：
 
@@ -266,6 +275,7 @@ Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日�
 | `cycles:changed` | `{ cycle_ids: string[] }` | 失效周期相关查询 |
 | `tasks:changed` | `{ cycle_ids: string[] }` | 失效任务相关查询 |
 | `proposals:changed` | `{ cycle_id: string }` | 失效待确认摘要 |
+| `agent:conversation_updated` | `{ conversation_id, cycle_id, revision }` | 失效该周期的会话 |
 
 事件只做"失效通知"，载荷不带业务数据——避免出现第二份真相。
 
