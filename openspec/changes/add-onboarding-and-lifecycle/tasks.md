@@ -52,7 +52,7 @@
 - [x] 6.1 到达计划时长时发系统通知
 - [x] 6.2 权限请求与拒绝后静默跳过
 - [x] 6.3 无时长的专注块不产生通知
-- [ ] 6.4 应用不在前台时同样通知
+- [x] 6.4 应用不在前台时同样通知（到期提醒在 start_cycle 同一事务内写入 reminders 表，由后端调度线程投递，不依赖前端计时器；测试 session_start_schedules_background_due_notice）
 - [x] 6.5 测试：有时长/无时长两态；权限拒绝时不报错
 
 > 若 `add-reminders-notifications` 已实现通用调度，本节改为接入该调度，不另建路径。
