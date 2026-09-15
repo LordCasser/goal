@@ -6,6 +6,7 @@ import { normalizePlatform } from "./desktop-platform.mjs";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TAURI_DIR = path.join(ROOT_DIR, "src-tauri");
+const PRODUCT_NAME = "Goal";
 
 export const CONFIG_FILES = Object.freeze({
   base: path.join(TAURI_DIR, "tauri.conf.json"),
@@ -44,6 +45,9 @@ export function loadMergedConfig(platform) {
 }
 
 function assertWindowContract(config, platform) {
+  if (config.productName !== PRODUCT_NAME) {
+    throw new Error(`${platform} config product name must be ${PRODUCT_NAME}`);
+  }
   if (config.identifier !== "dev.lordcasser.planner") {
     throw new Error(`${platform} config changed the application identifier`);
   }
@@ -56,7 +60,7 @@ function assertWindowContract(config, platform) {
   const [window] = config.app.windows;
   const expected = {
     label: "main",
-    title: "Planner",
+    title: PRODUCT_NAME,
     width: 1280,
     height: 800,
     minWidth: 960,

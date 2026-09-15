@@ -8,6 +8,7 @@ mod common;
 use std::sync::Arc;
 
 use planner_lib::repository::reminders as repo;
+use planner_lib::repository::settings as settings_repo;
 use planner_lib::service::cycles;
 use planner_lib::service::reminders::{
     self, DeliveryOutcome, NotificationContent, PassReport, QuietHours, RecordingNotifier,
@@ -545,8 +546,27 @@ fn scheduler_thread_delivers_when_the_trigger_time_reaches() {
     let notifier = notifier_granted();
     let scheduler = Scheduler::new(db.db.clone(), notifier.clone(), None).spawn();
 
+    // Establish that the newly spawned thread completed its first empty-queue
+    // pass and is now allowed to take the long idle wait. The command layer
+    // must wake it after committing a new reminder; extending this deadline
+    // would only hide the production race.
+    let empty_pass_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while settings_repo::get(&db.conn(), reminders::KEY_LAST_SEEN_AT)
+        .expect("read scheduler heartbeat")
+        .is_none()
+    {
+        assert!(
+            std::time::Instant::now() < empty_pass_deadline,
+            "scheduler did not complete its initial empty-queue pass"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
     let fire_at = planner_lib::service::now_ms() + 120;
     set_reminder(&db.db, "task", &task.id, fire_at, false);
+    // This is the command-layer boundary used by set/update/delete reminder
+    // commands after their transaction and invalidation event are complete.
+    scheduler.wake();
 
     // Poll instead of a fixed sleep: the suite runs tests in parallel, so
     // the scheduler thread may not be scheduled promptly. Fails fast when

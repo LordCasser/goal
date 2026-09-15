@@ -7,7 +7,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{Emitter, Runtime, State};
+use tauri::{Emitter, Manager, Runtime, State};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::db::Db;
@@ -23,8 +23,15 @@ use crate::service::reminders::{
 /// of truth (architecture decision D4).
 pub const REMINDERS_CHANGED: &str = "reminders:changed";
 
-fn emit_changed(app: &tauri::AppHandle<tauri::Wry>) {
+fn emit_event(app: &tauri::AppHandle<tauri::Wry>) {
     let _ = app.emit(REMINDERS_CHANGED, ());
+}
+
+fn emit_changed(app: &tauri::AppHandle<tauri::Wry>) {
+    emit_event(app);
+    if let Some(scheduler) = app.try_state::<Scheduler>() {
+        scheduler.wake();
+    }
 }
 
 /// System notification delivery backed by tauri-plugin-notification, with an
@@ -94,12 +101,7 @@ impl<R: Runtime> reminders::ReminderNotifier for SystemNotifier<R> {
 pub fn start_scheduler(app: tauri::AppHandle<tauri::Wry>, db: Db) -> Scheduler {
     let notifier: Arc<dyn reminders::ReminderNotifier> = Arc::new(SystemNotifier::new(app.clone()));
     let emit_app = app;
-    Scheduler::new(
-        db,
-        notifier,
-        Some(Box::new(move || emit_changed(&emit_app))),
-    )
-    .spawn()
+    Scheduler::new(db, notifier, Some(Box::new(move || emit_event(&emit_app)))).spawn()
 }
 
 fn parse_status(status: Option<&str>) -> AppResult<repo::StatusFilter> {

@@ -3,7 +3,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Planner",
+        "title": "Goal",
         "width": 1280,
         "height": 800,
         "minWidth": 960,

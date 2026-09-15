@@ -33,7 +33,8 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          node scripts/release-artifacts.mjs verify-version --tag "$RELEASE_TAG"
+          VERSION="$(node scripts/release-artifacts.mjs verify-version --tag "$RELEASE_TAG")"
+          test -f "docs/releases/v$VERSION.md" || { echo "Release notes are missing" >&2; exit 1; }
           test -n "$APPLE_CERTIFICATE" || { echo "APPLE_CERTIFICATE is required for self-signed macOS release" >&2; exit 1; }
           test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "APPLE_CERTIFICATE_PASSWORD is required for self-signed macOS release" >&2; exit 1; }
 
@@ -190,11 +191,11 @@ jobs:
           if [ "${{ matrix.os }}" = "macos" ]; then
             app_path="$(find "src-tauri/target/${{ matrix.target }}" -type d -name '*.app' -print -quit)"
             test -n "$app_path" || { echo "macOS app bundle not found" >&2; exit 1; }
-            native_path="$app_path/Contents/MacOS/planner"
+            native_path="$app_path/Contents/MacOS/goal"
           elif [ "${{ matrix.os }}" = "windows" ]; then
-            native_path="src-tauri/target/${{ matrix.target }}/release/planner.exe"
+            native_path="src-tauri/target/${{ matrix.target }}/release/goal.exe"
           else
-            native_path="src-tauri/target/${{ matrix.target }}/release/planner"
+            native_path="src-tauri/target/${{ matrix.target }}/release/goal"
           fi
           node scripts/release-artifacts.mjs verify-binary \
             --target "${{ matrix.id }}" \
@@ -260,6 +261,5 @@ jobs:
           gh release create "$RELEASE_TAG" \
             --verify-tag \
             --title "Goal $VERSION" \
-            --generate-notes \
-            --notes "macOS signing mode: self-signed (not notarized). Windows packages are unsigned." \
+            --notes-file "docs/releases/v$VERSION.md" \
             release-artifacts/*

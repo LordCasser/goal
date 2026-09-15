@@ -25,6 +25,8 @@ describe("Tauri JSON Merge Patch platform configs", () => {
       dragDropEnabled: false,
     });
     expect(config.identifier).toBe("dev.lordcasser.planner");
+    expect(config.productName).toBe("Goal");
+    expect(window.title).toBe("Goal");
     expect(config.version).toBe("0.1.0");
   });
 
@@ -56,6 +58,7 @@ describe("Tauri JSON Merge Patch platform configs", () => {
     const macosCapability = capability(path.join(capabilitiesDir, "macos.json"));
     const windowsCapability = capability(path.join(capabilitiesDir, "windows.json"));
     expect(defaultCapability.permissions).not.toContain("core:window:allow-start-dragging");
+    expect(defaultCapability.permissions).toContain("allow-planner-commands");
     expect(macosCapability).toMatchObject({ windows: ["main"], platforms: ["macOS"] });
     expect(macosCapability.permissions).toContain("core:window:allow-start-dragging");
     expect(windowsCapability).toMatchObject({ windows: ["main"], platforms: ["windows"] });

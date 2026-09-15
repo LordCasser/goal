@@ -35,6 +35,17 @@ function stateFile() {
   return process.env.GOAL_SIGNING_STATE_FILE;
 }
 function readState() { return JSON.parse(fs.readFileSync(stateFile(), 'utf8')); }
+function errorMessage(error) { return error instanceof Error ? error.message : String(error); }
+function cleanupAggregate(errors) {
+  const details = errors.map(errorMessage).join('; ');
+  return new AggregateError(errors, `macOS signing cleanup failed: ${details}`);
+}
+function operationWithCleanupError(operationError, cleanupError) {
+  return new AggregateError(
+    [operationError, cleanupError],
+    `${errorMessage(operationError)}; cleanup failed: ${errorMessage(cleanupError)}`,
+  );
+}
 export function prepare() {
   const encoded = process.env.APPLE_CERTIFICATE;
   const password = process.env.APPLE_CERTIFICATE_PASSWORD;
@@ -71,7 +82,14 @@ export function prepare() {
     // anchor. Keep user/admin trust settings untouched. Tauri's intermediate
     // bundle is signed below before it can become a release artifact.
     console.log(`Prepared pinned Goal signing identity ${pinned.fingerprint}`);
-  } catch (error) { cleanup(); throw error; }
+  } catch (error) {
+    try {
+      cleanup();
+    } catch (cleanupError) {
+      throw operationWithCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
 }
 export function sign(appPath) {
   const state = readState();
@@ -116,9 +134,23 @@ export function cleanup() {
   const file = process.env.GOAL_SIGNING_STATE_FILE;
   if (!file || !fs.existsSync(file)) return;
   const state = readState();
-  run('security', ['list-keychains', '-d', 'user', '-s', ...state.originalKeychains]);
-  run('security', ['delete-keychain', state.keychain], { allowFailure: true });
-  fs.rmSync(state.directory, { recursive: true, force: true });
+  const errors = [];
+  try {
+    run('security', ['list-keychains', '-d', 'user', '-s', ...state.originalKeychains]);
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    run('security', ['delete-keychain', state.keychain]);
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    fs.rmSync(state.directory, { recursive: true, force: true });
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length > 0) throw cleanupAggregate(errors);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

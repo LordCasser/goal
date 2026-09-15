@@ -29,6 +29,17 @@ function run(command, args, { redact = [] } = {}) {
   return result;
 }
 
+function errorMessage(error) { return error instanceof Error ? error.message : String(error); }
+function cleanupAggregate(errors) {
+  const details = errors.map(errorMessage).join('; ');
+  return new AggregateError(errors, `macOS Keychain continuity cleanup failed: ${details}`);
+}
+function operationWithCleanupErrors(operationError, cleanupErrors) {
+  const errors = [operationError, ...cleanupErrors];
+  const details = cleanupErrors.map(errorMessage).join('; ');
+  return new AggregateError(errors, `${errorMessage(operationError)}; cleanup failed: ${details}`);
+}
+
 function readSigningState() {
   const statePath = process.env.GOAL_SIGNING_STATE_FILE;
   if (!statePath) throw new Error('GOAL_SIGNING_STATE_FILE is required; run macos-signing.mjs prepare first');
@@ -191,9 +202,10 @@ function main() {
     'dev.lordcasser.planner.keychain-negative',
   );
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-keychain-continuity-'));
-  fs.chmodSync(directory, 0o700);
   let keychain;
+  let operationError;
   try {
+    fs.chmodSync(directory, 0o700);
     keychain = makeKeychain(directory);
     const sourceV1 = path.join(directory, 'continuity-v1.c');
     const sourceV2 = path.join(directory, 'continuity-v2.c');
@@ -221,9 +233,28 @@ function main() {
     signAdHoc(wrongSignature, stableIdentifier);
     run(wrongSignature, ['deny', keychain]);
     console.log('macOS Keychain continuity passed: stable DR allowed access; wrong identifier and signature were denied.');
-  } finally {
-    if (keychain) run('security', ['delete-keychain', keychain]);
+  } catch (error) {
+    operationError = error;
+  }
+  const cleanupErrors = [];
+  if (keychain) {
+    try {
+      run('security', ['delete-keychain', keychain]);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  try {
     fs.rmSync(directory, { recursive: true, force: true });
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  if (operationError && cleanupErrors.length > 0) {
+    throw operationWithCleanupErrors(operationError, cleanupErrors);
+  }
+  if (operationError) throw operationError;
+  if (cleanupErrors.length > 0) {
+    throw cleanupAggregate(cleanupErrors);
   }
 }
 

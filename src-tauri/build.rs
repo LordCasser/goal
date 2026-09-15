@@ -50,7 +50,7 @@ fn main() {
     );
     let quoted = |name: &str| format!("\"{name}\"");
     let mut permissions = vec![format!(
-        r#"{{"identifier":"allow-planner-commands","description":"Registered planner commands for the local main window","commands":{{"allow":[{}]}}}}"#,
+        r#"{{"identifier":"allow-planner-commands","description":"Registered Goal commands for the local main window","commands":{{"allow":[{}]}}}}"#,
         business
             .into_iter()
             .map(quoted)

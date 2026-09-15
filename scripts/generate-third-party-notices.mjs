@@ -56,7 +56,7 @@ function npmPackages() {
     const packageFile = path.join(directory, "package.json");
     if (!fs.existsSync(packageFile)) continue;
     const metadata = JSON.parse(fs.readFileSync(packageFile, "utf8"));
-    if (!metadata.name || metadata.name === "planner") continue;
+    if (!metadata.name || path.resolve(directory) === root) continue;
     const expression = metadata.license ?? metadata.licenses?.map((item) => item.type ?? item).join(" OR ");
     if (!expression) throw new Error(`npm package has no license expression: ${metadata.name}@${metadata.version}`);
     packages.push({

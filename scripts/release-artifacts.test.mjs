@@ -31,7 +31,7 @@ function writeBundles(rootDir, targetId) {
   for (const bundle of target.bundles) {
     const directory = path.join(rootDir, "src-tauri", "target", target.triple, "release", "bundle", bundle.directory);
     fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(path.join(directory, `Planner-0.1.0${bundle.extension}`), `${targetId}:${bundle.directory}`);
+    fs.writeFileSync(path.join(directory, `Goal-0.1.0${bundle.extension}`), `${targetId}:${bundle.directory}`);
   }
 }
 

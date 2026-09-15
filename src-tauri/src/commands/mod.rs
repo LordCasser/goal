@@ -19,7 +19,7 @@ pub mod reviews;
 pub mod settings;
 pub mod tasks;
 
-use tauri::Runtime;
+use tauri::{Manager, Runtime};
 
 use crate::events;
 use crate::service::Mutation;
@@ -31,5 +31,11 @@ fn emit_mutation<R: Runtime, T>(app: &tauri::AppHandle<R>, mutation: &Mutation<T
     events::emit_tasks_changed(app, &mutation.tasks);
     if let Some(cycle_id) = &mutation.proposal_cycle {
         events::emit_proposals_changed(app, cycle_id);
+    }
+    // Mutations can create or remove focus-block reminders in the same
+    // transaction. Wake the managed scheduler after the mutation events so a
+    // newly committed trigger is not left behind its empty-queue sleep.
+    if let Some(scheduler) = app.try_state::<crate::service::reminders::Scheduler>() {
+        scheduler.wake();
     }
 }
