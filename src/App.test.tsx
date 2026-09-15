@@ -79,8 +79,9 @@ vi.mock("./features/calendar/CalendarView", () => ({
 }));
 
 import App from "./App";
+import { applyLocale } from "./lib/i18n";
 
-beforeEach(() => { localStorage.clear(); planning.mockReset().mockResolvedValue({}); });
+beforeEach(() => { applyLocale("en"); localStorage.clear(); planning.mockReset().mockResolvedValue({}); });
 function mount() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
 }
@@ -95,31 +96,31 @@ describe("workspace / calendar transitions", () => {
   });
   it("preserves page state and scroll while the outgoing page becomes inert immediately", () => {
     mount();
-    const workspace = screen.getByRole("tabpanel", { name: "workspace" });
+    const workspace = screen.getByRole("tabpanel", { name: "Workspace" });
     const draft = screen.getByRole("textbox", { name: "Plan draft" });
     fireEvent.change(draft, { target: { value: "Keep this draft" } });
     workspace.scrollLeft = 240;
 
-    fireEvent.click(screen.getByRole("tab", { name: "calendar" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Calendar" }));
     expect(workspace.hasAttribute("inert")).toBe(true);
     expect(workspace.getAttribute("aria-hidden")).toBe("true");
     expect(draft.getAttribute("data-active")).toBe("false");
     expect(screen.queryByRole("textbox", { name: "Plan draft" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Month 9" }));
 
-    fireEvent.click(screen.getByRole("tab", { name: "workspace" }));
-    expect(screen.getByRole("tabpanel", { name: "workspace" })).toBe(workspace);
+    fireEvent.click(screen.getByRole("tab", { name: "Workspace" }));
+    expect(screen.getByRole("tabpanel", { name: "Workspace" })).toBe(workspace);
     expect(workspace.scrollLeft).toBe(240);
     expect((screen.getByRole("textbox", { name: "Plan draft" }) as HTMLInputElement).value).toBe("Keep this draft");
-    fireEvent.click(screen.getByRole("tab", { name: "calendar" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Calendar" }));
     expect(screen.getByRole("button", { name: "Month 10" })).toBeTruthy();
   });
 
   it("rapid keyboard reversals select the latest destination without waiting for animation events", () => {
     mount();
     const tabs = within(screen.getByRole("tablist", { name: "View" }));
-    const workspace = tabs.getByRole("tab", { name: "workspace" });
-    const calendar = tabs.getByRole("tab", { name: "calendar" });
+    const workspace = tabs.getByRole("tab", { name: "Workspace" });
+    const calendar = tabs.getByRole("tab", { name: "Calendar" });
     workspace.focus();
     fireEvent.keyDown(workspace, { key: "ArrowRight" });
     fireEvent.keyDown(calendar, { key: "ArrowLeft" });
@@ -127,7 +128,7 @@ describe("workspace / calendar transitions", () => {
     expect(document.activeElement).toBe(calendar);
     expect(calendar.getAttribute("aria-selected")).toBe("true");
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
-    expect(screen.getByRole("tabpanel", { name: "calendar" }).hasAttribute("inert")).toBe(false);
+    expect(screen.getByRole("tabpanel", { name: "Calendar" }).hasAttribute("inert")).toBe(false);
     expect(localStorage.getItem("planner.preferred-view")).toBe("calendar");
   });
 
@@ -135,8 +136,8 @@ describe("workspace / calendar transitions", () => {
     localStorage.setItem("planner.preferred-view", "calendar");
     mount();
     expect(screen.queryByRole("textbox", { name: "Plan draft", hidden: true })).toBeNull();
-    expect(screen.getByRole("tabpanel", { name: "calendar" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "workspace" }));
+    expect(screen.getByRole("tabpanel", { name: "Calendar" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Workspace" }));
     expect(screen.getByRole("textbox", { name: "Plan draft" })).toBeTruthy();
   });
 });
@@ -145,10 +146,10 @@ it("hands an issue to Coach as a draft and can locate it from Calendar",async()=
   mount();
   const issues=await screen.findByRole("button",{name:"Issues"});
   await waitFor(()=>expect((issues as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole("tab",{name:"calendar"}));
+  fireEvent.click(screen.getByRole("tab",{name:"Calendar"}));
   fireEvent.click(issues);
   fireEvent.click(await screen.findByRole("button",{name:"Locate diagnostic"}));
-  expect(screen.getByRole("tab",{name:"workspace"}).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("tab",{name:"Workspace"}).getAttribute("aria-selected")).toBe("true");
   fireEvent.click(screen.getByRole("button",{name:"Discuss diagnostic"}));
   const draft=await screen.findByRole("textbox",{name:"Issue discussion"});
   expect((draft as HTMLInputElement).value).toBe("Check this issue");

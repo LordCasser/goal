@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { platform, primaryShortcut } from "../../lib/platform";
+import { useTranslation } from "../../lib/i18n";
 import { ProposalsBar } from "../proposals/ProposalsBar";
 import { useDesktopWindow } from "./useDesktopWindow";
 
@@ -33,6 +34,7 @@ export function WindowBar({
   onSwitchView: (view: "workspace" | "calendar") => void;
 }) {
   const headerRef = useRef<HTMLElement>(null);
+  const { t } = useTranslation("shell");
   const maximizeRef = useRef<HTMLButtonElement>(null);
   const dragRef = useRef<HTMLDivElement>(null);
   const shell = useDesktopWindow(headerRef, maximizeRef, dragRef);
@@ -49,20 +51,20 @@ export function WindowBar({
       <button
         type="button"
         aria-pressed={laterActive}
-        title={`Do Later (${primaryShortcut("L", true)})`}
+        title={t("desktop.laterTitle", { shortcut: primaryShortcut("L", true) })}
         className={`${buttonBase} ${laterActive ? active : hover}`}
         onClick={onToggleLater}
       >
         <ClockIcon />
-        Later
+        {t("desktop.later")}
       </button>
       {/* The spacer keeps dragging and double-click zoom native to the window. */}
       <div ref={dragRef} className="window-drag-area" data-tauri-drag-region={platform === "macos" ? true : undefined} />
-      <div className="view-switch relative isolate grid grid-cols-2 rounded-lg border border-light bg-subtle p-0.5" role="tablist" aria-label="View" data-view={view}>
+      <div className="view-switch relative isolate grid grid-cols-2 rounded-lg border border-light bg-subtle p-0.5" role="tablist" aria-label={t("desktop.view")} data-view={view}>
         <span className="view-switch-thumb" aria-hidden="true" />
         {(["workspace", "calendar"] as const).map((name) => (
           <button key={name} id={`tab-${name}`} aria-controls={`view-${name}`} type="button" role="tab" aria-selected={view === name} tabIndex={view === name ? 0 : -1}
-            className={`${buttonBase} relative justify-center ${view === name ? "text-primary" : "hover:text-primary"} capitalize`}
+            className={`${buttonBase} relative justify-center ${view === name ? "text-primary" : "hover:text-primary"}`}
             onClick={() => onSwitchView(name)} onKeyDown={(event) => {
               if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
               event.preventDefault();
@@ -70,48 +72,48 @@ export function WindowBar({
               onSwitchView(next);
               const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
               tabs?.[next === "workspace" ? 0 : 1]?.focus();
-            }}>{name}</button>
+            }}>{t(`desktop.${name}`)}</button>
         ))}
       </div>
       <div className="mx-3 h-5 w-px bg-light" aria-hidden="true" />
-      <div role="group" aria-label="Planning tools" className="flex items-center gap-1">
+      <div role="group" aria-label={t("desktop.planningTools")} className="flex items-center gap-1">
         <button type="button" aria-expanded={agentActive} disabled={!hasCycle}
-          aria-label="Coach"
-          title={hasCycle ? "Open Coach panel" : "Create a plan to use Coach"}
+          aria-label={t("desktop.coach")}
+          title={hasCycle ? t("desktop.openCoach") : t("desktop.createPlanCoach")}
           className={`${buttonBase} ${agentActive ? active : hover}`} onClick={onToggleAgent}>
-          <CoachIcon /><span className="window-tool-label">Coach</span>
+          <CoachIcon /><span className="window-tool-label">{t("desktop.coach")}</span>
         </button>
         {!agentActive && <ProposalsBar onOpen={onReviewChanges} />}
         <button type="button" aria-expanded={issuesActive} disabled={!hasCycle}
-          aria-label="Issues"
-          title={hasCycle ? "Open Issues panel" : "Create a plan to review issues"}
+          aria-label={t("desktop.issues")}
+          title={hasCycle ? t("desktop.openIssues") : t("desktop.createPlanIssues")}
           className={`${buttonBase} ${issuesActive ? active : hover}`} onClick={onToggleIssues}>
-          <FlagIcon /><span className="window-tool-label">Issues</span>
+          <FlagIcon /><span className="window-tool-label">{t("desktop.issues")}</span>
         </button>
       </div>
       <div className="mx-3 h-5 w-px bg-light" aria-hidden="true" />
       <button
         type="button"
-        title="Settings"
-        aria-label="Settings"
+        title={t("desktop.settings")}
+        aria-label={t("desktop.settings")}
         className={`${buttonBase} ${hover}`}
         onClick={onOpenSettings}
       >
         <GearIcon />
       </button>
-      {windowsControls && <div className="window-controls" role="group" aria-label="Window controls">
-        <button type="button" aria-label="Minimize window" title="Minimize" onClick={() => void shell.act("minimize")}>
+      {windowsControls && <div className="window-controls" role="group" aria-label={t("desktop.windowControls")}>
+        <button type="button" aria-label={t("desktop.minimize")} title={t("desktop.minimizeTitle")} onClick={() => void shell.act("minimize")}>
           <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10" /></svg>
         </button>
-        <button ref={maximizeRef} type="button" aria-label={shell.maximized ? "Restore window" : "Maximize window"}
-          title={shell.maximized ? "Restore" : "Maximize"}
+        <button ref={maximizeRef} type="button" aria-label={shell.maximized ? t("desktop.restore") : t("desktop.maximize")}
+          title={shell.maximized ? t("desktop.restoreTitle") : t("desktop.maximizeTitle")}
           data-hovered={shell.pointer.hovered} data-pressed={shell.pointer.pressed}
           onClick={() => void shell.act("toggleMaximize")}>
           <svg viewBox="0 0 12 12" aria-hidden="true">{shell.maximized
             ? <><path d="M3.5 3V1.5h7v7H9" /><rect x="1.5" y="3.5" width="7" height="7" rx=".5" /></>
             : <rect x="1.5" y="1.5" width="9" height="9" rx=".5" />}</svg>
         </button>
-        <button type="button" className="window-close" aria-label="Close window" title="Close" onClick={() => void shell.act("close")}>
+        <button type="button" className="window-close" aria-label={t("desktop.close")} title={t("desktop.closeTitle")} onClick={() => void shell.act("close")}>
           <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9" /></svg>
         </button>
       </div>}

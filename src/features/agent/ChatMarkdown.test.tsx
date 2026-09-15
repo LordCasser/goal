@@ -1,8 +1,10 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { applyLocale } from "../../lib/i18n";
 import { ChatMarkdown } from "./ChatMarkdown";
 
 describe("ChatMarkdown", () => {
+  beforeEach(() => applyLocale("zh-CN"));
   it("renders GFM tables inside a keyboard accessible horizontal scroll region", () => {
     render(<ChatMarkdown>{"| Task | Subtasks | Notes |\n| --- | --- | --- |\n| **Test** | — | No details captured |\n| Workspace content verified | — | Title only |"}</ChatMarkdown>);
     const region = screen.getByRole("region", { name: "AI 回复表格，可横向滚动" });

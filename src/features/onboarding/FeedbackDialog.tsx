@@ -8,6 +8,7 @@
  */
 import { useState } from "react";
 import { Button, Dialog } from "../../ui";
+import { errorMessage, useTranslation } from "../../lib/i18n";
 import { isAppError } from "../../lib/ipc";
 import { getTalkToFounderEligibility, sendFeedback } from "./api";
 
@@ -22,6 +23,7 @@ type FeedbackStatus =
   | { kind: "error"; note: string };
 
 export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
+  const { t } = useTranslation("shell");
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<FeedbackStatus>({ kind: "idle" });
   const [copied, setCopied] = useState(false);
@@ -30,7 +32,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
   const submit = async () => {
     if (submitting) return;
     if (!message.trim()) {
-      setStatus({ kind: "error", note: "Please enter your feedback." });
+      setStatus({ kind: "error", note: t("onboarding.feedback.empty") });
       return;
     }
     setSubmitting(true);
@@ -43,8 +45,8 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
         kind: "error",
         note:
           isAppError(error) && error.code === "empty_feedback"
-            ? "Please enter your feedback."
-            : "Couldn't send feedback. Please try again.",
+            ? t("onboarding.feedback.empty")
+            : errorMessage(error),
       });
     } finally {
       setSubmitting(false);
@@ -62,15 +64,15 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="Send feedback">
+    <Dialog open={open} onClose={onClose} title={t("onboarding.feedback.title")}>
       {status.kind === "sent" ? (
         <div className="flex flex-col gap-4" data-testid="feedback-sent">
           <p className="text-body text-primary">
-            Thanks — your feedback was received.
+            {t("onboarding.feedback.sent")}
           </p>
           <div className="flex justify-end">
             <Button variant="primary" onClick={onClose}>
-              Done
+              {t("onboarding.feedback.done")}
             </Button>
           </div>
         </div>
@@ -78,7 +80,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-body font-medium text-primary">
-              What worked, what broke, what you wish existed.
+              {t("onboarding.feedback.prompt")}
             </span>
             <textarea
               value={message}
@@ -88,8 +90,8 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
               }}
               rows={4}
               className="w-full rounded-sm border border-control bg-content px-2 py-1 text-[14px] text-primary placeholder:text-hint"
-              placeholder="Your feedback stays on this device."
-              aria-label="Feedback message"
+              placeholder={t("onboarding.feedback.placeholder")}
+              aria-label={t("onboarding.feedback.label")}
             />
           </label>
           {status.kind === "error" && (
@@ -102,20 +104,20 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
               type="button"
               className="rounded-sm px-2 py-1 text-menu text-secondary hover:bg-hover hover:text-primary"
               onClick={() => void copySupportId()}
-              aria-label="Copy support ID"
+              aria-label={t("onboarding.feedback.copySupportId")}
             >
-              {copied ? "Support ID copied" : "Copy support ID"}
+              {copied ? t("onboarding.feedback.supportIdCopied") : t("onboarding.feedback.copySupportId")}
             </button>
             <div className="flex gap-2">
               <Button variant="ghost" onClick={onClose}>
-                Cancel
+                {t("onboarding.feedback.cancel")}
               </Button>
               <Button
                 variant="primary"
                 loading={submitting}
                 onClick={() => void submit()}
               >
-                Send feedback
+                {t("onboarding.feedback.send")}
               </Button>
             </div>
           </div>

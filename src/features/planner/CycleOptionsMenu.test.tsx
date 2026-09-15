@@ -115,7 +115,8 @@ describe("CycleOptionsMenu deletion", () => {
     mount(target);
 
     await openDelete(target);
-    expect((await screen.findByRole("alert")).textContent).toContain("This planning container is protected.");
+    expect((await screen.findByRole("alert")).textContent).toContain("This planning container cannot be deleted.");
+    expect(screen.getByRole("alert").textContent).not.toContain("This planning container is protected.");
     const confirm = screen.getByRole("button", { name: "Delete day plan" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(confirm);

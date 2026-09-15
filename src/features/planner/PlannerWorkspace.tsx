@@ -4,13 +4,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState } from "../../ui";
 import { createPlanningCycle, ensureDay, getEditorWorkspacesByCycleIds, getPlannerState, LATER_CYCLE_ID, type Cycle } from "../../lib/ipc";
 import { qk } from "../../lib/events";
-import { formatShortDate, isoWeekNumber, todayISO, weekdayName } from "./dates";
+import { isoWeekNumber, todayISO, weekdayName } from "./dates";
 import { invalidateCycles, useActionError } from "./actions";
 import { CycleColumn } from "./CycleColumn";
 import { DurationDialog } from "./DurationDialog";
 import { directRelations, highlightedTasks, indexTasks, type RelationView } from "./relations";
 import { RelationLayer } from "./RelationLayer";
 import { TaskDragProvider } from "./TaskDragContext";
+import { useTranslation, formatDate } from "../../lib/i18n";
 
 function currentCycle(cycles: Cycle[], selected: string | null, today: string): Cycle | null {
   return cycles.find((c) => c.id === selected)
@@ -19,6 +20,7 @@ function currentCycle(cycles: Cycle[], selected: string | null, today: string): 
 }
 
 export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewIssues, onPlanWithAI, revealTask }: { revealTask?: {cycleId:string;taskId:string;requestId:number}; active?: boolean; onActiveCycleChange?: (id: string) => void; onReviewIssues?: (id: string) => void; onPlanWithAI?: (id: string) => void }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const { data: state, isLoading, isError } = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
   const [durationOpen, setDurationOpen] = useState(false);
@@ -104,67 +106,67 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
     setCreating(false);
   };
 
-  if (isLoading) return <div className="flex h-full items-center justify-center text-hint">Loading workspace…</div>;
-  if (isError || state === undefined) return <div role="alert" className="p-8 text-secondary">The workspace could not be loaded. <Button onClick={() => void qc.invalidateQueries({ queryKey: qk.plannerState() })}>Retry</Button></div>;
+  if (isLoading) return <div className="flex h-full items-center justify-center text-hint">{t("workspace.loading")}</div>;
+  if (isError || state === undefined) return <div role="alert" className="p-8 text-secondary">{t("workspace.loadError")} <Button onClick={() => void qc.invalidateQueries({ queryKey: qk.plannerState() })}>{t("workspace.retry")}</Button></div>;
 
-  const weekHint = "What needs to get done this week? Add several tasks, with or without a long-term goal.";
-  const dayHint = "Plan what matters today. Link to a weekly task when useful, or keep it independent.";
+  const weekHint = t("workspace.weekHint");
+  const dayHint = t("workspace.dayHint");
 
   return <TaskDragProvider>
     <div className="flex h-full min-h-0 flex-col">
     <div ref={viewportRef} className="relative min-h-0 flex-1">
-    <div className="h-full min-w-0 overflow-x-auto" aria-label="Planning workspace">
+      <div className="h-full min-w-0 overflow-x-auto" aria-label={t("workspace.planning")}>
       <div className="flex h-full w-max items-start gap-8 px-6 pb-6 pt-8">
-        <Horizon label="Cycles" cycles={months} selected={month?.id} onSelect={selectMonth}
-          action={<button className="cycle-nav-add" onClick={() => setDurationOpen(true)}>+ Add cycle</button>}>
+        <Horizon label={t("workspace.cycles")} cycles={months} selected={month?.id} onSelect={selectMonth}
+          action={<button className="cycle-nav-add" onClick={() => setDurationOpen(true)}>+ {t("workspace.addCycle")}</button>} t={t}>
           {month ? <CycleColumn revealTask={revealTask} active={active} key={month.id} cycle={month} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(month.id)} /> :
-            <EmptyState title="Start with a meaningful goal" description="What would you like to achieve in the coming months? Give your weeks and days a direction."
-              action={<Button variant="primary" onClick={() => setDurationOpen(true)}>Set long-term goals</Button>} className="min-h-[360px] w-plan self-start" />}
+            <EmptyState title={t("workspace.emptyTitle")} description={t("workspace.emptyDescription")}
+              action={<Button variant="primary" onClick={() => setDurationOpen(true)}>{t("workspace.setGoals")}</Button>} className="min-h-[360px] w-plan self-start" />}
         </Horizon>
-        <Horizon label="Weeks" cycles={weeks} selected={week?.id} onSelect={selectWeek}
-          action={<button className="cycle-nav-add" disabled={creating} onClick={() => void createWeek()}>This week</button>}>
+        <Horizon label={t("workspace.weeks")} cycles={weeks} selected={week?.id} onSelect={selectWeek}
+          action={<button className="cycle-nav-add" disabled={creating} onClick={() => void createWeek()}>{t("workspace.thisWeek")}</button>} t={t}>
           {week ? <CycleColumn revealTask={revealTask} active={active} key={week.id} cycle={week} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(week.id)} /> :
-            <EmptyState title="Shape your week" description={weekHint}
-              action={<Button disabled={creating} onClick={() => void createWeek()}>Create this week</Button>} className="min-h-[360px] w-plan self-start" />}
+            <EmptyState title={t("workspace.thisWeek")} description={weekHint}
+              action={<Button disabled={creating} onClick={() => void createWeek()}>{t("workspace.createWeek")}</Button>} className="min-h-[360px] w-plan self-start" />}
         </Horizon>
-        <Horizon label="Days" cycles={days} selected={day?.id} onSelect={selectDay}
-          action={<button className="cycle-nav-add" disabled={creating} onClick={() => void createToday()}>+ Today</button>}>
+        <Horizon label={t("workspace.days")} cycles={days} selected={day?.id} onSelect={selectDay}
+          action={<button className="cycle-nav-add" disabled={creating} onClick={() => void createToday()}>+ {t("workspace.today")}</button>} t={t}>
           {day ? <CycleColumn revealTask={revealTask} active={active} key={day.id} cycle={day} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(day.id)} /> :
-            <EmptyState title="Give today a clear focus" description={dayHint}
-              action={<Button disabled={creating} onClick={() => void createToday()}>Add today</Button>} className="min-h-[360px] w-plan self-start" />}
+            <EmptyState title={t("workspace.today")} description={dayHint}
+              action={<Button disabled={creating} onClick={() => void createToday()}>{t("workspace.addToday")}</Button>} className="min-h-[360px] w-plan self-start" />}
         </Horizon>
       </div>
     </div>
     <RelationLayer viewportRef={viewportRef} edges={edges} tasks={tasks} hidden={dragging} />
     </div>
-    {selected && <div className="connection-bar flex shrink-0 items-center gap-3 border-t border-light bg-content px-6 py-2 text-caption" aria-label="Task connections">
-      <span className="shrink-0 font-medium text-secondary">Connections</span>
+    {selected && <div className="connection-bar flex shrink-0 items-center gap-3 border-t border-light bg-content px-6 py-2 text-caption" aria-label={t("workspace.connections")}>
+      <span className="shrink-0 font-medium text-secondary">{t("workspace.connections")}</span>
       <span className="max-w-48 truncate text-primary" title={selected.title}>{selected.title}</span>
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
         {edges.length ? edges.map(([parent, child]) => { const related = parent.id === selected.id ? child : parent;
-          return <button key={related.id} className="shrink-0 rounded-md border border-light px-2 py-1 text-secondary hover:bg-hover" title={`Locate ${related.title}`} onClick={() => locate(related.id)}>{parent.id === selected.id ? "→ " : "← "}{related.title}</button>;
-        }) : <span className="text-hint">No connections yet. Use the color slot to link a goal.</span>}
+          return <button key={related.id} className="shrink-0 rounded-md border border-light px-2 py-1 text-secondary hover:bg-hover" title={t("workspace.locate", { title: related.title })} onClick={() => locate(related.id)}>{parent.id === selected.id ? "→ " : "← "}{related.title}</button>;
+        }) : <span className="text-hint">{t("workspace.noConnections")}</span>}
       </div>
-      <button className="h-7 w-7 shrink-0 rounded-md text-secondary hover:bg-hover" aria-label="Close connections" title="Close connections (Esc)" onClick={() => { setSelectedTask(null); setHoveredTask(null); }}>×</button>
+      <button className="h-7 w-7 shrink-0 rounded-md text-secondary hover:bg-hover" aria-label={t("workspace.closeConnections")} title={`${t("workspace.closeConnections")} (Esc)`} onClick={() => { setSelectedTask(null); setHoveredTask(null); }}>×</button>
     </div>}
     </div>
     <DurationDialog open={durationOpen} onClose={() => setDurationOpen(false)} onCreated={(cycle) => { selectMonth(cycle.id); invalidateCycles(qc); }} />
-    {error && <div role="alert" className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-light bg-content px-4 py-3 text-caption text-danger shadow-lg">{error}<button className="ml-3 underline" onClick={dismiss}>Dismiss</button></div>}
+    {error && <div role="alert" className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-light bg-content px-4 py-3 text-caption text-danger shadow-lg">{error}<button className="ml-3 underline" onClick={dismiss}>{t("workspace.dismiss")}</button></div>}
   </TaskDragProvider>;
 }
 
-function Horizon({ label, cycles, selected, onSelect, action, children }: {
-  label: string; cycles: Cycle[]; selected?: string; onSelect: (id: string) => void; action: ReactNode; children: ReactNode;
+function Horizon({ label, cycles, selected, onSelect, action, children, t }: {
+  label: string; cycles: Cycle[]; selected?: string; onSelect: (id: string) => void; action: ReactNode; children: ReactNode; t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   return <div className="flex h-full shrink-0 gap-4">
     <nav aria-label={label} className="flex w-[88px] shrink-0 flex-col gap-1 pt-1">
       <h2 className="mb-2 px-2 text-caption font-medium text-secondary">{label}</h2>
       <div className="min-h-0 overflow-y-auto">
         {cycles.map((cycle) => <button key={cycle.id} type="button" aria-current={selected === cycle.id ? "date" : undefined}
-          onClick={() => onSelect(cycle.id)} title={cycle.starts_on ?? cycle.title}
+          onClick={() => onSelect(cycle.id)} title={cycle.starts_on ? formatDate(cycle.starts_on, { year: "numeric", month: "short", day: "numeric" }) : cycle.title}
           className={`mb-1 w-full rounded-md px-2 py-2 text-left text-caption transition-colors ${selected === cycle.id ? "bg-focus-surface font-medium text-focus" : "text-secondary hover:bg-hover"}`}>
-          {cycle.type === "month" ? (cycle.starts_on ? formatShortDate(cycle.starts_on) : cycle.title) : cycle.type === "week" ? `W${isoWeekNumber(cycle.starts_on ?? "") ?? cycle.position + 1}` : cycle.starts_on ? weekdayName(cycle.starts_on).slice(0, 3) : cycle.title}
-          {cycle.finished && <span className="block text-[10px] font-normal text-hint">Ended</span>}
+          {cycle.type === "month" ? (cycle.starts_on ? formatDate(cycle.starts_on, { month: "short", day: "numeric" }) : cycle.title) : cycle.type === "week" ? `W${isoWeekNumber(cycle.starts_on ?? "") ?? cycle.position + 1}` : cycle.starts_on ? weekdayName(cycle.starts_on).slice(0, 3) : cycle.title}
+          {cycle.finished && <span className="block text-[10px] font-normal text-hint">{t("workspace.ended")}</span>}
         </button>)}
       </div>
       {action}

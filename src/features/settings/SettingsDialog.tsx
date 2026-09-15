@@ -15,42 +15,28 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { ReminderSettingsSection } from "../reminders/ReminderSettingsSection";
 import { AiSettingsPage } from "../ai-settings/AiSettingsPage";
-import { Button, Dialog, cn } from "../../ui";
+import { Button, Dialog, Select, SelectItem, cn } from "../../ui";
 import { qk } from "../../lib/events";
 import {
   getDebugLogDir,
   getSchemaVersion,
   getSettings,
-  isAppError,
+  setLocale,
   setLogLevel,
   setTheme,
   setWeekStartDay,
 } from "../../lib/ipc";
 import type { LogLevel, Settings, Theme } from "../../lib/ipc";
+import { applyLocale, errorMessage, useTranslation } from "../../lib/i18n";
 import { applyTheme } from "../../lib/theme";
 
 /** 两个用户确认的浅色主题（design.md §4.4）；默认白底。 */
-const THEME_OPTIONS: ReadonlyArray<{ value: Theme; label: string }> = [
-  { value: "white", label: "白底" },
-  { value: "gray", label: "灰底" },
+const THEME_OPTIONS: ReadonlyArray<{ value: Theme }> = [
+  { value: "white" },
+  { value: "gray" },
 ];
 
-/** 周一…周日 ↔ ISO 1…7，与 setWeekStartDay 的取值域一致。 */
-const WEEK_DAY_LABELS = [
-  "周一",
-  "周二",
-  "周三",
-  "周四",
-  "周五",
-  "周六",
-  "周日",
-] as const;
-
 const LOG_LEVELS: readonly LogLevel[] = ["error", "warn", "info", "debug"];
-
-/* 原生 select 复用 Input 的表面样式（design.md 4.1/4.3）；箭头留给平台。 */
-const SELECT_CLASS =
-  "h-9 rounded-md border border-control bg-content px-3 text-[14px] text-primary transition-colors duration-100";
 
 /*
  * 主题示意小图（48×32、2px 圆角）：canvas 上承托一块 content 面板。
@@ -77,12 +63,7 @@ function ThemePreview({ theme }: { theme: Theme }) {
 /** 行内错误（AppError 优先取 message），不打断、不弹窗（design.md 9.2）。 */
 function InlineError({ error }: { error: unknown }) {
   if (error === null || error === undefined) return null;
-  const message = isAppError(error)
-    ? error.message
-    : error instanceof Error
-      ? error.message
-      : String(error);
-  return <p className="text-caption text-danger">{message}</p>;
+  return <p className="text-caption text-danger">{errorMessage(error)}</p>;
 }
 
 export function SettingsDialog({
@@ -96,8 +77,10 @@ export function SettingsDialog({
   onPreviewExitPoll?: () => void;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
+  const { t } = useTranslation("shell");
   const weekStartId = useId();
   const logLevelId = useId();
+  const localeId = useId();
 
   // 关闭期间不发 IPC；settings 键与 App 共享同一份缓存。
   const settingsQuery = useQuery({
@@ -155,6 +138,23 @@ export function SettingsDialog({
     },
   });
 
+  const localeMutation = useMutation({
+    mutationFn: async (locale: Settings["locale"]) => {
+      await setLocale(locale);
+      return locale;
+    },
+    onMutate: () => queryClient.cancelQueries({ queryKey: qk.settings() }),
+    onSuccess: (locale) => {
+      // Publish the durable preference only after success. App also observes
+      // this cache, so optimistic writes would switch the whole UI too early.
+      queryClient.setQueryData<Settings>(qk.settings(), (current) =>
+        current ? { ...current, locale } : current,
+      );
+      applyLocale(locale);
+      void queryClient.invalidateQueries({ queryKey: qk.settings() });
+    },
+  });
+
   // 后端没有日志级别回读命令，先显示 info；之后的取值以本地选择为准。
   const [logLevel, setLogLevelValue] = useState<LogLevel>("info");
   const logLevelMutation = useMutation({ mutationFn: setLogLevel });
@@ -167,6 +167,7 @@ export function SettingsDialog({
 
   const selectedTheme = settingsQuery.data?.theme ?? "white";
   const weekStartDay = settingsQuery.data?.week_start_day ?? 1;
+  const selectedLocale = settingsQuery.data?.locale ?? "en";
 
   const chooseTheme = (theme: Theme) => {
     if (theme === selectedTheme) return;
@@ -202,14 +203,14 @@ export function SettingsDialog({
   if (!open) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} title="设置" wide className="max-w-[1040px]! h-[680px] max-h-[calc(100vh-64px)]" bodyClassName="overflow-hidden!">
+    <Dialog open={open} onClose={onClose} title={t("settings.title")} wide className="max-w-[1040px]! h-[680px] max-h-[calc(100vh-64px)]" bodyClassName="overflow-hidden!">
       <div className="flex h-full gap-7 border-t border-light pt-5">
-        <nav aria-label="设置分类" className="flex w-[136px] shrink-0 flex-col gap-1">
+        <nav aria-label={t("settings.navLabel")} className="flex w-[136px] shrink-0 flex-col gap-1">
           {([
-            ["general", "通用", "外观与规划偏好"],
-            ["ai", "AI 模型", "供应商与连接"],
-            ["reminders", "提醒", "时间与免打扰"],
-            ["diagnostics", "诊断", "日志与应用信息"],
+            ["general", t("settings.nav.general"), t("settings.nav.generalDescription")],
+            ["ai", t("settings.nav.ai"), t("settings.nav.aiDescription")],
+            ["reminders", t("settings.nav.reminders"), t("settings.nav.remindersDescription")],
+            ["diagnostics", t("settings.nav.diagnostics"), t("settings.nav.diagnosticsDescription")],
           ] as const).map(([id, label, description]) => (
             <button key={id} type="button" aria-current={section === id ? "page" : undefined}
               onClick={() => setSection(id)}
@@ -222,21 +223,21 @@ export function SettingsDialog({
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1 pb-2">
           {section === "general" && <div className="flex flex-col gap-7">
             <section>
-              <h3 className="text-section-title font-semibold text-primary">外观与偏好</h3>
-              <p className="mt-1 text-body text-secondary">选择工作台底色与每周的开始时间。</p>
+              <h3 className="text-section-title font-semibold text-primary">{t("settings.appearance.title")}</h3>
+              <p className="mt-1 text-body text-secondary">{t("settings.appearance.description")}</p>
               <div className="mt-5 grid grid-cols-2 gap-3">
                 {THEME_OPTIONS.map((option) => (
-                  <button key={option.value} type="button" aria-label={option.label}
+                  <button key={option.value} type="button" aria-label={t(`settings.theme.${option.value}`)}
                     aria-pressed={selectedTheme === option.value}
                     disabled={settingsQuery.isPending || themeMutation.isPending}
                     onClick={() => chooseTheme(option.value)}
                     className={cn("overflow-hidden rounded-lg border p-2 text-left transition-colors", selectedTheme === option.value ? "border-focus" : "border-light hover:border-control")}>
                     <ThemePreview theme={option.value} />
                     <span className="flex items-center justify-between px-2 pb-1 pt-3 text-body font-medium text-primary">
-                      {option.label}
+                      {t(`settings.theme.${option.value}`)}
                       <span aria-hidden="true" className={cn("flex h-4 w-4 items-center justify-center rounded-full border text-[10px]", selectedTheme === option.value ? "border-focus bg-focus text-white" : "border-control")}>{selectedTheme === option.value ? "✓" : ""}</span>
                     </span>
-                    <span className="block px-2 pb-2 text-caption text-secondary">{option.value === "white" ? "轻盈留白，让内容成为主角" : "柔和灰底，衬托白色计划面"}</span>
+                    <span className="block px-2 pb-2 text-caption text-secondary">{t(`settings.theme.${option.value}Description`)}</span>
                   </button>
                 ))}
               </div>
@@ -245,45 +246,62 @@ export function SettingsDialog({
             <section className="border-t border-light pt-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <label htmlFor={weekStartId} className="text-body font-medium text-primary">周起始日</label>
-                  <p className="mt-1 text-caption text-secondary">用于日历与新建周计划。</p>
+                  <label htmlFor={localeId} className="text-body font-medium text-primary">{t("settings.language.label")}</label>
+                  <p className="mt-1 text-caption text-secondary">{t("settings.language.description")}</p>
                 </div>
-                <select id={weekStartId} value={weekStartDay} disabled={settingsQuery.isPending || weekStartMutation.isPending}
-                  onChange={(e) => chooseWeekStart(Number(e.currentTarget.value))} className={cn(SELECT_CLASS, "w-[116px]")}>
-                  {WEEK_DAY_LABELS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
-                </select>
+                <Select id={localeId} value={selectedLocale} disabled={settingsQuery.isPending || localeMutation.isPending}
+                  onValueChange={(value) => {
+                    const locale = value as Settings["locale"];
+                    if (locale !== selectedLocale) localeMutation.mutate(locale);
+                  }} triggerClassName="w-[132px]">
+                  <SelectItem value="zh-CN">{t("settings.language.zhCN")}</SelectItem>
+                  <SelectItem value="en">{t("settings.language.en")}</SelectItem>
+                </Select>
+              </div>
+              <InlineError error={localeMutation.error} />
+            </section>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <label htmlFor={weekStartId} className="text-body font-medium text-primary">{t("settings.weekStart.label")}</label>
+                  <p className="mt-1 text-caption text-secondary">{t("settings.weekStart.description")}</p>
+                </div>
+                <Select id={weekStartId} value={String(weekStartDay)} disabled={settingsQuery.isPending || weekStartMutation.isPending}
+                  onValueChange={(value) => chooseWeekStart(Number(value))} triggerClassName="w-[116px]">
+                  {Array.from({ length: 7 }, (_, index) => <SelectItem key={index + 1} value={String(index + 1)}>{t(`settings.weekDay.${index + 1}`)}</SelectItem>)}
+                </Select>
               </div>
               <InlineError error={weekStartMutation.error} />
             </section>
             {onPreviewExitPoll && <section className="flex items-center justify-between gap-4 border-t border-light pt-5">
-              <div><h3 className="text-body font-medium text-primary">使用反馈</h3><p className="mt-1 text-caption text-secondary">记录是什么打断了这次专注。</p></div>
-              <Button size="compact" onClick={onPreviewExitPoll}>填写反馈</Button>
+              <div><h3 className="text-body font-medium text-primary">{t("settings.feedback.title")}</h3><p className="mt-1 text-caption text-secondary">{t("settings.feedback.description")}</p></div>
+              <Button size="compact" onClick={onPreviewExitPoll}>{t("settings.feedback.action")}</Button>
             </section>}
             <InlineError error={settingsQuery.error} />
-            <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending ? "正在保存…" : "更改自动保存"}</p>
+            <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending || localeMutation.isPending ? t("settings.saveStatus.saving") : t("settings.saveStatus.auto")}</p>
           </div>}
           {section === "ai" && <AiSettingsPage />}
-          {section === "reminders" && <div className="flex flex-col gap-6"><div><h3 className="text-section-title font-semibold text-primary">提醒与通知</h3><p className="mt-1 text-body text-secondary">安排提醒时间，为专注保留安静的空间。</p></div><ReminderSettingsSection /></div>}
+          {section === "reminders" && <div className="flex flex-col gap-6"><div><h3 className="text-section-title font-semibold text-primary">{t("settings.reminders.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.reminders.description")}</p></div><ReminderSettingsSection /></div>}
           {section === "diagnostics" && <div className="flex flex-col gap-6">
-            <div><h3 className="text-section-title font-semibold text-primary">诊断与日志</h3><p className="mt-1 text-body text-secondary">遇到问题时，在这里查看本地诊断信息。</p></div>
+            <div><h3 className="text-section-title font-semibold text-primary">{t("settings.diagnostics.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.diagnostics.description")}</p></div>
             <section className="border-t border-light pt-5">
               <div className="flex items-center justify-between gap-3">
-                <div><label htmlFor={logLevelId} className="text-body font-medium text-primary">日志级别</label><p className="mt-1 text-caption text-secondary">调整当前运行期间的记录详细程度。</p></div>
-                <select id={logLevelId} value={logLevel} onChange={(e) => chooseLogLevel(e.currentTarget.value as LogLevel)} className={cn(SELECT_CLASS, "w-[116px]")}>
-                  {LOG_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
-                </select>
+                <div><label htmlFor={logLevelId} className="text-body font-medium text-primary">{t("settings.logLevel.label")}</label><p className="mt-1 text-caption text-secondary">{t("settings.logLevel.description")}</p></div>
+                <Select id={logLevelId} value={logLevel} onValueChange={(value) => chooseLogLevel(value as LogLevel)} triggerClassName="w-[116px]">
+                  {LOG_LEVELS.map((level) => <SelectItem key={level} value={level}>{level}</SelectItem>)}
+                </Select>
               </div>
               <InlineError error={logLevelMutation.error} />
             </section>
             <section className="border-t border-light pt-5">
               <div className="flex items-center justify-between gap-3">
-                <div><h3 className="text-body font-medium text-primary">应用日志</h3><p className="mt-1 text-caption text-secondary">在 Finder 中打开日志所在文件夹。</p></div>
-                <Button size="compact" loading={openingLogs} onClick={() => void openLogDir()}>打开日志目录</Button>
+                <div><h3 className="text-body font-medium text-primary">{t("settings.logs.title")}</h3><p className="mt-1 text-caption text-secondary">{t("settings.logs.description")}</p></div>
+                <Button size="compact" loading={openingLogs} onClick={() => void openLogDir()}>{t("settings.logs.open")}</Button>
               </div>
               {logDir !== null && <p className="mt-3 break-all rounded-md bg-subtle p-3 text-caption text-secondary">{logDir}</p>}
               <InlineError error={logDirError} />
             </section>
-            {schemaQuery.data !== undefined && <p className="border-t border-light pt-5 text-caption text-hint">Schema v{schemaQuery.data}</p>}
+            {schemaQuery.data !== undefined && <p className="border-t border-light pt-5 text-caption text-hint">{t("settings.schemaVersion", { version: schemaQuery.data })}</p>}
             <InlineError error={schemaQuery.error} />
           </div>}
         </div>

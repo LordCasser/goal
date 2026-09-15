@@ -86,32 +86,47 @@ pub fn conversation_for_cycle(
 pub const CONTEXT_IDLE_TTL_MS: i64 = 15 * 60 * 1000;
 pub const CONTEXT_IDLE_SETTING: &str = "ai.context-idle-minutes";
 pub fn context_idle_minutes(conn: &Connection) -> AppResult<i64> {
-    Ok(crate::repository::settings::get(conn, CONTEXT_IDLE_SETTING)?
-        .and_then(|value| value.parse::<i64>().ok()).filter(|n| (1..=1440).contains(n)).unwrap_or(15))
+    Ok(
+        crate::repository::settings::get(conn, CONTEXT_IDLE_SETTING)?
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|n| (1..=1440).contains(n))
+            .unwrap_or(15),
+    )
 }
 
 pub fn expires_at(conversation: &Conversation, minutes: i64) -> Option<i64> {
-    if conversation.active_turn_id.is_some() { return None; }
-    conversation.updated_at.parse::<i64>().ok().map(|t| t + minutes * 60_000)
+    if conversation.active_turn_id.is_some() {
+        return None;
+    }
+    conversation
+        .updated_at
+        .parse::<i64>()
+        .ok()
+        .map(|t| t + minutes * 60_000)
 }
 
 /// Expiration is enforced before every context read/turn, including after app
 /// suspension. In-flight replies are not cut off and browsing never extends TTL.
 /// The UI schedules a refresh at this same deadline for visible automatic clearing.
 pub fn expire_idle(conn: &Connection, now_ms: i64) -> AppResult<()> {
-    if !conn.is_autocommit() { return expire_idle_in_transaction(conn,now_ms); }
-    let tx=conn.unchecked_transaction().map_err(from_rusqlite)?;
-    expire_idle_in_transaction(&tx,now_ms)?;
+    if !conn.is_autocommit() {
+        return expire_idle_in_transaction(conn, now_ms);
+    }
+    let tx = conn.unchecked_transaction().map_err(from_rusqlite)?;
+    expire_idle_in_transaction(&tx, now_ms)?;
     tx.commit().map_err(from_rusqlite)
 }
 
-fn expire_idle_in_transaction(conn:&Connection,now_ms:i64)->AppResult<()> {
+fn expire_idle_in_transaction(conn: &Connection, now_ms: i64) -> AppResult<()> {
     let predicate = "active_turn_id IS NULL AND CAST(updated_at AS INTEGER) <= ?1 AND (active_skill IS NOT NULL OR last_error IS NOT NULL OR EXISTS (SELECT 1 FROM agent_messages m WHERE m.conversation_id = agent_conversations.id))";
-    let cutoff=now_ms-context_idle_minutes(conn)?*60_000;
+    let cutoff = now_ms - context_idle_minutes(conn)? * 60_000;
     let ids:Vec<String>=conn.prepare(&format!("UPDATE agent_conversations SET active_skill=NULL, last_error=NULL, revision=revision+1, updated_at=?2 WHERE {predicate} RETURNING id"))
         .map_err(from_rusqlite)?.query_map(params![cutoff,now_ms],|r|r.get(0)).map_err(from_rusqlite)?
         .collect::<rusqlite::Result<_>>().map_err(from_rusqlite)?;
-    for id in ids {conn.execute("DELETE FROM agent_messages WHERE conversation_id=?1",[id]).map_err(from_rusqlite)?;}
+    for id in ids {
+        conn.execute("DELETE FROM agent_messages WHERE conversation_id=?1", [id])
+            .map_err(from_rusqlite)?;
+    }
     Ok(())
 }
 
@@ -274,28 +289,57 @@ mod tests {
 
     #[test]
     fn configured_timeout_is_validated_and_controls_expiration_immediately() {
-        let (db, _dir) = db(); let conn = db.pool().get().unwrap();
+        let (db, _dir) = db();
+        let conn = db.pool().get().unwrap();
         assert_eq!(context_idle_minutes(&conn).unwrap(), 15);
         for invalid in ["0", "1.5", "1441", "forever"] {
-            assert!(crate::service::settings::set_app_flag(&db, CONTEXT_IDLE_SETTING.into(), invalid.into()).is_err());
+            assert!(crate::service::settings::set_app_flag(
+                &db,
+                CONTEXT_IDLE_SETTING.into(),
+                invalid.into()
+            )
+            .is_err());
         }
-        crate::service::settings::set_app_flag(&db, CONTEXT_IDLE_SETTING.into(), "1".into()).unwrap();
+        crate::service::settings::set_app_flag(&db, CONTEXT_IDLE_SETTING.into(), "1".into())
+            .unwrap();
         let c = get_or_create_conversation(&conn, "later", 1000).unwrap();
-        conn.execute("UPDATE agent_conversations SET active_skill='daily_planning' WHERE id=?1", [&c.id]).unwrap();
-        assert_eq!(expires_at(&c, context_idle_minutes(&conn).unwrap()), Some(61_000));
+        conn.execute(
+            "UPDATE agent_conversations SET active_skill='daily_planning' WHERE id=?1",
+            [&c.id],
+        )
+        .unwrap();
+        assert_eq!(
+            expires_at(&c, context_idle_minutes(&conn).unwrap()),
+            Some(61_000)
+        );
         expire_idle(&conn, 61_000).unwrap();
-        assert!(conversation_for_cycle(&conn, "later").unwrap().unwrap().active_skill.is_none());
+        assert!(conversation_for_cycle(&conn, "later")
+            .unwrap()
+            .unwrap()
+            .active_skill
+            .is_none());
     }
 
     #[test]
     fn expiry_clears_only_idle_context_at_fifteen_minutes_and_never_extends_on_read() {
-        let (db, _dir) = db(); let conn = db.pool().get().unwrap();
+        let (db, _dir) = db();
+        let conn = db.pool().get().unwrap();
         let c = get_or_create_conversation(&conn, "later", 1000).unwrap();
-        conn.execute("UPDATE agent_conversations SET active_skill='daily_planning' WHERE id=?1", [&c.id]).unwrap();
+        conn.execute(
+            "UPDATE agent_conversations SET active_skill='daily_planning' WHERE id=?1",
+            [&c.id],
+        )
+        .unwrap();
         conn.execute("INSERT INTO agent_messages (id,conversation_id,turn_id,sequence_number,message_type,payload_json) VALUES ('m',?1,'t',1,'user','{}')", [&c.id]).unwrap();
         get_or_create_conversation(&conn, "later", 1000 + CONTEXT_IDLE_TTL_MS - 1).unwrap();
         assert_eq!(list_messages(&conn, &c.id, 0).unwrap().len(), 1);
-        assert_eq!(conversation_for_cycle(&conn, "later").unwrap().unwrap().updated_at, "1000");
+        assert_eq!(
+            conversation_for_cycle(&conn, "later")
+                .unwrap()
+                .unwrap()
+                .updated_at,
+            "1000"
+        );
         claim_turn(&conn, &c.id, "running").unwrap();
         expire_idle(&conn, 1000 + CONTEXT_IDLE_TTL_MS).unwrap();
         assert_eq!(list_messages(&conn, &c.id, 0).unwrap().len(), 1);
@@ -303,8 +347,11 @@ mod tests {
         expire_idle(&conn, 1000 + CONTEXT_IDLE_TTL_MS).unwrap();
         assert!(list_messages(&conn, &c.id, 0).unwrap().is_empty());
         let cleared = conversation_for_cycle(&conn, "later").unwrap().unwrap();
-        assert!(cleared.active_skill.is_none()); assert_eq!(cleared.revision, 1);
-        assert!(crate::repository::cycles::get(&conn, "later").unwrap().is_some());
+        assert!(cleared.active_skill.is_none());
+        assert_eq!(cleared.revision, 1);
+        assert!(crate::repository::cycles::get(&conn, "later")
+            .unwrap()
+            .is_some());
     }
 
     #[test]

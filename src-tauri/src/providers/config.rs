@@ -191,7 +191,11 @@ impl ProviderStore {
             .expect("existence checked above");
         *slot = stored.clone();
         if next.active_provider_id.as_deref() == Some(&stored.id)
-            && !stored.models.iter().any(|m| Some(&m.model_id) == next.active_model_id.as_ref()) {
+            && !stored
+                .models
+                .iter()
+                .any(|m| Some(&m.model_id) == next.active_model_id.as_ref())
+        {
             next.active_provider_id = None;
             next.active_model_id = None;
         }
@@ -243,7 +247,9 @@ impl ProviderStore {
 
     #[cfg(test)]
     pub fn set_active(&self, id: &str) -> AppResult<()> {
-        let provider = self.get(id).ok_or_else(|| AppError::not_found("provider", id))?;
+        let provider = self
+            .get(id)
+            .ok_or_else(|| AppError::not_found("provider", id))?;
         self.set_active_model(id, &provider.models[0].model_id)
     }
 
@@ -253,7 +259,15 @@ impl ProviderStore {
         if !state.providers.iter().any(|p| p.id == id) {
             return Err(AppError::not_found("provider", id));
         }
-        if !state.providers.iter().find(|p| p.id == id).unwrap().models.iter().any(|m| m.model_id == model_id) {
+        if !state
+            .providers
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .models
+            .iter()
+            .any(|m| m.model_id == model_id)
+        {
             return Err(AppError::not_found("model", model_id));
         }
         let mut next = state.clone();
@@ -272,7 +286,7 @@ impl ProviderStore {
         }
         let mut next = state.clone();
         next.active_provider_id = None;
-            next.active_model_id = None;
+        next.active_model_id = None;
         self.commit(&mut state, next)?;
         crate::logging::debug(LOG_MODULE, "active provider cleared");
         Ok(())
@@ -289,8 +303,14 @@ impl ProviderStore {
 
     pub fn resolve_active_model(&self) -> Option<(ProviderConfig, ModelConfig)> {
         let state = self.lock();
-        let provider = state.providers.iter().find(|p| Some(&p.id) == state.active_provider_id.as_ref())?;
-        let model = provider.models.iter().find(|m| Some(&m.model_id) == state.active_model_id.as_ref())?;
+        let provider = state
+            .providers
+            .iter()
+            .find(|p| Some(&p.id) == state.active_provider_id.as_ref())?;
+        let model = provider
+            .models
+            .iter()
+            .find(|m| Some(&m.model_id) == state.active_model_id.as_ref())?;
         Some((provider.clone(), model.clone()))
     }
 
@@ -383,7 +403,10 @@ pub(crate) fn validate(provider: &ProviderConfig) -> AppResult<()> {
     let mut model_ids = std::collections::HashSet::new();
     for model in &provider.models {
         if !model_ids.insert(model.model_id.as_str()) {
-            return Err(AppError::validation("duplicate_model_id", "Model IDs must be unique within a provider."));
+            return Err(AppError::validation(
+                "duplicate_model_id",
+                "Model IDs must be unique within a provider.",
+            ));
         }
         if model.model_id.trim().is_empty() {
             return Err(AppError::validation(
@@ -478,15 +501,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = ProviderStore::load(dir.path()).unwrap();
         let mut config = sample_provider();
-        let mut second = sample_model(); second.model_id = "second".into();
+        let mut second = sample_model();
+        second.model_id = "second".into();
         config.models.push(second);
         let saved = store.add(config).unwrap();
         store.set_active_model(&saved.id, "second").unwrap();
         assert!(store.set_active_model(&saved.id, "missing").is_err());
         assert_eq!(store.resolve_active_model().unwrap().1.model_id, "second");
         let reopened = ProviderStore::load(dir.path()).unwrap();
-        assert_eq!(reopened.resolve_active_model().unwrap().1.model_id, "second");
-        let mut changed = saved; changed.models.pop(); store.update(changed).unwrap();
+        assert_eq!(
+            reopened.resolve_active_model().unwrap().1.model_id,
+            "second"
+        );
+        let mut changed = saved;
+        changed.models.pop();
+        store.update(changed).unwrap();
         assert!(store.resolve_active_model().is_none());
         assert_eq!(store.active_provider_id(), None);
         assert_eq!(store.active_model_id(), None);
@@ -527,7 +556,9 @@ mod tests {
     #[test]
     fn crud_roundtrip_survives_reload() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = ProviderStore::load(dir.path()).expect("load empty");
+        let config_dir = dir.path().join("用户 providers with spaces");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        let store = ProviderStore::load(&config_dir).expect("load empty");
 
         assert!(store.list().is_empty());
         let added = store.add(sample_provider()).expect("add");
@@ -535,7 +566,7 @@ mod tests {
         assert_ne!(added.created_at, 0, "store assigns created_at");
 
         // A fresh store over the same directory sees the write.
-        let reopened = ProviderStore::load(dir.path()).expect("reload");
+        let reopened = ProviderStore::load(&config_dir).expect("reload");
         assert_eq!(reopened.list(), vec![added.clone()]);
         assert_eq!(reopened.get(&added.id), Some(added.clone()));
         assert_eq!(reopened.get("missing"), None);
@@ -546,12 +577,12 @@ mod tests {
         let updated = reopened.update(edited).expect("update");
         assert_eq!(updated.name, "Renamed");
 
-        let after_update = ProviderStore::load(dir.path()).expect("reload");
+        let after_update = ProviderStore::load(&config_dir).expect("reload");
         assert_eq!(after_update.list().len(), 1);
         assert_eq!(after_update.list()[0].name, "Renamed");
 
         after_update.delete(&updated.id).expect("delete");
-        assert!(ProviderStore::load(dir.path())
+        assert!(ProviderStore::load(&config_dir)
             .expect("reload")
             .list()
             .is_empty());

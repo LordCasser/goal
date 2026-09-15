@@ -22,11 +22,13 @@ import {
 import { qk } from "../../lib/events";
 import { Button, Input } from "../../ui";
 import { LaterTaskRow } from "./LaterTaskRow";
+import { useTranslation } from "../../lib/i18n";
 
 /** app_settings 里的 flag key；值为 "dismissed" 后解释卡不再出现。 */
 export const LATER_HINT_KEY = "hint.later-explainer";
 
 export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const { t } = useTranslation("planning");
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
   const [hintHidden, setHintHidden] = useState(false);
@@ -93,20 +95,20 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
 
   return (
     <aside
-      aria-label="Do Later"
+      aria-label={t("later.panel")}
       onKeyDown={onPanelKeyDown}
       className="flex h-full w-panel shrink-0 flex-col border-r border-light bg-content"
     >
       <header className="flex items-center justify-between px-4 pb-3 pt-4">
         <h2 className="text-caption font-semibold uppercase tracking-[0.08em] text-secondary">
-          Later
+          {t("later.title")}
         </h2>
         <Button
           variant="ghost"
           size="icon"
           onClick={onClose}
-          aria-label="Close Later panel"
-          title="Close (Esc)"
+          aria-label={t("later.close")}
+          title={t("later.closeEsc")}
         >
           <CloseIcon />
         </Button>
@@ -117,30 +119,28 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onQuickAddKeyDown}
-          placeholder="Note it down, schedule later"
-          aria-label="New parked goal"
+          placeholder={t("later.placeholder")}
+          aria-label={t("later.newGoal")}
         />
       </div>
       {showHint && (
         <section className="mx-4 mb-3 rounded-sm border border-light bg-subtle p-3">
           <header className="flex items-start justify-between gap-2">
             <h3 className="text-caption font-semibold uppercase tracking-[0.08em] text-secondary">
-              Park now, plan later
+              {t("later.hintTitle")}
             </h3>
             <Button
               variant="ghost"
               size="icon"
               onClick={() => dismissHint.mutate()}
-              aria-label="Dismiss hint"
-              title="Won't show again"
+              aria-label={t("later.dismissHint")}
+              title={t("later.wontShow")}
             >
               <CloseIcon />
             </Button>
           </header>
           <p className="mt-1 text-menu text-secondary">
-            Capture a goal the moment it shows up — nothing here needs a date or
-            a plan. Promote parked items into a long-term cycle when you are
-            ready.
+            {t("later.hint")}
           </p>
         </section>
       )}
@@ -149,7 +149,7 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
         {rows.length === 0 ? (
           // 空状态只留一行轻提示：Later 面板窄，不用大 EmptyState（9.1）。
           <p className="pt-2 text-body text-hint">
-            Nothing parked yet — note it down above. No date or plan needed.
+            {t("later.empty")}
           </p>
         ) : (
           rows.map(({ task, depth }) => (

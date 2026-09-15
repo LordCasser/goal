@@ -158,15 +158,25 @@ fn opening_an_independent_day_does_not_force_a_parent_or_duplicate_it() {
 #[test]
 fn independent_weeks_copy_unfinished_tasks_from_the_previous_date() {
     let db = TestDb::open();
-    let args = CreateCycleArgs { cycle_type: "week".into(), ..Default::default() };
-    let first = cycles::create_planning_cycle(&db.db, &args, common::today(), NOW).unwrap().value;
+    let args = CreateCycleArgs {
+        cycle_type: "week".into(),
+        ..Default::default()
+    };
+    let first = cycles::create_planning_cycle(&db.db, &args, common::today(), NOW)
+        .unwrap()
+        .value;
     let item = add_task(&db.db, &first.id, "Arrange a repair", NOW);
     let next_date = planner_lib::domain::calendar::add_days(common::today(), 7);
-    let next = cycles::create_planning_cycle(&db.db, &args, next_date, NOW + 1).unwrap().value;
+    let next = cycles::create_planning_cycle(&db.db, &args, next_date, NOW + 1)
+        .unwrap()
+        .value;
     cycles::copy_uncompleted_from_previous(&db.db, &next.id, NOW + 2).unwrap();
     let workspace = planner_lib::service::editor::get_editor_workspace(&db.db, &next.id).unwrap();
     assert_eq!(workspace.tasks.len(), 1);
-    assert_eq!(workspace.tasks[0].task.copied_from_task_id.as_deref(), Some(item.id.as_str()));
+    assert_eq!(
+        workspace.tasks[0].task.copied_from_task_id.as_deref(),
+        Some(item.id.as_str())
+    );
 }
 
 #[test]
@@ -872,6 +882,53 @@ fn save_as_repeat_links_first_instance() {
 }
 
 #[test]
+fn opening_days_without_active_repeats_keeps_sessions_empty() {
+    let db = TestDb::open();
+    let today = cycles::get_or_create_day(&db.db, common::today(), NOW)
+        .unwrap()
+        .value;
+    assert!(cycles::list_sessions(&db.db, &today.id).unwrap().is_empty());
+
+    let reopened = cycles::get_or_create_day(&db.db, common::today(), NOW + 1)
+        .unwrap()
+        .value;
+    assert_eq!(reopened.id, today.id);
+    assert!(cycles::list_sessions(&db.db, &reopened.id)
+        .unwrap()
+        .is_empty());
+
+    // A stopped template must not materialize into a later newly opened day.
+    let source = cycles::add_session(
+        &db.db,
+        &cycles::AddSessionArgs {
+            day_cycle_id: today.id,
+            title: "Stopped repeat source".into(),
+            duration_ms: Some(1_500_000),
+            position: None,
+        },
+        NOW,
+    )
+    .unwrap()
+    .value;
+    let repeat = planner_lib::service::repeats::add_repeat(
+        &db.db,
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: source.id,
+        },
+        NOW,
+    )
+    .unwrap()
+    .value;
+    planner_lib::service::repeats::stop_repeat(&db.db, &repeat.id).unwrap();
+
+    let later_date = planner_lib::domain::calendar::add_days(common::today(), 1);
+    let later = cycles::get_or_create_day(&db.db, later_date, NOW + 2)
+        .unwrap()
+        .value;
+    assert!(cycles::list_sessions(&db.db, &later.id).unwrap().is_empty());
+}
+
+#[test]
 fn next_day_generates_instances_in_template_order() {
     let db = TestDb::open();
     let morning = make_session(&db, "Morning review", 1_800_000, NOW);
@@ -1127,21 +1184,35 @@ fn coach_preview_locks_only_affected_tasks_and_rejection_restores_the_exact_tree
     let editor = planner_lib::service::editor::get_editor_workspace(&db.db, &month.id).unwrap();
     assert_eq!(editor.tasks[0].task.title, "AI title");
     assert_eq!(editor.tasks[0].children[0].task.id, child.id);
-    let patch = tasks::TaskPatch {title:Some("Manual".into()),..Default::default()};
+    let patch = tasks::TaskPatch {
+        title: Some("Manual".into()),
+        ..Default::default()
+    };
     assert!(tasks::patch_task(&db.db, &root.id, &patch).is_err());
     assert!(tasks::delete_task(&db.db, &root.id).is_err());
     assert!(tasks::set_task_root_color(&db.db, &root.id, Some("blue")).is_err());
     assert!(tasks::move_task(&db.db, &root.id, &month.id, None).is_err());
     tasks::patch_task(&db.db, &other.id, &patch).unwrap();
     proposals::undo_task_preview(&db.db, &root.id).unwrap();
-    assert_eq!(planner_lib::repository::tasks::require(&db.conn(), &root.id).unwrap(), before);
+    assert_eq!(
+        planner_lib::repository::tasks::require(&db.conn(), &root.id).unwrap(),
+        before
+    );
     tasks::patch_task(&db.db, &root.id, &patch).unwrap();
     proposals::apply_delete_preview(&db.db, &root.id).unwrap();
     assert!(tasks::patch_task(&db.db, &child.id, &patch).is_err());
     assert!(cycles::delete_cycle(&db.db, &month.id).is_err());
     let editor = planner_lib::service::editor::get_editor_workspace(&db.db, &month.id).unwrap();
-    assert_eq!(editor.tasks[0].children[0].task.proposal, Some(planner_lib::domain::proposal::ProposalKind::Delete));
-    assert_eq!(proposals::get_preview_summary(&db.db, &month.id).unwrap().deletion_impacts[&root.id], vec!["Child"]);
+    assert_eq!(
+        editor.tasks[0].children[0].task.proposal,
+        Some(planner_lib::domain::proposal::ProposalKind::Delete)
+    );
+    assert_eq!(
+        proposals::get_preview_summary(&db.db, &month.id)
+            .unwrap()
+            .deletion_impacts[&root.id],
+        vec!["Child"]
+    );
     proposals::undo_task_preview(&db.db, &root.id).unwrap();
     tasks::patch_task(&db.db, &child.id, &patch).unwrap();
     proposals::apply_update_preview(&db.db, &root.id, &input("Confirmed title")).unwrap();

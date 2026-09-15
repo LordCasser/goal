@@ -1,14 +1,13 @@
 //! Reminder commands (change: add-reminders-notifications).
 //!
 //! Also owns the production wiring of the reminders scheduler: the
-//! tauri-plugin-notification backed notifier and the `reminders:changed`
+//! platform notification backed notifier and the `reminders:changed`
 //! invalidation event. See the coordinator notes in `lib.rs` for the two
 //! setup lines this module expects.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use tauri::{Emitter, Manager, Runtime, State};
-use tauri_plugin_notification::NotificationExt;
+use tauri::{Emitter, Manager, State};
 
 use crate::db::Db;
 use crate::error::AppResult;
@@ -34,58 +33,28 @@ fn emit_changed(app: &tauri::AppHandle<tauri::Wry>) {
     }
 }
 
-/// System notification delivery backed by tauri-plugin-notification, with an
-/// in-memory permission cache (tasks §3.1) so reads never hit the OS.
-pub struct SystemNotifier<R: Runtime> {
-    app: tauri::AppHandle<R>,
-    cache: Mutex<Option<String>>,
-}
+/// System notification delivery through the synchronous platform adapter.
+/// Desktop permission state is system-managed and therefore deliberately not
+/// represented as a fabricated `granted` value.
+pub struct SystemNotifier;
 
-impl<R: Runtime> SystemNotifier<R> {
-    pub fn new(app: tauri::AppHandle<R>) -> Self {
-        Self {
-            app,
-            cache: Mutex::new(None),
-        }
+impl SystemNotifier {
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl<R: Runtime> reminders::ReminderNotifier for SystemNotifier<R> {
+impl reminders::ReminderNotifier for SystemNotifier {
     fn permission(&self) -> String {
-        if let Some(cached) = self.cache.lock().expect("permission cache").clone() {
-            return cached;
-        }
-        let token = self
-            .app
-            .notification()
-            .permission_state()
-            .map(|state| state.to_string())
-            .unwrap_or_else(|_| "prompt".to_string());
-        *self.cache.lock().expect("permission cache") = Some(token.clone());
-        token
+        crate::platform::notifications::permission_state().to_string()
     }
 
     fn request_permission(&self) -> String {
-        let token = self
-            .app
-            .notification()
-            .request_permission()
-            .map(|state| state.to_string())
-            .unwrap_or_else(|_| "denied".to_string());
-        *self.cache.lock().expect("permission cache") = Some(token.clone());
-        token
+        crate::platform::notifications::request_permission().to_string()
     }
 
     fn notify(&self, notification: &reminders::NotificationContent) -> reminders::DeliveryOutcome {
-        if self.permission() != "granted" {
-            return reminders::DeliveryOutcome::PermissionDenied;
-        }
-        self.app
-            .notification()
-            .builder()
-            .title(&notification.title)
-            .body(&notification.body)
-            .show()
+        crate::platform::notifications::send(&notification.title, &notification.body)
             .map(|_| reminders::DeliveryOutcome::Delivered)
             .unwrap_or_else(|err| reminders::DeliveryOutcome::Failed(err.to_string()))
     }
@@ -99,7 +68,7 @@ impl<R: Runtime> reminders::ReminderNotifier for SystemNotifier<R> {
 /// app.manage(scheduler);
 /// ```
 pub fn start_scheduler(app: tauri::AppHandle<tauri::Wry>, db: Db) -> Scheduler {
-    let notifier: Arc<dyn reminders::ReminderNotifier> = Arc::new(SystemNotifier::new(app.clone()));
+    let notifier: Arc<dyn reminders::ReminderNotifier> = Arc::new(SystemNotifier::new());
     let emit_app = app;
     Scheduler::new(db, notifier, Some(Box::new(move || emit_event(&emit_app)))).spawn()
 }
@@ -222,14 +191,15 @@ pub fn set_reminder_settings(
     Ok(())
 }
 
-/// Asks the OS for notification permission and caches the answer (§3.1).
+/// Reports the platform notification permission state (§3.1). Desktop builds
+/// return `system_managed` because the native API does not expose a query.
 #[tauri::command]
 pub fn request_notification_permission(scheduler: State<'_, Scheduler>) -> AppResult<String> {
     Ok(scheduler.request_permission())
 }
 
-/// Cached permission plus the last delivery failure, for the settings page
-/// guidance (§3.3).
+/// Platform permission state plus the last synchronous delivery failure, for
+/// the settings page guidance (§3.3).
 #[tauri::command]
 pub fn get_notification_permission(scheduler: State<'_, Scheduler>) -> AppResult<DeliveryStatus> {
     Ok(scheduler.delivery_status())

@@ -53,7 +53,11 @@ fn resolve_provider(
     model_id: &str,
     api_key: Option<String>,
 ) -> Result<ResolvedProvider, AgentError> {
-    let model = provider.models.iter().find(|m| m.model_id == model_id).cloned()
+    let model = provider
+        .models
+        .iter()
+        .find(|m| m.model_id == model_id)
+        .cloned()
         .ok_or_else(|| AgentError::Internal("selected model is unavailable".into()))?;
     let tools_supported = model.supports_tools;
     Ok(ResolvedProvider {

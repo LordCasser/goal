@@ -1,11 +1,13 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const invoke=vi.hoisted(()=>vi.fn());
 vi.mock("@tauri-apps/api/core",()=>({invoke}));
 import { ProposalsBar } from "./ProposalsBar";
 import { commands } from "../../lib/ipc";
+import { applyLocale } from "../../lib/i18n";
 afterEach(cleanup);
+beforeEach(() => applyLocale("zh-CN"));
 function mount(count:number){
   invoke.mockReset().mockImplementation(async(cmd:string,args:{cycleId?:string})=>{
     if(cmd===commands.getPlannerState) return {cycles:[{id:"day"},{id:"week"}]};

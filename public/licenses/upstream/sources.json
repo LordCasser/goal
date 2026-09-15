@@ -715,5 +715,22 @@
       }
     ],
     "note": "The selectors revision contains no license file; this is the identical MPL-2.0 text from the local cached cssparser-0.36.0 crate. The selectors repository/revision is retained as provenance."
+  },
+  {
+    "ecosystem": "npm",
+    "name": "react-remove-scroll-bar",
+    "version": "2.3.8",
+    "expression": "MIT",
+    "repository": "https://github.com/theKashey/react-remove-scroll-bar",
+    "revision": "8ca9ba5ea52de03308fe8ced94f7b159a44d28ff",
+    "note": "The npm archive omits LICENSE; copied from the upstream repository license addition. The npm package declares MIT.",
+    "files": [
+      {
+        "name": "LICENSE",
+        "path": "public/licenses/upstream/theKashey-react-remove-scroll-bar-8ca9ba5ea52de-LICENSE",
+        "url": "https://github.com/theKashey/react-remove-scroll-bar/raw/8ca9ba5ea52de03308fe8ced94f7b159a44d28ff/LICENSE",
+        "sha256": "a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84"
+      }
+    ]
   }
 ]

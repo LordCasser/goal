@@ -35,8 +35,9 @@
 
 ## 设置范围
 
-`propose_settings` 支持 9 项：
+`propose_settings` 支持 10 项：
 
+- `locale`：`zh-CN` / `en`，确认后立即切换界面并影响下一轮 AI 回复语言。
 - `theme`：white / gray。
 - `week_start_day`：1–7，周一为 1。
 - `coach_idle_minutes`：1–1440 分钟。
@@ -77,7 +78,7 @@ Provider 的增删、endpoint、请求头和密钥编辑继续使用设置页；
 
 ## 回答风格
 
-`~/.goal/persona.md` 与 `~/.goal/skills/` 分开管理。首次安装默认文件，已有文件不覆盖；每次生成读取最新 UTF-8 内容。默认风格为简洁、可靠的秘书／助理：先结果和下一步，少复述，一次只问关键问题。Coach 和时段分析共用此风格；权限、数据真实性及 GUI 确认要求由代码保留。
+`~/.goal/persona.md` 与 `~/.goal/skills/` 分开管理。首次安装默认文件，已有文件不覆盖；每次生成读取最新 UTF-8 内容。默认 persona 和内置 SKILL 使用英语编写，system prompt 每次读取界面语言作为默认输出语言，用户明确要求其他语言时遵从用户。默认风格为简洁、可靠的秘书／助理：先结果和下一步，少复述，一次只问关键问题。Coach 和时段分析共用此风格；权限、数据真实性及 GUI 确认要求由代码保留。
 
 ## 单独跟踪的边界
 

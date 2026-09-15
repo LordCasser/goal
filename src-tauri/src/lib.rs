@@ -12,6 +12,7 @@ pub mod db;
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod i18n;
 pub mod logging;
 mod platform;
 pub mod providers;
@@ -25,7 +26,6 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -110,6 +110,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_week_start_day,
             commands::settings::set_theme,
+            commands::settings::set_locale,
             commands::settings::set_log_level,
             commands::settings::get_app_flag,
             commands::settings::set_app_flag,

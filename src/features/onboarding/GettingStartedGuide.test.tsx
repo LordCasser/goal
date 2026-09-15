@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 const { listeners } = vi.hoisted(() => ({ listeners: {} as Record<string, (payload: unknown) => void> }));
@@ -65,6 +66,7 @@ function backendWith(guide: GuidePayload) {
 }
 
 beforeEach(() => {
+  applyLocale("en");
   invokeMock.mockReset();
   delete listeners["cycles:changed"];
   delete listeners["tasks:changed"];

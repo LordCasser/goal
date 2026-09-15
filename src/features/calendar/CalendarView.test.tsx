@@ -190,8 +190,8 @@ describe("CalendarView grids", () => {
       expect(getCalendarRangeMock).toHaveBeenCalledWith("2026-09-01", "2026-09-30"),
     );
     // 共用单元格渲染：摘要 = 专注块数 + 完成进度（spec：格子摘要）。
-    expect(await screen.findByText("3 blocks")).toBeTruthy();
-    expect(screen.getByText("1/3 blocks done")).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "1/3 focus blocks completed" })).toBeTruthy();
+    expect(screen.queryByText("3 blocks")).toBeNull();
     // 每个返回日期都有格子，没有空洞。
     expect(container.querySelector('[data-day-cell="2026-09-16"]')).toBeTruthy();
     expect(container.querySelector('[data-day-cell="2026-09-18"]')).toBeTruthy();
@@ -203,7 +203,7 @@ describe("CalendarView grids", () => {
     await waitFor(() =>
       expect(getCalendarRangeMock).toHaveBeenCalledWith("2026-09-14", "2026-09-20"),
     );
-    expect(await screen.findByRole("region", { name: "Focus blocks on 2026-09-16" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Focus blocks on Sep 16, 2026" })).toBeTruthy();
     expect(screen.getByText("1/3 done")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open focus block Review" }));
     expect(screen.getByRole("tab", { name: "schedule" }).getAttribute("aria-selected")).toBe("true");
@@ -212,7 +212,7 @@ describe("CalendarView grids", () => {
 
   it("centers the focused date on entering Week, preserves manual scrolling, and recenters on Today", async () => {
     const { client, setActive } = renderView();
-    await screen.findByRole("button", { name: "Open 2026-09-16" });
+    await screen.findByRole("button", { name: "Open Sep 16, 2026" });
     const viewport = screen.getByRole("region", { name: "Calendar dates" });
     Object.defineProperty(viewport, "clientWidth", { value: 600 });
     const scrollTo = vi.fn((options?: ScrollToOptions | number) => { viewport.scrollLeft = typeof options === "number" ? options : options?.left ?? 0; });
@@ -260,7 +260,7 @@ describe("CalendarView grids", () => {
 
   it("creates a day plan from an empty cell with its date", async () => {
     renderView();
-    const button = await screen.findByRole("button", { name: "Create day plan for 2026-09-18" });
+    const button = await screen.findByRole("button", { name: "Create day plan for Sep 18, 2026" });
     fireEvent.click(button);
     await waitFor(() => expect(ensureDayMock).toHaveBeenCalledWith("2026-09-18"));
   });
@@ -281,7 +281,7 @@ describe("CalendarView drag", () => {
 
   it("uses an opaque calendar payload and rejects unrelated or cancelled drops", async () => {
     const { container } = renderView();
-    const chip = await screen.findByTitle("Move 2026-09-16");
+    const chip = await screen.findByTitle("Move Sep 16, 2026");
     const target = container.querySelector('[data-day-cell="2026-09-18"]')!;
     const payload = transfer();
     fireEvent.dragStart(chip, payload);
@@ -304,7 +304,7 @@ describe("CalendarView drag", () => {
 
   it("schedules a staged focus block only from its own payload", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     const staged = screen.getByText("Unplanned").closest("[data-focus-block]")!;
     const timeline = screen.getByTestId("timeline");
@@ -335,7 +335,7 @@ describe("CalendarView drag", () => {
 
   it("moves a scheduled focus block with its grab offset and shows the snapped ghost", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     const timeline = screen.getByTestId("timeline");
     const block = timeline.querySelector('[data-scheduled-block="s-run"]')!;
@@ -359,7 +359,7 @@ describe("CalendarView drag", () => {
 
   it("edits a scheduled start time from its keyboard-accessible control", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
     const input = screen.getByLabelText("Start time for Review");
@@ -370,7 +370,7 @@ describe("CalendarView drag", () => {
 
   it("saves start time and duration together and previews the resulting end time", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
     expect((screen.getByLabelText("Duration in minutes for Review") as HTMLInputElement).value).toBe("30");
@@ -383,7 +383,7 @@ describe("CalendarView drag", () => {
 
   it("changes duration without moving the start", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
     fireEvent.change(screen.getByLabelText("Duration in minutes for Review"), { target: { value: "60" } });
@@ -393,7 +393,7 @@ describe("CalendarView drag", () => {
 
   it.each(["", "0", "-5", "1.5"])("does not save an invalid duration %s", async (value) => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
     fireEvent.change(screen.getByLabelText("Duration in minutes for Review"), { target: { value } });
@@ -405,7 +405,7 @@ describe("CalendarView drag", () => {
 
   it("discards duration edits on cancel and reopens with the saved value", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
     fireEvent.change(screen.getByLabelText("Duration in minutes for Review"), { target: { value: "60" } });
@@ -417,7 +417,7 @@ describe("CalendarView drag", () => {
 
   it("moves a scheduled focus block back to Unscheduled through the existing schedule IPC", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
     fireEvent.click(screen.getByRole("button", { name: "Move Review to Unscheduled" }));
@@ -426,7 +426,7 @@ describe("CalendarView drag", () => {
 
   it("accepts dragging a scheduled block back into the unscheduled area", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     const source = screen.getByTestId("timeline").querySelector('[data-scheduled-block="s-run"]')!;
     const payload = transfer();
@@ -438,13 +438,13 @@ describe("CalendarView drag", () => {
   it("keeps the original schedule visible when a time edit fails", async () => {
     setSessionScheduleMock.mockRejectedValueOnce(new Error("Schedule failed"));
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
     fireEvent.change(screen.getByLabelText("Start time for Review"), { target: { value: "10:30" } });
     fireEvent.change(screen.getByLabelText("Duration in minutes for Review"), { target: { value: "45" } });
     fireEvent.click(screen.getByRole("button", { name: "Save schedule for Review" }));
-    expect(await screen.findByText("Schedule failed")).toBeTruthy();
+    expect(await screen.findByText("Could not complete the operation: Schedule failed")).toBeTruthy();
     expect((screen.getByLabelText("Start time for Review") as HTMLInputElement).value).toBe("10:30");
     expect((screen.getByLabelText("Duration in minutes for Review") as HTMLInputElement).value).toBe("45");
     expect(screen.getByTestId("timeline").querySelector('[data-scheduled-block="s-run"]')?.getAttribute("title"))
@@ -467,7 +467,7 @@ describe("CalendarView drag", () => {
     }));
     getCalendarRangeMock.mockResolvedValueOnce(lockedRange);
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     const locked = screen.getByTestId("timeline").querySelector('[data-scheduled-block="s-locked"]')!;
     expect(locked.getAttribute("aria-disabled")).toBe("true");
@@ -479,7 +479,7 @@ describe("CalendarView drag", () => {
 
   it("drops onto an empty date with the optimistic move (no strategy dialog)", async () => {
     const { container } = renderView();
-    const chip = await screen.findByTitle("Move 2026-09-16");
+    const chip = await screen.findByTitle("Move Sep 16, 2026");
     const payload = transfer();
     fireEvent.dragStart(chip, payload);
     const target = container.querySelector('[data-day-cell="2026-09-18"]');
@@ -493,14 +493,14 @@ describe("CalendarView drag", () => {
 
   it("asks for a strategy when the target is occupied and sends merge", async () => {
     const { container } = renderView();
-    const chip = await screen.findByTitle("Move 2026-09-16");
+    const chip = await screen.findByTitle("Move Sep 16, 2026");
     const payload = transfer();
     fireEvent.dragStart(chip, payload);
     fireEvent.drop(container.querySelector('[data-day-cell="2026-09-17"]')!, payload);
     // 冲突时弹出策略选择（spec：MUST NOT 静默覆盖或丢弃）。
     expect(await screen.findByText("This date already has a plan")).toBeTruthy();
     expect(moveDayCycleMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Merge into 2026-09-17" }));
+    fireEvent.click(screen.getByRole("button", { name: "Merge into Sep 17, 2026" }));
     await waitFor(() =>
       expect(moveDayCycleMock).toHaveBeenCalledWith("day-2026-09-16", "2026-09-17", "merge"),
     );
@@ -510,7 +510,7 @@ describe("CalendarView drag", () => {
 describe("CalendarView budget presentation", () => {
   it("renders no chart at all while capacity is unset (even with scheduled minutes)", async () => {
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2026-09-16" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     // 时间轴出现：已排块在轴上，未排块在待排区。
     expect(await screen.findByTestId("staging-area")).toBeTruthy();

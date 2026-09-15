@@ -18,6 +18,7 @@ import {
   isAppError,
   moveTask,
   reorderTasks,
+  setLocale,
   updateCycle,
   updateTask,
 } from "./ipc";
@@ -36,6 +37,10 @@ describe("command name registry", () => {
 });
 
 describe("argument key contract", () => {
+  it("sends only the canonical locale to the validated settings command", async () => {
+    await setLocale("zh-CN");
+    expect(invokeMock).toHaveBeenCalledWith("set_locale", { locale: "zh-CN" });
+  });
   it("nests struct parameters under the Rust parameter name `args`", async () => {
     invokeMock.mockResolvedValue({});
     await createPlanningCycle({ cycle_type: "month", duration_months: 3 });

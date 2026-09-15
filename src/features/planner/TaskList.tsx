@@ -40,6 +40,7 @@ import { errorMessage, invalidateTasks, useActionError } from "./actions";
 import { canAssignParent, ROOT_PALETTE, taskColor, type RelationView } from "./relations";
 import { ParentGoalPicker } from "./ParentGoalPicker";
 import { TASK_DRAG_TYPE, useTaskDrag } from "./TaskDragContext";
+import { useTranslation } from "../../lib/i18n";
 
 /** 列表尾空行的判定（对齐 domain::task::is_empty_input_row 的可见部分）。 */
 function isEmptyRow(task: { title: string; completed: boolean; children: TaskNode[] }): boolean {
@@ -75,6 +76,7 @@ export function TaskList({
   relations?: RelationView;
   onReviewIssues?: () => void;
 }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const workspace = useQuery({
     queryKey: qk.editorWorkspace(cycleId),
@@ -333,7 +335,7 @@ export function TaskList({
     }}>
       {locked && (
         <p className="px-2 pb-1 text-caption text-hint">
-          This page has ended and can only be reviewed.
+          {t("workspace.ended")}
         </p>
       )}
       {rows.map((row) =>
@@ -350,7 +352,7 @@ export function TaskList({
             dragging={drag?.task.id === row.node.id}
             dropBefore={drag && dropHint?.id === row.node.id && dropHint.kind === "reorder" ? dropHint.before : null}
             linkHint={!!drag && dropHint?.id === row.node.id && dropHint.kind === "link"}
-            placeholder={cycleType === "month" ? "Add a goal…" : "Add a task…"}
+            placeholder={cycleType === "month" ? t("task.addGoal") : t("task.addTask")}
             onDraftChange={(value) => setDrafts((d) => ({ ...d, [row.node.id]: value }))}
             onInputRef={(el) => {
               if (el) inputRefs.current.set(row.node.id, el);
@@ -431,16 +433,16 @@ export function TaskList({
         ),
       )}
       {workspace.data?.work_mix && workspace.data.work_mix.total > 0 && (
-        <div className="mx-5 mt-4 border-t border-light pt-3 text-caption text-hint" aria-label="Work mix"
-          title="Counts of top-level tasks using their current goal links. Independent work is valid; this is not time spent or a productivity score.">
-          <p className="mb-1 font-medium text-secondary">Work mix · {workspace.data.work_mix.total} tasks</p>
+        <div className="mx-5 mt-4 border-t border-light pt-3 text-caption text-hint" aria-label={t("task.workMixLabel")}
+          title={t("task.workMixTitle")}>
+          <p className="mb-1 font-medium text-secondary">{t("task.workMix", { count: workspace.data.work_mix.total })}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1">
-            <span>{workspace.data.work_mix.long_term} goal-linked</span>
-            <span>{workspace.data.work_mix.weekly_standalone} standalone weekly</span>
-            {cycleType === "day" && <span>{workspace.data.work_mix.daily_standalone} independent daily</span>}
-            {workspace.data.work_mix.unresolved > 0 && <span>{workspace.data.work_mix.unresolved} unresolved</span>}
+            <span>{t("task.withLongTerm", { count: workspace.data.work_mix.long_term })}</span>
+            <span>{t("task.independentWeekly", { count: workspace.data.work_mix.weekly_standalone })}</span>
+            {cycleType === "day" && <span>{t("task.independentDaily", { count: workspace.data.work_mix.daily_standalone })}</span>}
+            {workspace.data.work_mix.unresolved > 0 && <span>{t("task.unresolved", { count: workspace.data.work_mix.unresolved })}</span>}
           </div>
-          <p className="mt-1">{Math.round(100 * (workspace.data.work_mix.weekly_standalone + workspace.data.work_mix.daily_standalone) / workspace.data.work_mix.total)}% without long-term links</p>
+          <p className="mt-1">{t("task.withoutLinks", { percent: Math.round(100 * (workspace.data.work_mix.weekly_standalone + workspace.data.work_mix.daily_standalone) / workspace.data.work_mix.total) })}</p>
         </div>
       )}
       {workspace.isError && (
@@ -452,7 +454,7 @@ export function TaskList({
         <p role="alert" className="flex items-center gap-2 px-2 py-1 text-caption text-danger">
           {error}
           <button type="button" className="underline" onClick={dismiss}>
-            Dismiss
+            {t("task.dismiss")}
           </button>
         </p>
       )}
@@ -513,6 +515,7 @@ function TaskRow({
   onDragOver: (e: DragEvent<HTMLDivElement>) => void;
   onDrop: (e: DragEvent<HTMLDivElement>) => void;
 }) {
+  const { t } = useTranslation("planning");
   const titleRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const field = titleRef.current;
@@ -524,12 +527,12 @@ function TaskRow({
   const empty = isEmptyRow(node);
   const color = relations ? taskColor(node, relations.tasks) : null;
   const highlighted = relations?.highlighted.has(node.id) ?? false;
-  const hints = [node.needs_refinement === true ? "Clarify this goal" : null, node.needs_breakdown === true ? "Break into smaller steps" : null].filter(Boolean).join(" · ");
+  const hints = [node.needs_refinement === true ? t("task.clarify") : null, node.needs_breakdown === true ? t("task.breakdown") : null].filter(Boolean).join(" · ");
   return (
     <div
       data-task-id={node.id}
       data-proposal={node.proposal ?? undefined}
-      title={node.proposal ? "预览已锁定，请在 Coach 中确认或放弃" : undefined}
+      title={node.proposal ? t("task.previewLockedCn") : undefined}
       data-related={highlighted || undefined}
       data-selected={relations?.selectedId === node.id || undefined}
       onClick={(event) => {
@@ -547,7 +550,7 @@ function TaskRow({
       style={{ marginLeft: row.depth * 20, "--task-color": color ?? "var(--color-focus)" } as CSSProperties}
     >
       {dropBefore && <InsertLine position="top" />}
-      {linkHint && <span role="status" className="pointer-events-none absolute bottom-full left-4 z-20 mb-1 max-w-full truncate rounded-md bg-focus px-2 py-1 text-caption text-white shadow-sm">Link to {node.title}</span>}
+      {linkHint && <span role="status" className="pointer-events-none absolute bottom-full left-4 z-20 mb-1 max-w-full truncate rounded-md bg-focus px-2 py-1 text-caption text-white shadow-sm">{t("task.linkTo", { title: node.title })}</span>}
       {/* The handle is draggable before pointer-down; the editable row never is. */}
       {empty || locked ? (
         <span className="w-4 shrink-0" aria-hidden="true" />
@@ -555,8 +558,8 @@ function TaskRow({
         <span
           role="button"
           tabIndex={active ? 0 : -1}
-          aria-label={`Reorder ${node.title || "row"}`}
-          title="Drag to reorder or link to a parent goal · ↑/↓ to reorder"
+          aria-label={t("task.reorder", { title: node.title || t("task.reorderRow") })}
+          title={t("task.reorderTitle")}
           draggable={active}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
@@ -578,7 +581,7 @@ function TaskRow({
         checked={node.completed}
         disabled={locked || empty}
         onChange={onToggle}
-        aria-label={empty ? undefined : `Mark “${node.title}” complete`}
+        aria-label={empty ? undefined : t("task.markComplete", { title: node.title })}
         className="task-check shrink-0"
       />
       {!empty && allowColor && row.depth === 0 ? <ColorSlotButton task={node} disabled={locked} onPick={onPickColor} relations={relations} /> :
@@ -602,22 +605,22 @@ function TaskRow({
       />
       {node.proposal && <span className="mr-1 flex h-7 shrink-0 items-center gap-1 text-[11px] text-secondary">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-        {node.proposal === "delete" ? "待删除" : "预览"}
+        {node.proposal === "delete" ? t("task.proposalDelete") : t("task.proposalPreview")}
       </span>}
       {!empty && !node.proposal && hints && <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-hint transition-colors hover:bg-hover hover:text-secondary"
-        aria-label={`Review planning hints for ${node.title}`} title={hints} onClick={onReviewIssues}>
+        aria-label={t("task.reviewHints", { title: node.title })} title={hints} onClick={onReviewIssues}>
         <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true"><path d="M4 14V2h8l-2 3 2 3H4" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>}
       {!empty && !locked && (
         /* 预览任务沿用相同布局，仅锁定编辑控件。 */
         <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
-          <IconButton label={`Move “${node.title}” to Later`} title="Move to Later" onClick={onSendToLater}>
+          <IconButton label={t("task.moveLater", { title: node.title })} title={t("task.moveLaterTitle")} onClick={onSendToLater}>
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
               <circle cx="8" cy="8" r="6.2" />
               <path d="M8 4.8V8l2.2 1.6" />
             </svg>
           </IconButton>
-          <IconButton label={`Delete “${node.title}”`} title="Delete" onClick={onDelete}>
+          <IconButton label={t("task.delete", { title: node.title })} title={t("cycle.delete")} onClick={onDelete}>
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
               <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8h5.8l.6-8M6.8 7v3.5M9.2 7v3.5" />
             </svg>
@@ -674,10 +677,12 @@ function ColorSlotButton({
   onPick: (colorKey: string | null) => void;
   relations?: RelationView;
 }) {
+  const { t } = useTranslation("planning");
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const colorKey = task.root_color_key as RootColorKey | null;
   const solid = colorKey !== null && colorKey in ROOT_PALETTE ? ROOT_PALETTE[colorKey] : null;
+  const colorLabel = (key: RootColorKey): string => t(`task.color.${key}`);
   return (
     <span className="relative inline-flex shrink-0">
       <button
@@ -685,19 +690,19 @@ function ColorSlotButton({
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={solid ? `Goal color: ${colorKey}` : "Set goal color"}
-        title="Goal color"
+        aria-label={solid ? `${t("task.goalColor")}: ${colorLabel(colorKey as RootColorKey)}` : t("task.setGoalColor")}
+        title={t("task.goalColor")}
         onMouseEnter={() => relations?.preview(task.id)}
         onMouseLeave={() => relations?.preview(null)}
         onClick={() => setOpen((o) => !o)}
         className="task-color-control"
       ><span className="task-color-slot" style={solid ? { backgroundColor: solid, borderColor: solid } : undefined} /></button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} label="Goal color">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} label={t("task.goalColor")}>
         {ROOT_COLOR_KEYS.map((key) => (
           <PopoverItem
             key={key}
             disabled={disabled}
-            aria-label={key}
+            aria-label={colorLabel(key)}
             className="flex items-center gap-2 capitalize"
             onSelect={() => {
               setOpen(false);
@@ -709,23 +714,23 @@ function ColorSlotButton({
               className="inline-block h-3 w-3 rounded-[3px]"
               style={{ backgroundColor: ROOT_PALETTE[key] }}
             />
-            <span className="flex-1">{key}</span>
-            {key === colorKey && <span aria-label="Current color">✓</span>}
+            <span className="flex-1">{colorLabel(key)}</span>
+            {key === colorKey && <span aria-label={t("task.currentColor")}>✓</span>}
           </PopoverItem>
         ))}
         <PopoverItem
           disabled={disabled}
           className="flex items-center gap-2"
-          aria-label="No color"
+          aria-label={t("task.noColor")}
           onSelect={() => {
             setOpen(false);
             onPick(null);
           }}
         >
-          <span className="flex-1">No color</span>
-          {!solid && <span aria-label="Current color">✓</span>}
+          <span className="flex-1">{t("task.noColor")}</span>
+          {!solid && <span aria-label={t("task.currentColor")}>✓</span>}
         </PopoverItem>
-        {relations && <PopoverItem className="border-t border-light" onSelect={() => { relations.select(task.id); setOpen(false); }}>View connections</PopoverItem>}
+        {relations && <PopoverItem className="border-t border-light" onSelect={() => { relations.select(task.id); setOpen(false); }}>{t("task.viewConnections")}</PopoverItem>}
       </Popover>
     </span>
   );

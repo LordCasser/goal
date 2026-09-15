@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 const { listenMock } = vi.hoisted(() => ({ listenMock: vi.fn() }));
@@ -42,6 +43,7 @@ function renderSection(): QueryClient {
 }
 
 beforeEach(() => {
+  applyLocale("zh-CN");
   invokeMock.mockReset();
   listenMock.mockReset();
   listenMock.mockResolvedValue(() => {});
@@ -166,5 +168,24 @@ describe("ReminderSettingsSection", () => {
       await screen.findByRole("button", { name: "请求通知权限" }),
     ).toBeTruthy();
     expect(screen.queryByText(/被拒绝/)).toBeNull();
+  });
+
+  it("shows system-managed desktop permission without a fake request action", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === commands.getReminderSettings) return Promise.resolve(SETTINGS);
+      if (cmd === commands.getNotificationPermission) {
+        return Promise.resolve<DeliveryStatus>({
+          permission: "system_managed",
+          last_error: null,
+          last_delivery_at: null,
+        });
+      }
+      return Promise.resolve(null);
+    });
+    renderSection();
+
+    expect(await screen.findByText(/由系统管理/)).toBeTruthy();
+    expect(screen.getByText(/通知权限由操作系统管理/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "请求通知权限" })).toBeNull();
   });
 });

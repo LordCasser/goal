@@ -97,6 +97,7 @@ export const commands = {
   getSettings: "get_settings",
   setWeekStartDay: "set_week_start_day",
   setTheme: "set_theme",
+  setLocale: "set_locale",
   setLogLevel: "set_log_level",
   getAppFlag: "get_app_flag",
   setAppFlag: "set_app_flag",
@@ -345,6 +346,10 @@ export function setWeekStartDay(day: number): Promise<void> {
 
 export function setTheme(theme: Theme): Promise<void> {
   return invoke<void>(commands.setTheme, { theme });
+}
+
+export function setLocale(locale: import("./i18n").Locale): Promise<void> {
+  return invoke<void>(commands.setLocale, { locale });
 }
 
 /** Applies immediately to the running logger and persists for next launch. */

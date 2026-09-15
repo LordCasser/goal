@@ -6,12 +6,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 import { PlanApprovalCard } from "./PlanApprovalCard";
 import { commands, getEditorWorkspace, type PreviewSummary, type Task, type TaskSnapshot } from "../../lib/ipc";
 import { qk } from "../../lib/events";
+import { applyLocale } from "../../lib/i18n";
 
 const task: Task = { id: "t1", cycle_id: "day", parent_id: null, title: "Revised goal", completed: false, subtasks: [], position: 0, goal_breakdown: null, needs_refinement: null, needs_breakdown: null, root_color_key: null, copied_from_task_id: null, proposal: "upsert", created_at: 1 };
 const original: TaskSnapshot = { ...task, original_exists: true, title: "Original goal" };
 let pending: PreviewSummary;
 let committed: Task[];
 beforeEach(() => {
+  applyLocale("zh-CN");
   pending = { cycle_id: "day", tasks: [{ ...task }], count: 1, deletion_impacts: {}, originals: { t1: original } };
   committed = [];
   invoke.mockReset().mockImplementation(async (cmd: string, args: { taskId?: string; approve?:boolean }) => {

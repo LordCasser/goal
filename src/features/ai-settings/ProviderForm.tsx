@@ -16,10 +16,10 @@
 import { useId, useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import { Button, Dialog, Input, ProgressDot, cn } from "../../ui";
+import { Button, Dialog, Input, ProgressDot, Select, SelectItem, cn } from "../../ui";
+import { errorMessage, formatNumber, t, useTranslation } from "../../lib/i18n";
 import {
   deleteProvider,
-  isAppError,
   removeProviderApiKey,
   saveProvider,
   testProviderConnection,
@@ -41,10 +41,6 @@ export type ProviderFormProps = {
   /** 任何写操作成功后的失效通知；ai-settings 查询 key 由页面持有。 */
   onChanged: () => Promise<void> | void;
 };
-
-/* 原生 select 复用 Input 的表面样式（design.md 4.1/4.3）；箭头留给平台。 */
-const SELECT_CLASS =
-  "h-9 w-full min-w-0 rounded-md border border-control bg-content px-3 text-[14px] text-primary transition-colors duration-100";
 
 /** 三种 API 格式 + 各自的请求端点（design D2），下拉项直接显示端点路径。 */
 const API_FORMATS: ReadonlyArray<{ value: ApiFormat; label: string }> = [
@@ -70,23 +66,22 @@ function isHttpBaseUrl(url: string): boolean {
 function connectionFailureText(result: ConnectionTestResult): string {
   switch (result.error_code) {
     case "auth_failed":
-      return "认证失败：请检查 API Key。";
+      return t("ai:settings.authFailed");
     case "provider_unreachable":
     case "timeout":
-      return "无法连接到端点：请检查 Base URL 与网络连接。";
+      return t("ai:settings.unreachable");
     case "invalid_request":
-      return `请求被拒绝：${result.error_message ?? ""}`;
+      return t("ai:settings.invalidRequest", { message: result.error_message ?? "" });
     case "rate_limited":
-      return "请求被限流：请稍后重试。";
+      return t("ai:settings.rateLimited");
     default:
-      return result.error_message ?? result.error_code ?? "连接失败。";
+      return result.error_message ?? result.error_code ?? t("ai:settings.connectionFailed");
   }
 }
 
 /** AppError 保留稳定 code（如 invalid_base_url），与 message 一起行内展示。 */
 function errorText(error: unknown): string {
-  if (isAppError(error)) return `${error.code}：${error.message}`;
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }
 
 export function ProviderForm({
@@ -94,6 +89,7 @@ export function ProviderForm({
   onSaved,
   onChanged,
 }: ProviderFormProps): JSX.Element {
+  const { t: translate } = useTranslation("ai");
   const nameInputId = useId();
   const urlInputId = useId();
   const keyInputId = useId();
@@ -114,9 +110,9 @@ export function ProviderForm({
 
   // 前端预校验（task 5.3）：名称非空、http(s) URL、至少一个模型。
   const missing: string[] = [];
-  if (name.trim() === "") missing.push("名称");
-  if (!isHttpBaseUrl(baseUrl.trim())) missing.push("Base URL（http/https 地址）");
-  if (models.length === 0) missing.push("至少一个模型");
+  if (name.trim() === "") missing.push(translate("settings.name"));
+  if (!isHttpBaseUrl(baseUrl.trim())) missing.push(translate("settings.baseUrl"));
+  if (models.length === 0) missing.push(translate("settings.models"));
   const canSave = missing.length === 0;
 
   const requireProviderId = (): string => {
@@ -186,9 +182,9 @@ export function ProviderForm({
                 {provider.name}
               </h4>
               <span className="shrink-0 text-caption text-secondary">
-                {provider.is_active ? "激活" : "未激活"}
+                {provider.is_active ? translate("settings.active") : translate("settings.inactive")}
               </span>
-              <span className="text-caption text-hint">{provider.connection_verified_at ? "已测通" : "待测试"}</span>
+              <span className="text-caption text-hint">{provider.connection_verified_at ? translate("settings.verified") : translate("settings.unverified")}</span>
             </div>
             <div className="flex items-center gap-2">
 
@@ -198,9 +194,9 @@ export function ProviderForm({
                 onClick={() => testMutation.mutate()}
                 loading={testMutation.isPending}
                 disabled={busy || dirty}
-                title={dirty ? "有未保存修改，请使用下方的测试并保存" : "测试已保存配置"}
+                title={dirty ? translate("settings.unsavedTitle") : translate("settings.testSavedTitle")}
               >
-                测试连接
+                {translate("settings.testConnection")}
               </Button>
               <Button
                 variant="ghost"
@@ -209,7 +205,7 @@ export function ProviderForm({
                 onClick={() => setDeleteOpen(true)}
                 disabled={busy}
               >
-                删除
+                {translate("settings.deleteProvider")}
               </Button>
             </div>
           </div>
@@ -222,7 +218,7 @@ export function ProviderForm({
             >
               <ProgressDot tone={testResult.ok ? "done" : "alert"} />
               {testResult.ok
-                ? `连接成功 · ${testResult.latency_ms ?? 0} ms`
+                ? translate("settings.connectionSuccess", { latency: formatNumber(testResult.latency_ms ?? 0) })
                 : connectionFailureText(testResult)}
             </p>
           )}
@@ -234,42 +230,42 @@ export function ProviderForm({
         </>
       ) : (
         <div className="border-b border-light px-4 py-2.5">
-          <h4 className="text-block-title font-semibold text-primary">添加供应商</h4>
+          <h4 className="text-block-title font-semibold text-primary">{translate("settings.addProviderTitle")}</h4>
         </div>
       )}
 
       <fieldset disabled={busy} className="flex min-w-0 flex-col gap-4 px-4 py-4">
         <div className="flex flex-col gap-1">
           <label htmlFor={nameInputId} className="text-caption text-secondary">
-            名称
+            {translate("settings.name")}
           </label>
           <Input
             id={nameInputId}
             value={name}
             onChange={(e) => setName(e.currentTarget.value)}
-            placeholder="如 Ollama 本地、OpenRouter"
+            placeholder={translate("settings.namePlaceholder")}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={urlInputId} className="text-caption text-secondary">
-            Base URL
+            {translate("settings.baseUrl")}
           </label>
           <Input
             id={urlInputId}
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.currentTarget.value)}
-            placeholder="https://api.example.com/v1 或 http://127.0.0.1:11434/v1"
+            placeholder={translate("settings.baseUrlPlaceholder")}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={keyInputId} className="text-caption text-secondary">
-            API Key
+            {translate("settings.apiKey")}
           </label>
           {/* 已有 Key：只显示「已配置」徽标 + 移除入口；明文既不回显也不截尾。 */}
           {provider?.has_api_key && (
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center rounded-[2px] border border-light bg-subtle px-1.5 py-0.5 text-caption text-secondary">
-                已配置
+                {translate("settings.configured")}
               </span>
               <Button
                 variant="ghost"
@@ -278,7 +274,7 @@ export function ProviderForm({
                 onClick={() => removeKeyMutation.mutate()}
                 loading={removeKeyMutation.isPending}
               >
-                移除
+                {translate("settings.remove")}
               </Button>
               {removeKeyMutation.isError && (
                 <span className="text-caption text-danger">
@@ -295,41 +291,41 @@ export function ProviderForm({
             onChange={(e) => setApiKey(e.currentTarget.value)}
             placeholder={
               provider?.has_api_key
-                ? "输入新 Key 以替换；留空保持不变"
-                : "sk-…（本地端点可留空）"
+                ? translate("settings.replaceKeyPlaceholder")
+                : translate("settings.localKeyPlaceholder")
             }
           />
-          <p className="text-caption text-hint">密钥保存在系统钥匙串，不写入配置文件。</p>
+          <p className="text-caption text-hint">{translate("settings.keychainHelp")}</p>
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={formatInputId} className="text-caption text-secondary">
-            API 格式
+            {translate("settings.apiFormat")}
           </label>
-          <select
+          <Select
             id={formatInputId}
             value={apiFormat}
-            onChange={(e) => setApiFormat(e.currentTarget.value as ApiFormat)}
-            className={SELECT_CLASS}
+            onValueChange={(value) => setApiFormat(value as ApiFormat)}
+            triggerClassName="w-full"
           >
             {API_FORMATS.map((format) => (
-              <option key={format.value} value={format.value}>
+              <SelectItem key={format.value} value={format.value}>
                 {format.label}
-              </option>
+              </SelectItem>
             ))}
-          </select>
+          </Select>
         </div>
 
         {/* 模型列表（task 5.2）：model_id + 窗口 + 最大输出 + 工具调用标记。 */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-block-title font-semibold text-primary">模型</span>
+            <span className="text-block-title font-semibold text-primary">{translate("settings.models")}</span>
             <Button size="compact" onClick={() => setModelDialogOpen(true)}>
-              添加模型
+              {translate("settings.addModel")}
             </Button>
           </div>
           {models.length === 0 ? (
             <p className="text-caption text-hint">
-              尚未添加模型；每个供应商至少需要一个模型。
+              {translate("settings.noModels")}
             </p>
           ) : (
             <ul className="border border-light">
@@ -344,13 +340,13 @@ export function ProviderForm({
                   <div className="flex min-w-0 flex-col">
                     <span className="truncate text-body text-primary">{model.model_id}</span>
                     <span className="text-caption text-secondary">
-                      上下文 {model.context_window} · 最大输出 {model.max_output_tokens}
-                      {model.supports_tools ? " · 支持工具调用" : " · 不支持工具调用"}
+                      {translate("settings.modelDetails", { context: formatNumber(model.context_window), output: formatNumber(model.max_output_tokens) })}
+                      {model.supports_tools ? ` · ${translate("settings.toolsSupported")}` : ` · ${translate("settings.toolsUnsupported")}`}
                     </span>
                   </div>
                   <button
                     type="button"
-                    aria-label={`移除模型 ${model.model_id}`}
+                    aria-label={translate("settings.removeModel", { model: model.model_id })}
                     onClick={() =>
                       setModels((previous) => previous.filter((_, i) => i !== index))
                     }
@@ -381,8 +377,8 @@ export function ProviderForm({
       {/* 底部：行内校验提示（列出缺什么）+ 主按钮（task 5.3）。 */}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-light px-4 py-3">
         <div className="flex min-w-0 flex-col">
-          {!canSave && <p className="text-caption text-hint">还需完善：{missing.join("、")}</p>}
-          {canSave && <p className="text-caption text-hint">{saveMutation.isPending ? "正在测试模型，成功后保存…" : "测试通过后才会保存；失败时保留当前配置。"}</p>}
+          {!canSave && <p className="text-caption text-hint">{translate("settings.needComplete", { items: missing.join(translate("common.listSeparator")) })}</p>}
+          {canSave && <p className="text-caption text-hint">{saveMutation.isPending ? translate("settings.testingSave") : translate("settings.saveHelp")}</p>}
           {saveMutation.isError && (
             <p className="text-caption text-danger">{errorText(saveMutation.error)}</p>
           )}
@@ -393,7 +389,7 @@ export function ProviderForm({
           loading={saveMutation.isPending}
           onClick={() => saveMutation.mutate()}
         >
-          测试并保存
+          {translate("settings.testSave")}
         </Button>
       </div>
 
@@ -410,11 +406,11 @@ export function ProviderForm({
         <Dialog
           open={deleteOpen}
           onClose={() => setDeleteOpen(false)}
-          title="删除供应商"
+          title={translate("settings.deleteProvider")}
           footer={
             <>
               <Button variant="secondary" size="compact" onClick={() => setDeleteOpen(false)}>
-                取消
+                {translate("settings.cancel")}
               </Button>
               <Button
                 variant="primary"
@@ -423,14 +419,14 @@ export function ProviderForm({
                 loading={deleteMutation.isPending}
                 onClick={() => deleteMutation.mutate()}
               >
-                删除
+                {translate("settings.deleteProvider")}
               </Button>
             </>
           }
         >
-          <p className="text-body text-primary">确定删除供应商「{provider.name}」？</p>
+          <p className="text-body text-primary">{translate("settings.deleteConfirm", { provider: provider.name })}</p>
           <p className="mt-1 text-caption text-secondary">
-            钥匙串中的 API Key 将一并清除。
+            {translate("settings.deleteHelp")}
           </p>
         </Dialog>
       )}

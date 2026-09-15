@@ -339,12 +339,28 @@ fn repeats_table_and_cycles_link_exist_after_migrations() {
 fn skill_migration_preserves_messages_with_foreign_keys_enabled() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-    for migration in &migrations::MIGRATIONS[..8] { conn.execute_batch(migration.sql).unwrap(); }
+    for migration in &migrations::MIGRATIONS[..8] {
+        conn.execute_batch(migration.sql).unwrap();
+    }
     conn.execute_batch("INSERT INTO agent_conversations (id,cycle_id) VALUES ('c','later'); INSERT INTO agent_messages (id,conversation_id,turn_id,sequence_number,message_type,payload_json) VALUES ('m','c','t',1,'user','{}');").unwrap();
     conn.execute_batch(migrations::MIGRATIONS[8].sql).unwrap();
-    let count: i64 = conn.query_row("SELECT count(*) FROM agent_messages WHERE conversation_id='c'", [], |r| r.get(0)).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM agent_messages WHERE conversation_id='c'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(count, 1);
-    conn.execute("UPDATE agent_conversations SET active_skill='period_analysis' WHERE id='c'", []).unwrap();
-    let broken: i64 = conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+    conn.execute(
+        "UPDATE agent_conversations SET active_skill='period_analysis' WHERE id='c'",
+        [],
+    )
+    .unwrap();
+    let broken: i64 = conn
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
     assert_eq!(broken, 0);
 }

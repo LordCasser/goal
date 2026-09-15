@@ -13,8 +13,8 @@ pub mod prioritization;
 pub mod review;
 pub mod tools;
 
-pub mod skills;
-pub mod period_analysis;
 pub mod actions;
-pub mod tool_catalog;
+pub mod period_analysis;
 pub mod persona;
+pub mod skills;
+pub mod tool_catalog;

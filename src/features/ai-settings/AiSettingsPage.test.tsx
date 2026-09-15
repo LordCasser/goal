@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const mocks = vi.hoisted(() => ({
   getAiSettings: vi.fn(),
@@ -101,6 +102,7 @@ const asButton = (element: HTMLElement): HTMLButtonElement =>
   element as HTMLButtonElement;
 
 beforeEach(() => {
+  applyLocale("zh-CN");
   vi.clearAllMocks();
   mocks.getAiSettings.mockResolvedValue(emptySummary);
   mocks.getAppFlag.mockResolvedValue(null); mocks.setAppFlag.mockResolvedValue(undefined);
@@ -132,10 +134,10 @@ describe("AiSettingsPage", () => {
     mocks.getAiSettings.mockResolvedValue(oneSummary);
     mocks.saveProvider.mockRejectedValue({ code: "auth_failed", message: "Authentication failed; configuration was not saved." });
     renderPage();
-    fireEvent.change(await screen.findByLabelText("API Key"), { target: { value: "unsaved-secret" } });
+    fireEvent.change(await screen.findByLabelText("API 密钥"), { target: { value: "unsaved-secret" } });
     fireEvent.click(screen.getByRole("button", { name: "测试并保存" }));
-    expect(await screen.findByText(/Authentication failed/)).toBeTruthy();
-    expect(asInput(screen.getByLabelText("API Key")).value).toBe("unsaved-secret");
+    expect(await screen.findByText(/认证失败/)).toBeTruthy();
+    expect(asInput(screen.getByLabelText("API 密钥")).value).toBe("unsaved-secret");
     expect(mocks.saveProviderApiKey).not.toHaveBeenCalled();
   });
   it("empty state: left column shows the empty hint and the add entry", async () => {
@@ -158,17 +160,17 @@ describe("AiSettingsPage", () => {
   it("never echoes the stored key: password field starts empty with an 已配置 badge", async () => {
     mocks.getAiSettings.mockResolvedValue(oneSummary);
     renderPage();
-    const input = await screen.findByLabelText("API Key");
+    const input = await screen.findByLabelText("API 密钥");
     expect(asInput(input).value).toBe("");
     expect(screen.getByText("已配置")).toBeTruthy();
     // 列表与说明行同时给出激活状态。
-    expect((screen.getByLabelText("当前使用的供应商和模型") as HTMLSelectElement).value).toBe(JSON.stringify(["p1", "llama3"]));
+    expect(screen.getByRole("combobox", { name: "当前使用的供应商和模型" }).textContent).toContain("Local runtime / llama3");
   });
 
   it("delete confirmation names the provider and the keychain cleanup", async () => {
     mocks.getAiSettings.mockResolvedValue(oneSummary);
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    fireEvent.click(await screen.findByRole("button", { name: "删除供应商" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("Local runtime");
     expect(dialog.textContent).toContain("钥匙串中的 API Key 将一并清除");
@@ -235,10 +237,10 @@ describe("AiSettingsPage", () => {
     fireEvent.change(await screen.findByLabelText("名称"), {
       target: { value: "New provider" },
     });
-    fireEvent.change(screen.getByLabelText("Base URL"), {
+    fireEvent.change(screen.getByLabelText("API 基础地址"), {
       target: { value: "https://api.example.com/v1" },
     });
-    fireEvent.change(screen.getByLabelText("API Key"), {
+    fireEvent.change(screen.getByLabelText("API 密钥"), {
       target: { value: "sk-secret" },
     });
 
@@ -266,7 +268,7 @@ describe("AiSettingsPage", () => {
     );
     // 保存成功后 Key 草稿清空、徽标随失效重取出现（不回显明文）。
     await waitFor(() =>
-      expect(asInput(screen.getByLabelText("API Key")).value).toBe(""),
+      expect(asInput(screen.getByLabelText("API 密钥")).value).toBe(""),
     );
     expect(await screen.findByText("已配置")).toBeTruthy();
   });
@@ -276,10 +278,11 @@ it("switches an exact saved provider/model pair independently of editing", async
   const second = { ...provider, id: "p2", name: "Second", is_active: false, models: [{ ...model, model_id: "other" }] };
   mocks.getAiSettings.mockResolvedValue({ ...oneSummary, providers: [provider, second] });
   renderPage();
-  await screen.findByLabelText("API Key");
+  await screen.findByLabelText("API 密钥");
   fireEvent.click(screen.getByRole("button", { name: /Second/ }));
   expect(mocks.setActiveProvider).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("当前使用的供应商和模型"), { target: { value: JSON.stringify(["p2", "other"]) } });
+  fireEvent.click(screen.getByRole("combobox", { name: "当前使用的供应商和模型" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Second / other" }));
   await waitFor(() => expect(mocks.setActiveProvider).toHaveBeenCalledWith("p2", "other"));
   expect(mocks.saveProvider).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "设为激活" })).toBeNull();

@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
@@ -29,6 +30,7 @@ function renderCard(onDismissed?: () => void) {
 }
 
 beforeEach(() => {
+  applyLocale("en");
   invokeMock.mockReset();
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === commands.getDismissedHints) return Promise.resolve([]);

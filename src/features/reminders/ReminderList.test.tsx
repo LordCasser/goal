@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 const { listenMock } = vi.hoisted(() => ({ listenMock: vi.fn() }));
@@ -78,6 +79,7 @@ function renderList(cycleId?: string): QueryClient {
 }
 
 beforeEach(() => {
+  applyLocale("zh-CN");
   invokeMock.mockReset();
   listenMock.mockReset();
   listenMock.mockResolvedValue(() => {});

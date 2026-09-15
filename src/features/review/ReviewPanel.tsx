@@ -22,6 +22,7 @@ import type * as React from "react";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "../../ui";
+import { formatDate, formatDuration, formatNumber, useTranslation } from "../../lib/i18n";
 import {
   applyReviewDisposition,
   exportCycleReviewMarkdown,
@@ -43,20 +44,21 @@ import {
   setDraft,
   type ReviewDraft,
 } from "./draft";
-import { formatFocusedTime, formatPercent, formatSnapshotAt } from "./format";
+import { formatPercent } from "./format";
 
 export interface ReviewPanelProps {
   cycleId: string;
   onClose: () => void;
 }
 
-const DISPOSITION_BUTTONS: { key: Disposition; label: string; title: string }[] = [
-  { key: "carry", label: "Carry", title: "Copy into the next cycle" },
-  { key: "later", label: "Do Later", title: "Move back to the Do Later list" },
-  { key: "drop", label: "Drop", title: "Let this item go" },
+const DISPOSITION_BUTTONS: { key: Disposition; labelKey: string; titleKey: string }[] = [
+  { key: "carry", labelKey: "review.carry", titleKey: "review.carryTitle" },
+  { key: "later", labelKey: "review.later", titleKey: "review.laterTitle" },
+  { key: "drop", labelKey: "review.drop", titleKey: "review.dropTitle" },
 ];
 
 export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.Element {
+  const { t } = useTranslation("ai");
   const queryClient = useQueryClient();
   const reviewQuery = useQuery({
     queryKey: reviewQk.cycleReview(cycleId),
@@ -136,15 +138,15 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
         });
         if (!target) return markdown; // user cancelled — nothing to report
         await saveCycleReviewMarkdown(cycleId, target);
-        setExportNote(`Saved to ${target}`);
+        setExportNote(t("review.exportSaved", { target }));
         return markdown;
       } catch {
         await navigator.clipboard.writeText(markdown);
-        setExportNote("Markdown copied to clipboard");
+        setExportNote(t("review.exportCopied"));
         return markdown;
       }
     },
-    onError: () => setExportNote("Export failed: save a review first"),
+    onError: () => setExportNote(t("review.exportFailed")),
   });
 
   const recordedByTask = new Map(
@@ -153,72 +155,72 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
 
   return (
     <aside
-      aria-label="Cycle review"
+      aria-label={t("review.title")}
       className="flex h-full w-panel shrink-0 flex-col overflow-hidden border-l border-light bg-content"
     >
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-light px-4 py-3">
-        <h2 className="text-section-title font-bold text-primary">Cycle review</h2>
-        <Button variant="ghost" size="compact" aria-label="Close review" onClick={onClose}>
-          Close
+        <h2 className="text-section-title font-bold text-primary">{t("review.title")}</h2>
+        <Button variant="ghost" size="compact" aria-label={t("review.close")} onClick={onClose}>
+          {t("common.closeEsc")}
         </Button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {reviewQuery.isPending ? (
-          <p className="text-body text-secondary">Loading review…</p>
+          <p className="text-body text-secondary">{t("review.loading")}</p>
         ) : (
           <>
             {/* -- 事实段（只读） -------------------------------------- */}
-            <section aria-label="Facts" className="mb-6">
+            <section aria-label={t("review.facts")} className="mb-6">
               <div className="mb-2 flex items-baseline justify-between gap-2">
-                <h3 className="text-block-title font-semibold text-primary">Facts</h3>
+                <h3 className="text-block-title font-semibold text-primary">{t("review.facts")}</h3>
                 {review ? (
                   <p className="text-caption text-hint">
-                    Snapshotted {formatSnapshotAt(review.snapshot_at)}
-                    {review.is_final ? "" : " · interim"}
-                    {review.kind === "facts_only" ? " · facts only" : ""}
+                    {t("review.snapshotted", { time: formatDate(review.snapshot_at, { dateStyle: "medium", timeStyle: "short" }) })}
+                    {review.is_final ? "" : ` · ${t("review.interim")}`}
+                    {review.kind === "facts_only" ? ` · ${t("review.factsOnly")}` : ""}
                   </p>
                 ) : (
-                  <p className="text-caption text-hint">Not reviewed yet · so far</p>
+                  <p className="text-caption text-hint">{t("review.notReviewed")}</p>
                 )}
               </div>
               {facts === null ? (
-                <p className="text-body text-secondary">Loading facts…</p>
+                <p className="text-body text-secondary">{t("review.loadingFacts")}</p>
               ) : facts.has_content ? (
                 <dl className="rounded-sm border border-light px-3 py-2 text-body text-primary">
                   <div className="flex justify-between gap-3 py-0.5">
-                    <dt className="text-secondary">Completion</dt>
+                    <dt className="text-secondary">{t("review.completion")}</dt>
                     <dd>
                       {formatPercent(facts.completion_rate ?? 0)} (
-                      {facts.completed_items}/{facts.total_items})
+                      {formatNumber(facts.completed_items)}/{formatNumber(facts.total_items)})
                     </dd>
                   </div>
                   <div className="flex justify-between gap-3 py-0.5">
-                    <dt className="text-secondary">Focused time</dt>
-                    <dd>{formatFocusedTime(facts.focused_time_ms)}</dd>
+                    <dt className="text-secondary">{t("review.focusedTime")}</dt>
+                    <dd>{formatDuration(facts.focused_time_ms)}</dd>
                   </div>
                   <div className="flex justify-between gap-3 py-0.5">
-                    <dt className="text-secondary">Linked lower-level items</dt>
-                    <dd>{facts.linked_lower_items}</dd>
+                    <dt className="text-secondary">{t("review.linkedItems")}</dt>
+                    <dd>{formatNumber(facts.linked_lower_items)}</dd>
                   </div>
                   <div className="flex justify-between gap-3 py-0.5">
-                    <dt className="text-secondary">Unfinished items</dt>
-                    <dd>{facts.incomplete.length}</dd>
+                    <dt className="text-secondary">{t("review.unfinishedItems")}</dt>
+                    <dd>{formatNumber(facts.incomplete.length)}</dd>
                   </div>
                 </dl>
               ) : (
                 /* 空周期：显式说明无可复盘内容，绝不显示 0% 造成误导 */
                 <p className="rounded-sm border border-dashed border-light px-3 py-3 text-body text-secondary">
-                  This cycle has no reviewable content.
+                  {t("review.noContent")}
                 </p>
               )}
             </section>
 
             {/* -- 未完成项去向（每条三个去向按钮） -------------------- */}
             {facts !== null && facts.incomplete.length > 0 && (
-              <section aria-label="Unfinished items" className="mb-6">
+              <section aria-label={t("review.unfinishedSection")} className="mb-6">
                 <h3 className="mb-2 text-block-title font-semibold text-primary">
-                  Unfinished items
+                  {t("review.unfinishedSection")}
                 </h3>
                 <ul className="flex flex-col gap-2">
                   {facts.incomplete.map((item) => {
@@ -230,13 +232,13 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
                       >
                         <p className="text-body text-primary">{item.title}</p>
                         <div className="mt-1.5 flex items-center gap-2">
-                          {DISPOSITION_BUTTONS.map(({ key, label, title }) => (
+                          {DISPOSITION_BUTTONS.map(({ key, labelKey, titleKey }) => (
                             <Button
                               key={key}
                               size="compact"
                               variant={recorded === key ? "primary" : "secondary"}
                               aria-pressed={recorded === key}
-                              title={title}
+                              title={t(titleKey)}
                               loading={
                                 dispose.isPending &&
                                 dispose.variables?.taskId === item.task_id &&
@@ -245,14 +247,14 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
                               disabled={dispose.isPending}
                               onClick={() => dispose.mutate({ taskId: item.task_id, disposition: key })}
                             >
-                              {label}
+                              {t(labelKey)}
                             </Button>
                           ))}
                           {recorded && (
                             <span className="text-caption text-secondary">
-                              {recorded === "carry" && "Carried to next cycle"}
-                              {recorded === "later" && "Moved to Do Later"}
-                              {recorded === "drop" && "Dropped"}
+                              {recorded === "carry" && t("review.carried")}
+                              {recorded === "later" && t("review.movedLater")}
+                              {recorded === "drop" && t("review.dropped")}
                             </span>
                           )}
                         </div>
@@ -262,15 +264,15 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
                 </ul>
                 {dispose.isError && (
                   <p role="alert" className="mt-2 text-menu text-danger">
-                    Could not record that outcome. Try again.
+                    {t("review.dispositionFailed")}
                   </p>
                 )}
               </section>
             )}
 
             {/* -- 判断段（可编辑） ------------------------------------ */}
-            <section aria-label="Answers" className="mb-6">
-              <h3 className="mb-2 text-block-title font-semibold text-primary">Your take</h3>
+            <section aria-label={t("review.answers")} className="mb-6">
+              <h3 className="mb-2 text-block-title font-semibold text-primary">{t("review.answers")}</h3>
               <div className="flex flex-col gap-4">
                 {REVIEW_QUESTIONS.map((question) => {
                   const entry = draft[question.id];
@@ -281,7 +283,7 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
                           htmlFor={`review-${question.id}`}
                           className="text-menu font-medium text-primary"
                         >
-                          {question.text}
+                          {t(`review.question.${question.id}`)}
                         </label>
                         <Button
                           size="compact"
@@ -289,7 +291,7 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
                           aria-pressed={entry?.skipped ?? false}
                           onClick={() => toggleSkip(question.id)}
                         >
-                          {entry?.skipped ? "Restore" : "Skip"}
+                          {entry?.skipped ? t("review.restore") : t("review.skip")}
                         </Button>
                       </div>
                       <textarea
@@ -297,12 +299,12 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
                         value={entry?.text ?? ""}
                         onChange={(event) => update(question.id, event.target.value)}
                         rows={2}
-                        placeholder="Answer in your own words, or skip"
+                        placeholder={t("review.answerPlaceholder")}
                         className="w-full resize-y rounded-sm border border-light bg-content px-2 py-1.5 text-body text-primary placeholder:text-hint focus:border-control focus:outline-none"
                       />
                       {entry?.skipped && (
                         <p className="mt-0.5 text-caption text-hint">
-                          Will be saved as skipped{entry.text.trim() ? " with your note" : ""}.
+                          {entry.text.trim() ? t("review.skippedWithNote") : t("review.skipped")}
                         </p>
                       )}
                     </div>
@@ -322,27 +324,27 @@ export function ReviewPanel({ cycleId, onClose }: ReviewPanelProps): React.JSX.E
             loading={save.isPending}
             onClick={() => save.mutate()}
           >
-            Save review
+            {t("review.save")}
           </Button>
           <Button
             variant="secondary"
             size="md"
             disabled={review === null}
-            title="Copy this review as Markdown"
+            title={t("review.copyMarkdownTitle")}
             loading={exportMarkdown.isPending}
             onClick={() => exportMarkdown.mutate()}
           >
-            Copy Markdown
+            {t("review.copyMarkdown")}
           </Button>
         </div>
         <p className="mt-1.5 min-h-4 text-caption text-secondary" role="status">
           {save.isSuccess && !save.isPending
-            ? "Saved. You can keep editing and save again."
+            ? t("review.savedContinue")
             : (exportNote ?? "")}
         </p>
         {save.isError && (
           <p role="alert" className="text-caption text-danger">
-            Saving failed. Your draft is kept.
+            {t("review.saveFailed")}
           </p>
         )}
       </footer>

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { applyLocale } from "../../lib/i18n";
 
 type Target = "macos" | "windows" | "linux" | "web";
 type ShellState = {
@@ -53,6 +54,7 @@ function props() {
 }
 
 beforeEach(() => {
+  applyLocale("en");
   vi.clearAllMocks();
 });
 

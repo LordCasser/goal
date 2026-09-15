@@ -9,7 +9,6 @@ import { type Cycle, lifecycleOf, listSessions } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import {
   formatDateRange,
-  formatDuration,
   isoWeekNumber,
   remainingWeeks,
   todayISO,
@@ -20,13 +19,7 @@ import { FocusArea } from "./FocusArea";
 import { TaskList } from "./TaskList";
 import type { RelationView } from "./relations";
 import { PlanWithAI } from "../agent/PlanWithAI";
-
-const TYPE_BADGE: Record<Cycle["type"], string> = {
-  month: "Long-term",
-  week: "Week",
-  day: "Day",
-  session: "Focus",
-};
+import { useTranslation, formatDate, formatDuration } from "../../lib/i18n"
 
 export function CycleColumn({
   active = true,
@@ -45,6 +38,7 @@ export function CycleColumn({
   onReviewIssues?: (id: string) => void;
   onPlanWithAI?: (id: string) => void;
 }) {
+  const { t } = useTranslation("planning");
   const today = todayISO();
   const state = lifecycleOf(cycle);
 
@@ -62,9 +56,9 @@ export function CycleColumn({
   const runningSessionId =
     sessions.find((s) => s.started && !s.finished)?.id ?? null;
 
-  const badge = badgeText(cycle);
-  const meta = metaLine(cycle, today);
-  const title = titleText(cycle);
+  const badge = badgeText(cycle, t);
+  const meta = metaLine(cycle, today, t);
+  const title = titleText(cycle, t);
 
   return (
     /* 列宽固定 512px（--spacing-plan），绝不因视口不足被压缩（spec: 横向并列
@@ -80,7 +74,7 @@ export function CycleColumn({
         <div className="flex items-center justify-between gap-2">
           <span className="text-caption font-medium text-secondary">
             {badge}
-            {state === "finished" && <span className="ml-2 text-hint">ended</span>}
+            {state === "finished" && <span className="ml-2 text-hint">{t("cycle.ended")}</span>}
           </span>
           <CycleOptionsMenu cycle={cycle} runningElsewhere={false} />
         </div>
@@ -99,38 +93,38 @@ export function CycleColumn({
   );
 }
 
-function badgeText(cycle: Cycle): string {
+function badgeText(cycle: Cycle, t: (key: string, options?: Record<string, unknown>) => string): string {
   if (cycle.type === "week" && cycle.starts_on) {
     const week = isoWeekNumber(cycle.starts_on);
-    if (week !== null) return `Week ${week}`;
+    if (week !== null) return t("cycle.badge.week", { count: week });
   }
   if (cycle.type === "day" && cycle.starts_on) {
-    return weekdayName(cycle.starts_on);
+    return t("cycle.badge.day", { day: weekdayName(cycle.starts_on) });
   }
-  return TYPE_BADGE[cycle.type];
+  return t({ month: "cycle.badge.longTerm", week: "cycle.badge.week", day: "cycle.badge.day", session: "cycle.badge.focus" }[cycle.type]);
 }
 
-function titleText(cycle: Cycle): string {
-  if (cycle.type === "month") return "Long-term goals";
-  if (cycle.type === "week") return "Weekly plan";
-  if (cycle.type === "day") return "Daily plan";
+function titleText(cycle: Cycle, t: (key: string, options?: Record<string, unknown>) => string): string {
+  if (cycle.type === "month") return t("cycle.title.longTerm");
+  if (cycle.type === "week") return t("cycle.title.week");
+  if (cycle.type === "day") return t("cycle.title.day");
   return cycle.title;
 }
 
 /** 列头第二行：日期范围 + 剩余时间/编号 + 实际投入汇总（§3.2/§7）。 */
-function metaLine(cycle: Cycle, today: string): string | null {
+function metaLine(cycle: Cycle, today: string, t: (key: string, options?: Record<string, unknown>) => string): string | null {
   const parts: string[] = [];
   if (cycle.type === "month") {
     const range = formatDateRange(cycle.starts_on, cycle.ends_on);
     if (range) parts.push(range);
     const weeks = remainingWeeks(cycle.ends_on, today);
-    if (weeks !== null) parts.push(weeks > 0 ? `${weeks} weeks left` : "Ended");
+    if (weeks !== null) parts.push(weeks > 0 ? t("cycle.weeksLeft", { count: weeks }) : t("cycle.endedLabel"));
   } else if (cycle.type === "week") {
     const range = formatDateRange(cycle.starts_on, cycle.ends_on);
     if (range) parts.push(range);
   } else if (cycle.type === "day") {
-    if (cycle.starts_on) parts.push(cycle.starts_on);
+    if (cycle.starts_on) parts.push(formatDate(cycle.starts_on, { year: "numeric", month: "short", day: "numeric" }));
   }
-  if (cycle.focused_time > 0) parts.push(`${formatDuration(cycle.focused_time)} focused`);
+  if (cycle.focused_time > 0) parts.push(t("cycle.focused", { duration: formatDuration(cycle.focused_time) }));
   return parts.length > 0 ? parts.join(" · ") : null;
 }

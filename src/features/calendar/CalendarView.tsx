@@ -40,6 +40,7 @@ import { DAY_DRAG_TYPE, readDragToken } from "./calendar-dnd";
 import { CalendarPlan } from "./CalendarPlan";
 import { highlightedTasks, indexTasks, type RelationView } from "../planner/relations";
 import { StrategyDialog, type StrategyChoice } from "./StrategyDialog";
+import { useTranslation, formatDate } from "../../lib/i18n";
 import {
   getCalendarRange,
   getScheduleOverlaps,
@@ -64,6 +65,7 @@ function invalidateCalendar(qc: ReturnType<typeof useQueryClient>): void {
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function CalendarView({ active = true, onClose, onActiveCycleChange, onReviewIssues, onPlanWithAI }: { active?: boolean; onClose?: () => void; onActiveCycleChange?: (id: string) => void; onReviewIssues?: (id: string) => void; onPlanWithAI?: (id: string) => void }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const [view, setView] = useState<CalendarViewMode>(() => loadPreferredView());
   const [anchor, setAnchor] = useState<string>(() => todayISO());
@@ -80,6 +82,8 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
   const { error, run, fail, dismiss } = useActionError();
 
   const bounds = view === "month" ? monthBounds(anchor) : weekBounds(anchor);
+  const visibleStart = formatDate(bounds.start, { year: "numeric", month: "short", day: "numeric" });
+  const visibleEnd = formatDate(bounds.end, { year: "numeric", month: "short", day: "numeric" });
   const rangeKey = useMemo(() => [RANGE_KEY, bounds.start, bounds.end] as const, [bounds.start, bounds.end]);
   const { data: range, isLoading } = useQuery({
     queryKey: rangeKey,
@@ -291,7 +295,7 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
       onKeyDown={(event) => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) { setDragging(null); setSelectedTask(null); setHoveredTask(null); } }}>
       {/* 视图工具条：密度切换 + 期间导航 + 偏好记忆；顶栏入口由 App 接线。 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-light bg-canvas px-4 py-2">
-        <div role="tablist" aria-label="Calendar density">
+        <div role="tablist" aria-label={t("workspace.calendarDensity")}>
           {(["month", "week"] as const).map((mode) => (
             <button
               key={mode}
@@ -304,49 +308,49 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
                 view === mode ? "bg-focus-surface text-focus" : "text-primary hover:bg-hover",
               )}
             >
-              {mode}
+              {t(`workspace.${mode}`)}
             </button>
           ))}
         </div>
-        <Button size="compact" variant="ghost" onClick={() => navigate(-1)} aria-label="Previous">
+        <Button size="compact" variant="ghost" onClick={() => navigate(-1)} aria-label={t("workspace.previous")}>
           ‹
         </Button>
-        <Button size="compact" variant="ghost" onClick={() => { selectDay(today); setWeekScrollTarget({ date: today, animate: true }); }} aria-label="Jump to today">
-          Today
+        <Button size="compact" variant="ghost" onClick={() => { selectDay(today); setWeekScrollTarget({ date: today, animate: true }); }} aria-label={t("workspace.todayButton")}>
+          {t("workspace.today")}
         </Button>
-        <Button size="compact" variant="ghost" onClick={() => navigate(1)} aria-label="Next">
+        <Button size="compact" variant="ghost" onClick={() => navigate(1)} aria-label={t("workspace.next")}>
           ›
         </Button>
         <span className="text-menu text-secondary" data-testid="visible-range">
-          {bounds.start === bounds.end ? bounds.start : `${bounds.start} – ${bounds.end}`}
+          {bounds.start === bounds.end ? visibleStart : `${visibleStart} – ${visibleEnd}`}
         </span>
         <div className="min-w-4 flex-1" />
         {onClose && (
-          <Button size="compact" variant="ghost" onClick={onClose} aria-label="Close calendar view">
-            Close
+          <Button size="compact" variant="ghost" onClick={onClose} aria-label={t("workspace.closeCalendar")}>
+            {t("workspace.closeCalendar")}
           </Button>
         )}
       </div>
 
       <div className="flex min-h-0 flex-1">
         {/* Week keeps readable day widths; Month retains its compact seven-column grid. */}
-        <div ref={datesViewport} role="region" aria-label="Calendar dates" tabIndex={0}
+        <div ref={datesViewport} role="region" aria-label={t("workspace.calendarDates")} tabIndex={0}
           className={cn("min-h-0 min-w-0 flex-1 overflow-auto", view === "week" ? "py-4" : "p-4")}>
-          {plans.isError && <p role="alert" className="mb-3 text-caption text-danger">Task details could not be loaded. <button className="underline" onClick={() => void plans.refetch()}>Retry</button></p>}
+          {plans.isError && <p role="alert" className="mb-3 text-caption text-danger">{t("workspace.calendarError")} <button className="underline" onClick={() => void plans.refetch()}>{t("workspace.retry")}</button></p>}
           {isLoading ? (
-            <p className="p-4 text-body text-hint">Loading calendar…</p>
+            <p className="p-4 text-body text-hint">{t("workspace.loadingCalendar")}</p>
           ) : (
             <div
               role="grid"
-              aria-label={`Calendar ${view} view`}
+              aria-label={t("workspace.calendarView", { view: t(`workspace.${view}`) })}
               className={cn(
                 "grid",
                 view === "week" ? "calendar-week-grid" : "min-w-[720px] grid-cols-7 gap-1",
               )}
             >
-              {WEEKDAY_LABELS.map((label) => (
+              {WEEKDAY_LABELS.map((label, index) => (
                   <div key={label} role="columnheader" className="text-caption font-medium text-hint">
-                    {label}
+                    {t(`calendar.weekday.${index}`)}
                   </div>
                 ))}
               {days.map((day) => (
@@ -377,8 +381,8 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
         {/* Plan content and timed execution are two sections of the same day. */}
         <aside ref={detailsRef} className="flex w-panel shrink-0 flex-col gap-3 border-l border-light bg-content p-4">
           <header className="flex items-center justify-between gap-2">
-            <h2 className="text-block-title font-semibold">{selectedDate}</h2>
-            <div className="flex rounded-md bg-subtle p-0.5" role="tablist" aria-label="Day details">
+            <h2 className="text-block-title font-semibold">{formatDate(selectedDate, { year: "numeric", month: "short", day: "numeric" })}</h2>
+            <div className="flex rounded-md bg-subtle p-0.5" role="tablist" aria-label={t("workspace.dayDetails")}>
               {(["plan", "schedule"] as const).map((tab) => <button key={tab} id={`day-detail-${tab}`} aria-controls={`day-panel-${tab}`} type="button" role="tab" aria-selected={detail === tab} tabIndex={detail === tab ? 0 : -1}
                 className={cn("rounded-sm px-2 py-1 text-caption capitalize transition-colors", detail === tab ? "bg-content text-primary shadow-sm" : "text-secondary hover:text-primary")}
                 onClick={() => setDetail(tab)} onKeyDown={(event) => {
@@ -387,13 +391,13 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
                   const next = event.key === "Home" ? "plan" : event.key === "End" ? "schedule" : detail === "plan" ? "schedule" : "plan";
                   setDetail(next);
                   event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#day-detail-${next}`)?.focus();
-                }}>{tab}</button>)}
+                }}>{t(`workspace.${tab}`)}</button>)}
             </div>
           </header>
           <div id="day-panel-plan" role="tabpanel" aria-labelledby="day-detail-plan" className="min-h-0 flex-1 flex-col" style={{ display: detail === "plan" ? "flex" : "none" }}>
           {isLoading || (planCycleIds.length > 0 && plans.isPending)
-            ? <p className="text-caption text-hint">Loading plan…</p>
-            : plans.isError ? <p className="text-caption text-danger">Plan details are unavailable. Retry loading the tasks.</p>
+            ? <p className="text-caption text-hint">{t("workspace.loadingPlan")}</p>
+            : plans.isError ? <p className="text-caption text-danger">{t("workspace.planUnavailable")}</p>
             : <CalendarPlan active={active && detail === "plan"} date={selectedDate} day={selectedDay?.day_cycle ?? null} cycles={cycles} workspaces={workspaces}
               relations={relations} onCreateDay={createDay} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} />}
           </div>
@@ -422,7 +426,7 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
         >
           {error}
           <button type="button" className="ml-2 underline" onClick={dismiss}>
-            Dismiss
+            {t("workspace.dismiss")}
           </button>
         </div>
       )}

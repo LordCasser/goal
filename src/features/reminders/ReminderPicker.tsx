@@ -10,6 +10,7 @@ import type { JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Checkbox, Input, cn } from "../../ui";
+import { errorMessage, useTranslation } from "../../lib/i18n";
 import {
   fromLocalInputValue,
   setReminder,
@@ -41,6 +42,7 @@ export function ReminderPicker({
   onSaved,
   onCancel,
 }: ReminderPickerProps): JSX.Element {
+  const { t } = useTranslation("shell");
   const queryClient = useQueryClient();
   const [value, setValue] = useState(() =>
     toLocalInputValue(initialFireAt ?? Date.now() + 60 * 60 * 1000),
@@ -64,17 +66,17 @@ export function ReminderPicker({
   return (
     <div className="flex flex-col gap-2 rounded-sm border border-light bg-content p-2">
       <label className="flex flex-col gap-1 text-caption text-secondary">
-        提醒时间
+        {t("reminders.picker.time")}
         <Input
           type="datetime-local"
           value={value}
           onChange={(event) => setValue(event.currentTarget.value)}
-          aria-label="提醒时间"
+          aria-label={t("reminders.picker.time")}
           className="w-auto"
         />
       </label>
       <Checkbox checked={quietOk} onChange={setQuietOk}>
-        <span className="text-caption text-secondary">免打扰时段内静音</span>
+        <span className="text-caption text-secondary">{t("reminders.picker.quiet")}</span>
       </Checkbox>
       <div className="flex items-center gap-2">
         <Button
@@ -84,18 +86,18 @@ export function ReminderPicker({
           loading={save.isPending}
           onClick={() => save.mutate()}
         >
-          保存提醒
+          {t("reminders.picker.save")}
         </Button>
         {onCancel && (
           <Button variant="ghost" size="compact" onClick={onCancel}>
-            取消
+            {t("reminders.picker.cancel")}
           </Button>
         )}
         <span
           role="status"
           className={cn("text-caption", save.isError ? "text-danger" : "text-hint")}
         >
-          {save.isError ? "保存失败，请重试" : ""}
+          {save.isError ? errorMessage(save.error) : ""}
         </span>
       </div>
     </div>

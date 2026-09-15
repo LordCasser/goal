@@ -73,8 +73,8 @@ fn temporary_database_reopens_with_committed_and_coach_preview_state() {
         .iter()
         .any(|task| task.id == preview_target.id));
 
-    let pending = proposals::get_preview_summary(&reopened, &month.id)
-        .expect("read pending Coach preview");
+    let pending =
+        proposals::get_preview_summary(&reopened, &month.id).expect("read pending Coach preview");
     assert_eq!(pending.count, 1);
     assert_eq!(pending.tasks[0].id, preview_target.id);
     assert_eq!(pending.tasks[0].proposal, Some(ProposalKind::Upsert));
@@ -88,8 +88,7 @@ fn temporary_database_reopens_with_committed_and_coach_preview_state() {
 
     // Rejection uses the persisted snapshot, restoring the committed title
     // and clearing both pending representations.
-    proposals::undo_task_preview(&reopened, &preview_target.id)
-        .expect("reject Coach preview");
+    proposals::undo_task_preview(&reopened, &preview_target.id).expect("reject Coach preview");
     let restored = tasks::get(&conn, &preview_target.id)
         .expect("read restored task")
         .expect("restored task remains");

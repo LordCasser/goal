@@ -28,8 +28,13 @@ fn reorder_visible_roots_accepts_cross_cycle_links_without_reparenting() {
     tasks::set_task_parent_link(&db.db, &first.id, Some(&goal_a.id)).unwrap();
     tasks::set_task_parent_link(&db.db, &second.id, Some(&goal_b.id)).unwrap();
 
-    tasks::reorder_tasks(&db.db, &week.id, None, &[second.id.clone(), first.id.clone()])
-        .unwrap();
+    tasks::reorder_tasks(
+        &db.db,
+        &week.id,
+        None,
+        &[second.id.clone(), first.id.clone()],
+    )
+    .unwrap();
 
     let conn = db.conn();
     let first_after = planner_lib::repository::tasks::require(&conn, &first.id).unwrap();
@@ -113,10 +118,14 @@ fn reorder_rejects_mixed_nested_group_without_writing_positions() {
 
     let conn = db.conn();
     let child_after = planner_lib::repository::tasks::require(&conn, &child.id).unwrap();
-    let linked_root_after = planner_lib::repository::tasks::require(&conn, &linked_root.id).unwrap();
+    let linked_root_after =
+        planner_lib::repository::tasks::require(&conn, &linked_root.id).unwrap();
     assert_eq!(child_after.position, 1);
     assert_eq!(linked_root_after.position, 9);
-    assert_eq!(linked_root_after.parent_id.as_deref(), Some(goal.id.as_str()));
+    assert_eq!(
+        linked_root_after.parent_id.as_deref(),
+        Some(goal.id.as_str())
+    );
 }
 
 #[test]

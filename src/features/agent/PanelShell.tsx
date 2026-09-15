@@ -7,6 +7,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import type * as React from "react";
 
+import { useTranslation } from "../../lib/i18n";
 import { Button } from "../../ui";
 
 export type PanelShellProps = {
@@ -32,6 +33,7 @@ export function PanelShell({
   onKeyDown,
   children,
 }: PanelShellProps): React.JSX.Element {
+  const { t } = useTranslation("ai");
   const panelRef = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -80,8 +82,8 @@ export function PanelShell({
           variant="ghost"
           size="icon"
           onClick={close}
-          aria-label={`Close ${label} panel`}
-          title="Close (Esc)"
+          aria-label={t("common.closePanel", { label })}
+          title={t("common.closeEsc")}
         >
           <CloseIcon />
         </Button>

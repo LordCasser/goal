@@ -393,12 +393,15 @@ pub enum DeliveryOutcome {
 }
 
 /// Injection seam for delivery. Production wires
-/// [`crate::commands::reminders::SystemNotifier`] (tauri-plugin-notification);
+/// [`crate::commands::reminders::SystemNotifier`] (platform notification
+/// adapter);
 /// tests wire [`RecordingNotifier`].
 pub trait ReminderNotifier: Send + Sync {
-    /// Current permission as a stable token: `"granted" | "denied" | "prompt"`.
+    /// Current permission as a stable token. Desktop implementations may
+    /// return `"system_managed"` when the OS does not expose a query API.
     fn permission(&self) -> String;
-    /// Asks the OS for permission and caches the answer.
+    /// Requests permission when the platform supports it, otherwise returns
+    /// the platform's stable `system_managed` state.
     fn request_permission(&self) -> String;
     /// Attempts one system notification; never panics, failure is data.
     fn notify(&self, notification: &NotificationContent) -> DeliveryOutcome;
@@ -446,16 +449,25 @@ fn describe(
     info: &TargetInfo,
 ) -> Option<NotificationContent> {
     let title = info.title.clone().unwrap_or_default();
+    let locale = crate::i18n::current(conn).unwrap_or(crate::i18n::Locale::En);
     let body = match reminder.target_kind {
-        repo::TargetKind::Task => "Task reminder".to_string(),
-        repo::TargetKind::Session => "Focus block reached its planned length.".to_string(),
+        repo::TargetKind::Task => crate::i18n::text(locale, "notification.task", &[]),
+        repo::TargetKind::Session => crate::i18n::text(locale, "notification.session", &[]),
         repo::TargetKind::Day => {
             let n = crate::repository::tasks::list_visible_by_cycle(conn, &reminder.target_id)
                 .map(|tasks| tasks.len())
                 .unwrap_or(0);
-            format!("Today's plan is ready — {n} item(s) scheduled.")
+            crate::i18n::text(
+                locale,
+                if n == 1 {
+                    "notification.day_one"
+                } else {
+                    "notification.day_other"
+                },
+                &[("count", n.to_string())],
+            )
         }
-        repo::TargetKind::Cycle => "Planning cycle is entering its final stretch.".to_string(),
+        repo::TargetKind::Cycle => crate::i18n::text(locale, "notification.cycle", &[]),
     };
     Some(NotificationContent {
         reminder_id: reminder.id.clone(),
@@ -801,7 +813,7 @@ impl Scheduler {
         Ok(acknowledged)
     }
 
-    /// Requests notification permission, caching the outcome (tasks §3.1).
+    /// Reports the platform notification permission state (tasks §3.1).
     pub fn request_permission(&self) -> String {
         let token = self.core.notifier.request_permission();
         let mut state = self.core.state.lock().expect("scheduler state");
@@ -809,7 +821,7 @@ impl Scheduler {
         token
     }
 
-    /// Cached permission plus the last recorded delivery failure (§3.3).
+    /// Platform permission state plus the last recorded delivery failure (§3.3).
     pub fn delivery_status(&self) -> DeliveryStatus {
         let mut state = self.core.state.lock().expect("scheduler state");
         if state.status.permission.is_none() {
@@ -820,11 +832,12 @@ impl Scheduler {
 
     fn record_report(&self, report: &PassReport) {
         let mut state = self.core.state.lock().expect("scheduler state");
-        state.status.permission = Some(self.core.notifier.permission());
-        state.status.last_error = report.last_error.clone();
-        if report.notified + report.in_app_only > 0 {
-            state.status.last_delivery_at = Some(now_ms());
-        }
+        update_delivery_status(
+            &mut state.status,
+            self.core.notifier.as_ref(),
+            report,
+            now_ms(),
+        );
         let changed = pass_changed(report);
         drop(state);
         if changed {
@@ -853,11 +866,7 @@ fn run_loop(core: Arc<SchedulerCore>) {
         match reconcile(&core.db, core.notifier.as_ref(), now) {
             Ok(report) => {
                 let mut state = core.state.lock().expect("scheduler state");
-                state.status.permission = Some(core.notifier.permission());
-                state.status.last_error = report.last_error.clone();
-                if report.notified + report.in_app_only > 0 {
-                    state.status.last_delivery_at = Some(now);
-                }
+                update_delivery_status(&mut state.status, core.notifier.as_ref(), &report, now);
                 let changed = pass_changed(&report);
                 drop(state);
                 if changed {
@@ -881,6 +890,23 @@ fn run_loop(core: Arc<SchedulerCore>) {
             .expect("scheduler signal");
         guard.woken = false;
         drop(guard);
+    }
+}
+
+fn update_delivery_status(
+    status: &mut DeliveryStatus,
+    notifier: &dyn ReminderNotifier,
+    report: &PassReport,
+    delivery_at: i64,
+) {
+    status.permission = Some(notifier.permission());
+    if let Some(error) = &report.last_error {
+        status.last_error = Some(error.clone());
+    } else if report.notified > 0 {
+        status.last_error = None;
+    }
+    if report.notified + report.in_app_only > 0 {
+        status.last_delivery_at = Some(delivery_at);
     }
 }
 

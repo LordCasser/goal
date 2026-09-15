@@ -1,34 +1,63 @@
 //! User-editable workflows, independent of providers, conversations and tool permissions.
-use std::{fs, io::{Read, Write}, path::{Path, PathBuf}};
 use crate::error::{AppError, AppResult};
+use std::{
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Skill {
-    Coach, GoalClarification, LongTermPlanning, WeeklyPlanning, DailyPlanning,
-    Prioritization, CycleReview, PeriodAnalysis, PlanningIssues,
+    Coach,
+    GoalClarification,
+    LongTermPlanning,
+    WeeklyPlanning,
+    DailyPlanning,
+    Prioritization,
+    CycleReview,
+    PeriodAnalysis,
+    PlanningIssues,
 }
 
 impl Skill {
-    pub const ALL: [Self; 9] = [Self::Coach, Self::GoalClarification, Self::LongTermPlanning,
-        Self::WeeklyPlanning, Self::DailyPlanning, Self::Prioritization, Self::CycleReview,
-        Self::PeriodAnalysis, Self::PlanningIssues];
+    pub const ALL: [Self; 9] = [
+        Self::Coach,
+        Self::GoalClarification,
+        Self::LongTermPlanning,
+        Self::WeeklyPlanning,
+        Self::DailyPlanning,
+        Self::Prioritization,
+        Self::CycleReview,
+        Self::PeriodAnalysis,
+        Self::PlanningIssues,
+    ];
     pub fn name(self) -> &'static str {
         match self {
-            Self::Coach => "coach", Self::GoalClarification => "goal-clarification",
-            Self::LongTermPlanning => "long-term-planning", Self::WeeklyPlanning => "weekly-planning",
-            Self::DailyPlanning => "daily-planning", Self::Prioritization => "prioritization",
-            Self::CycleReview => "cycle-review", Self::PeriodAnalysis => "period-analysis",
+            Self::Coach => "coach",
+            Self::GoalClarification => "goal-clarification",
+            Self::LongTermPlanning => "long-term-planning",
+            Self::WeeklyPlanning => "weekly-planning",
+            Self::DailyPlanning => "daily-planning",
+            Self::Prioritization => "prioritization",
+            Self::CycleReview => "cycle-review",
+            Self::PeriodAnalysis => "period-analysis",
             Self::PlanningIssues => "planning-issues",
         }
     }
-    pub fn parse(name: &str) -> Option<Self> { Self::ALL.into_iter().find(|s| s.name() == name) }
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
     pub fn agent_skill(self) -> crate::ai::llm::types::AgentSkill {
         use crate::ai::llm::types::AgentSkill as A;
         match self {
-            Self::Coach => A::None, Self::GoalClarification => A::GoalSetting,
-            Self::LongTermPlanning => A::LongTermPlanning, Self::WeeklyPlanning => A::WeeklyPlanning,
-            Self::DailyPlanning => A::DailyPlanning, Self::Prioritization => A::Prioritization,
-            Self::CycleReview => A::Review, Self::PeriodAnalysis => A::PeriodAnalysis,
+            Self::Coach => A::None,
+            Self::GoalClarification => A::GoalSetting,
+            Self::LongTermPlanning => A::LongTermPlanning,
+            Self::WeeklyPlanning => A::WeeklyPlanning,
+            Self::DailyPlanning => A::DailyPlanning,
+            Self::Prioritization => A::Prioritization,
+            Self::CycleReview => A::Review,
+            Self::PeriodAnalysis => A::PeriodAnalysis,
             Self::PlanningIssues => A::PlanningIssues,
         }
     }
@@ -51,7 +80,8 @@ pub fn directory() -> AppResult<PathBuf> {
     // Tauri's home resolution is used at setup. This helper is also callable
     // from the provider-independent service layer without an AppHandle.
     #[allow(deprecated)]
-    std::env::home_dir().map(|p| p.join(".goal/skills"))
+    std::env::home_dir()
+        .map(|p| p.join(".goal/skills"))
         .ok_or_else(|| AppError::Internal("cannot resolve the user home directory".into()))
 }
 
@@ -61,9 +91,15 @@ pub fn install_missing(root: &Path) -> AppResult<()> {
         let dir = root.join(skill.name());
         fs::create_dir_all(&dir).map_err(|e| skill_error(&dir, e))?;
         let path = dir.join("SKILL.md");
-        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => file.write_all(skill.builtin().as_bytes()).map_err(|e| skill_error(&path, e))?,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {},
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => file
+                .write_all(skill.builtin().as_bytes())
+                .map_err(|e| skill_error(&path, e))?,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(skill_error(&path, e)),
         }
     }
@@ -77,10 +113,16 @@ fn skill_error(path: &Path, error: impl std::fmt::Display) -> AppError {
 pub fn load_from(root: &Path, skill: Skill) -> AppResult<String> {
     let path = root.join(skill.name()).join("SKILL.md");
     let mut text = String::new();
-    fs::File::open(&path).map_err(|e| skill_error(&path, e))?.take(65_537)
-        .read_to_string(&mut text).map_err(|e| skill_error(&path, e))?;
+    fs::File::open(&path)
+        .map_err(|e| skill_error(&path, e))?
+        .take(65_537)
+        .read_to_string(&mut text)
+        .map_err(|e| skill_error(&path, e))?;
     if text.trim().is_empty() || text.len() > 65_536 {
-        return Err(skill_error(&path, "SKILL.md must contain 1–65536 bytes of UTF-8 instructions"));
+        return Err(skill_error(
+            &path,
+            "SKILL.md must contain 1–65536 bytes of UTF-8 instructions",
+        ));
     }
     Ok(text)
 }
@@ -89,25 +131,50 @@ pub fn load(skill: Skill) -> AppResult<String> {
     // Unit tests never read or create personal configuration; filesystem
     // behavior is tested explicitly below against isolated temporary roots.
     #[cfg(test)]
-    { Ok(skill.builtin().to_string()) }
+    {
+        Ok(skill.builtin().to_string())
+    }
     #[cfg(not(test))]
-    { load_from(&directory()?, skill) }
+    {
+        load_from(&directory()?, skill)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
+    fn builtin_skills_are_english_and_do_not_fix_the_response_to_chinese() {
+        for skill in Skill::ALL {
+            assert!(
+                !skill
+                    .builtin()
+                    .chars()
+                    .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)),
+                "{} must use English instructions",
+                skill.name()
+            );
+        }
+    }
+    #[test]
     fn install_preserves_user_edits_and_load_observes_changes() {
         let dir = tempfile::tempdir().unwrap();
         install_missing(dir.path()).unwrap();
-        for skill in Skill::ALL { assert!(!load_from(dir.path(), skill).unwrap().is_empty()); }
+        for skill in Skill::ALL {
+            assert!(!load_from(dir.path(), skill).unwrap().is_empty());
+        }
         let path = dir.path().join("daily-planning/SKILL.md");
         fs::write(&path, "My daily workflow").unwrap();
         install_missing(dir.path()).unwrap();
-        assert_eq!(load_from(dir.path(), Skill::DailyPlanning).unwrap(), "My daily workflow");
+        assert_eq!(
+            load_from(dir.path(), Skill::DailyPlanning).unwrap(),
+            "My daily workflow"
+        );
         fs::write(&path, "Second revision").unwrap();
-        assert_eq!(load_from(dir.path(), Skill::DailyPlanning).unwrap(), "Second revision");
+        assert_eq!(
+            load_from(dir.path(), Skill::DailyPlanning).unwrap(),
+            "Second revision"
+        );
         fs::write(&path, " ").unwrap();
         assert!(load_from(dir.path(), Skill::DailyPlanning).is_err());
         fs::write(&path, "x".repeat(65_537)).unwrap();

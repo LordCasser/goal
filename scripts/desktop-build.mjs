@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import packageJson from "../package.json" with { type: "json" };
 import { assertPlatformConfig } from "./desktop-config.mjs";
 import { normalizePlatform, resolveBuildPlatform } from "./desktop-platform.mjs";
+import { npmCliInvocation } from "./npm-cli.mjs";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
@@ -76,26 +77,11 @@ function nativePlatformFromEnvironment() {
   return resolveBuildPlatform({ requireNative: true });
 }
 
-function npmCliPath() {
-  const candidates = [
-    process.env.npm_execpath,
-    path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
-    path.resolve(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
-  ].filter(Boolean);
-  return candidates.find((candidate) => fs.existsSync(candidate));
-}
-
 function runNpm(args, env) {
-  const cli = npmCliPath();
-  const command = cli ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
-  const commandArgs = cli ? [cli, ...args] : args;
+  const { command, args: commandArgs } = npmCliInvocation(args, { env });
   const result = spawnSync(command, commandArgs, {
     cwd: ROOT_DIR,
     env,
-    // npm.cmd is a fixed executable name with no user-controlled arguments;
-    // the shell fallback is only needed on Windows when npm's CLI path is
-    // not discoverable from the Node installation.
-    shell: !cli && process.platform === "win32",
     stdio: "inherit",
   });
   if (result.error) throw result.error;

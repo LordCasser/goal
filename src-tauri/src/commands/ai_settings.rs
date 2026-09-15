@@ -194,7 +194,9 @@ fn summarize_settings(settings: &AiSettingsState) -> AppResult<AiSettingsSummary
         })
         .collect::<Vec<_>>();
     let active_provider = providers.iter().find(|s| s.is_active).cloned();
-    let ai_available = settings.store.resolve_active_model()
+    let ai_available = settings
+        .store
+        .resolve_active_model()
         .is_some_and(|(p, _)| p.connection_verified_at.is_some());
     Ok(AiSettingsSummary {
         active_model_id: settings.store.active_model_id(),
@@ -266,7 +268,9 @@ async fn test_and_save_provider(
             };
             rollback?;
             if let Some((old_provider, old_model)) = previous_selection {
-                settings.store.set_active_model(&old_provider.id, &old_model.model_id)?;
+                settings
+                    .store
+                    .set_active_model(&old_provider.id, &old_model.model_id)?;
             }
             return Err(error);
         }

@@ -1,4 +1,6 @@
-//! OS window integration. No planner data or AI tool depends on this layer.
+//! OS integration. No planner data or AI tool depends on this layer.
+pub(crate) mod notifications;
+
 #[cfg(any(target_os = "windows", test))]
 pub(crate) mod geometry;
 #[cfg(target_os = "windows")]

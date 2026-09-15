@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
@@ -63,10 +64,10 @@ function modelTextMessage(text: string, sequence: number): MessageView {
   };
 }
 
-it("renders a persisted approval receipt inside the scrolling transcript, never in the composer footer",async()=>{
+it.each([undefined, { summary_key: "", details: [], decision: "rejected" }])("renders a persisted approval receipt inside the scrolling transcript, never in the composer footer (%j)",async(legacyResult)=>{
   mockBackend({conversation:conversationView([
     modelTextMessage("改动已准备好",1),
-    {id:"receipt",turn_id:"decision",sequence_number:2,message_type:"app_tool_result",payload:{kind:"app_tool_result",name:"approval_decision",result:{text:"已应用到计划：示例任务"}}},
+    {id:"receipt",turn_id:"decision",sequence_number:2,message_type:"app_tool_result",payload:{kind:"app_tool_result",name:"approval_decision",result:{text:"已应用到计划：示例任务", result: legacyResult}}},
     userMessage("继续安排明天",3),
   ])});
   renderPanel();
@@ -139,12 +140,13 @@ function renderPanel(props: Partial<import("./AgentPanel").AgentPanelProps> = {}
 }
 
 function typeDraft(text: string): HTMLTextAreaElement {
-  const input = screen.getByLabelText("Message Coach") as HTMLTextAreaElement;
+  const input = screen.getByLabelText("给助理发消息") as HTMLTextAreaElement;
   fireEvent.change(input, { target: { value: text } });
   return input;
 }
 
 beforeEach(() => {
+  applyLocale("zh-CN");
   invokeMock.mockReset();
 });
 
@@ -225,7 +227,7 @@ describe("AgentPanel", () => {
     renderPanel();
     await screen.findByRole("button", { name: /先做周计划/ });
 
-    fireEvent.keyDown(screen.getByRole("complementary", { name: "Coach" }), {
+    fireEvent.keyDown(screen.getByRole("complementary", { name: "助理" }), {
       key: "1",
       metaKey: true,
     });
@@ -245,7 +247,7 @@ describe("AgentPanel", () => {
       ]),
     });
     renderPanel();
-    const panel = await screen.findByRole("complementary", { name: "Coach" });
+    const panel = await screen.findByRole("complementary", { name: "助理" });
 
     for (const event of [
       { key: "1", ctrlKey: true },
@@ -259,14 +261,14 @@ describe("AgentPanel", () => {
     expect(invokeMock.mock.calls.some(([command]) => command === commands.sendAgentMessage)).toBe(false);
   });
 
-  it("does not send a candidate while Coach is busy or hidden", async () => {
+  it("does not send a candidate while 助理 is busy or hidden", async () => {
     mockBackend({
       conversation: conversationView([
         modelTextMessage("<next_steps>先做周计划</next_steps>", 1),
       ]),
     });
     const { onClose } = renderPanel({ externalPlanning: true });
-    const panel = await screen.findByRole("complementary", { name: "Coach" });
+    const panel = await screen.findByRole("complementary", { name: "助理" });
     expect(screen.queryByRole("button", { name: /先做周计划/ })).toBeNull();
     fireEvent.keyDown(panel, { key: "1", metaKey: true });
     expect(invokeMock.mock.calls.some(([command]) => command === commands.sendAgentMessage)).toBe(false);
@@ -291,7 +293,7 @@ describe("AgentPanel", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     // 行内显示错误，输入与历史都保留（spec: 失败）。
-    expect(await screen.findByText("Provider unreachable.")).toBeDefined();
+    expect(await screen.findByText("无法连接供应商，请检查网络和服务地址。")).toBeDefined();
     expect(input.value).toBe("帮我把目标拆细");
     expect(screen.getByText("好的，可以逐条来。")).toBeDefined();
     expect(invokeMock).toHaveBeenCalledWith(commands.sendAgentMessage, {
@@ -307,7 +309,7 @@ describe("AgentPanel", () => {
     });
     renderPanel();
 
-    const input = await screen.findByLabelText("Message Coach");
+    const input = await screen.findByLabelText("给助理发消息");
     fireEvent.change(input, { target: { value: "你好" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -318,7 +320,7 @@ describe("AgentPanel", () => {
     mockBackend();
     renderPanel();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Start planning" }));
+    fireEvent.click(await screen.findByRole("button", { name: "开始规划" }));
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith(commands.startPlanning, { cycleId: "c1" }),
     );
@@ -327,9 +329,9 @@ describe("AgentPanel", () => {
   it("closes the panel on Escape", async () => {
     mockBackend();
     const { onClose } = renderPanel();
-    await screen.findByLabelText("Message Coach");
+    await screen.findByLabelText("给助理发消息");
 
-    fireEvent.keyDown(screen.getByLabelText("Message Coach"), { key: "Escape" });
+  fireEvent.keyDown(screen.getByLabelText("给助理发消息"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
   });
   it("renders model emphasis and lists without interpreting raw HTML or loading remote images", async () => {
@@ -391,15 +393,15 @@ it("sends from the composer button and disables duplicate sends while pending", 
   invokeMock.mockImplementation((cmd: string) => ["get_pending_task_cycles","get_agent_actions"].includes(cmd) ? Promise.resolve([]) : cmd === commands.sendAgentMessage
     ? new Promise<TurnResult>((resolve) => { finish = resolve; }) : Promise.resolve(conversationView([])));
   renderPanel();
-  await screen.findByText("Start planning");
-  const button = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
+  await screen.findByText("开始规划");
+  const button = screen.getByRole("button", { name: "发送消息" }) as HTMLButtonElement;
   expect(button.disabled).toBe(true);
   typeDraft("帮我规划");
   fireEvent.click(button);
   await screen.findByRole("status");
   expect(button.disabled).toBe(true);
   finish(turnResult());
-  await waitFor(() => expect((screen.getByLabelText("Message Coach") as HTMLTextAreaElement).value).toBe(""));
+  await waitFor(() => expect((screen.getByLabelText("给助理发消息") as HTMLTextAreaElement).value).toBe(""));
   expect(screen.queryByRole("status")).toBeNull();
 });
 
@@ -431,6 +433,9 @@ function proposalResult(sequence: number): MessageView {
 function receiptMessage(sequence: number, decision: string): MessageView {
   return {id:`receipt-${sequence}`,turn_id:`decision-${sequence}`,sequence_number:sequence,message_type:"app_tool_result",payload:{kind:"app_tool_result",name:"approval_decision",result:{text:decision==="applied"?"已更新任务「Example」。":"已放弃改动「Example」。",target_kind:"task",target_id:"task",decision}}};
 }
+function structuredReceiptMessage(sequence: number): MessageView {
+  return {id:`structured-receipt-${sequence}`,turn_id:`decision-${sequence}`,sequence_number:sequence,message_type:"app_tool_result",payload:{kind:"app_tool_result",name:"approval_decision",result:{text:"legacy receipt",result:{summary_key:"backend-actions:preview.updated",details:[{key:"backend-actions:preview.title",args:{title:"Example"}}],decision:"applied",operation:"task_preview"},target_kind:"task",target_id:"task",decision:"applied"}}};
+}
 it("resolves the original tool summary and leaves a later proposal on the same task pending",async()=>{
   mockBackend({conversation:conversationView([proposalResult(1),modelTextMessage("请确认修改",2),receiptMessage(3,"applied"),userMessage("再调整一次",4),proposalResult(5)])});
   renderPanel();
@@ -447,11 +452,25 @@ it("shows rejected rather than pending after the user restores the preview",asyn
   expect(await screen.findByRole("button",{name:"1 项修改已放弃，查看过程"})).toBeTruthy();
   expect(screen.queryByRole("button",{name:/修改待确认/})).toBeNull();
 });
+it("renders structured approval receipts in the active locale", async () => {
+  mockBackend({conversation:conversationView([structuredReceiptMessage(1)])});
+  renderPanel();
+  const status = await screen.findByRole("status");
+  expect(status.textContent).toBe("✓已更新任务「Example」。");
+});
+it("refreshes structured receipts on a locale switch but preserves historical text", async () => {
+  mockBackend({conversation:conversationView([structuredReceiptMessage(1), receiptMessage(2, "applied")])});
+  renderPanel();
+  expect((await screen.findAllByRole("status"))[0]!.textContent).toBe("✓已更新任务「Example」。");
+  applyLocale("en");
+  await waitFor(() => expect(screen.getAllByRole("status")[0]!.textContent).toBe("✓Updated task: Example."));
+  expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("已更新任务「Example"))).toBe(true);
+});
 
 it("prepares an issue discussion as an editable draft and sends the exact task context only on request", async () => {
   mockBackend();
   renderPanel({initialDraft:"请核对 Prototype 的验证方式",focusedTaskId:"t1"});
-  const input = await screen.findByLabelText("Message Coach");
+  const input = await screen.findByLabelText("给助理发消息");
   expect((input as HTMLTextAreaElement).value).toBe("请核对 Prototype 的验证方式");
   expect(invokeMock.mock.calls.some(([cmd]) => cmd === commands.sendAgentMessage)).toBe(false);
   fireEvent.keyDown(input,{key:"Enter"});

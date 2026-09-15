@@ -64,7 +64,11 @@ pub(crate) fn default_root_color(
 
 /// Preview locks belong to task identity, so all editor entry points obey them.
 /// A deletion also affects linked descendants through the task foreign key.
-pub(crate) fn ensure_task_editable(conn: &Connection, task_id: &str, subtree: bool) -> AppResult<()> {
+pub(crate) fn ensure_task_editable(
+    conn: &Connection,
+    task_id: &str,
+    subtree: bool,
+) -> AppResult<()> {
     let locked: bool = conn.query_row(
         "WITH RECURSIVE ancestors(id, parent_id, proposal) AS (
             SELECT id, parent_id, proposal FROM tasks WHERE id = ?1
@@ -77,7 +81,10 @@ pub(crate) fn ensure_task_editable(conn: &Connection, task_id: &str, subtree: bo
         rusqlite::params![task_id, subtree], |row| row.get(0),
     ).map_err(|e| AppError::Db(e.to_string()))?;
     if locked {
-        return Err(AppError::conflict("task_preview_locked", "请先在 Coach 中确认或放弃这项改动，再编辑受影响的任务。"));
+        return Err(AppError::conflict(
+            "task_preview_locked",
+            "请先在 Coach 中确认或放弃这项改动，再编辑受影响的任务。",
+        ));
     }
     Ok(())
 }
@@ -123,7 +130,12 @@ pub fn add_task(db: &Db, args: &AddTaskArgs, now: i64) -> AppResult<Mutation<Tas
     };
     let root_color_key = match args.root_color_key.as_deref() {
         Some(color) => Some(color.to_string()),
-        None => default_root_color(&tx, &args.cycle_id, cycle.cycle_type, args.parent_id.as_deref())?,
+        None => default_root_color(
+            &tx,
+            &args.cycle_id,
+            cycle.cycle_type,
+            args.parent_id.as_deref(),
+        )?,
     };
     let new = repo::NewTask {
         id: uuid::Uuid::new_v4().to_string(),

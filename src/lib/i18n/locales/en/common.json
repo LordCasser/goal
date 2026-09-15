@@ -1,0 +1,9 @@
+{
+  "duration.minutes_one": "{{count}} min",
+  "duration.minutes_other": "{{count}} min",
+  "duration.hours_one": "{{count}} h",
+  "duration.hours_other": "{{count}} h",
+  "duration.hoursMinutes": "{{hours}} h {{minutes}} min",
+  "error.generic": "Something went wrong. Please try again.",
+  "error.detail": "Could not complete the operation: {{detail}}"
+}

@@ -14,11 +14,13 @@ CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo t
 node node_modules/@tauri-apps/cli/tauri.js build --target <rust-target>
 ```
 
+前端运行时基线为 Safari 16.4、Chromium/WebView2 111 与 Firefox 128，对应 [Tailwind v4 要求](https://tailwindcss.com/docs/compatibility)。macOS 安装声明收敛为 13.3；Windows 安装器遇到 WebView2 低于 111 时会尝试更新。Linux 使用已更新的 Ubuntu 22.04 或更新发行版与 WebKitGTK 4.1，具体桌面会话和最低 WebKitGTK 版本仍需原生认证，不能仅凭 ABI 名称推断浏览器功能。
+
 Linux 的凭据运行时需要可用的 Secret Service（例如 `gnome-keyring`）；没有它时凭据读写应明确失败，不能回退到明文。CI 在独立的 `dbus-run-session` 中以一次性测试密码启动 `gnome-keyring-daemon --unlock --components=secrets`，再运行上述 `cargo test`；其他平台直接在本机 secure store 上测试。Linux 发布 runner 同时安装 `gnome-keyring` 和 `dbus-x11`。
 
 构建 hook 会清除并重建当前目标的 `dist`，写入只含 `platform` 和产品 `version` 的 `dist/desktop-build.json`，打包前再次核对目标与版本。Tauri 的 JSON Merge Patch 按平台合并以下文件：
 
-- `src-tauri/tauri.macos.conf.json`：`app`、`dmg`，最低 macOS 11.0。
+- `src-tauri/tauri.macos.conf.json`：`app`、`dmg`，最低 macOS 13.3。
 - `src-tauri/tauri.windows.conf.json`：NSIS，启动时 `visible: false` 且 `decorations: true`。
 - `src-tauri/tauri.linux.conf.json`：AppImage 与 deb，使用 WebKitGTK 4.1。
 
@@ -30,7 +32,7 @@ Linux 的凭据运行时需要可用的 Secret Service（例如 `gnome-keyring`�
 
 ## 发布矩阵
 
-`.github/workflows/release.yml` 是发布入口。它固定使用 Node 22.12.0、Rust 1.88.0，并以六个独立的原生 runner 构建；每个 job 都重新执行 `npm ci`、目标配置检查和 Tauri 构建。CI 直接以 Node 调用本地 `@tauri-apps/cli/tauri.js`，避免 Windows PowerShell 的 npm shim 吞掉 `--target` 参数。Linux runner 需要 WebKitGTK 4.1、GTK 3、GLib、librsvg、OpenSSL、DBus、libsecret、gnome-keyring、dbus-x11、pkg-config 和 patchelf；Windows runner 依赖 MSVC、WebView2 和 NSIS；macOS runner 依赖系统 SDK。
+`.github/workflows/release.yml` 是发布入口。它固定使用 Node 22.12.0、Rust 1.88.0，并以六个独立的原生 runner 构建；每个 job 都重新执行 `npm ci`、目标配置检查和 Tauri 构建。CI 直接以 Node 调用本地 `@tauri-apps/cli/tauri.js`，避免 Windows PowerShell 的 npm shim 吞掉 `--target` 参数。Linux runner 需要 WebKitGTK 4.1、GTK 3、GLib、librsvg、OpenSSL、DBus、libsecret、gnome-keyring、dbus-x11、xdg-utils、pkg-config 和 patchelf；Windows runner 依赖 MSVC、WebView2 和 NSIS；macOS runner 依赖系统 SDK。
 
 | 发布 ID | runner | Rust target | 产物 |
 | --- | --- | --- | --- |

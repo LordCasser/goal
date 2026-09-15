@@ -10,7 +10,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
 import { Button, EmptyState, Popover, cn } from "../../ui";
-import { formatDuration, todayISO } from "../planner/dates";
+import { todayISO } from "../planner/dates";
+import { useTranslation, formatDuration, formatDate } from "../../lib/i18n";
 import type { CalendarDay, TimeBudget } from "./api";
 import { budgetState, scheduleOverlapLanes } from "./calendar-model";
 import { createDragToken, readDragToken, SESSION_DRAG_TYPE, writeDragToken } from "./calendar-dnd";
@@ -46,6 +47,8 @@ export function DayTimeline({
   onCreateDay: (date: string) => void;
   onSchedule: (sessionId: string, startsAt: number | null, durationMs: number | null) => Promise<boolean>;
 }) {
+  const { t } = useTranslation("planning");
+  const displayDate = formatDate(date, { year: "numeric", month: "short", day: "numeric" });
   const timelineRef = useRef<HTMLDivElement>(null);
   const initialScrollDate = useRef<string | null>(null);
   const [draggingSession, setDraggingSession] = useState<{
@@ -149,7 +152,7 @@ export function DayTimeline({
   };
 
   return (
-    <section aria-label={`Day timeline ${date}`} className="flex min-h-0 flex-1 flex-col gap-3">
+    <section aria-label={t("calendar.timeline", { date: displayDate })} className="flex min-h-0 flex-1 flex-col gap-3">
       {day?.day_cycle ? (
         <>
           {/* 待排区：只有时长没有开始时间的专注块。 */}
@@ -165,12 +168,12 @@ export function DayTimeline({
             }}>
           {staged.length === 0 ? (
             <div data-testid="staging-area" className="flex min-h-8 items-center gap-2 text-caption">
-              <span className="font-medium text-secondary">Unscheduled</span>
-              <span className="text-hint">{draggingSession ? "Drop here to remove the time slot" : "All blocks scheduled"}</span>
+              <span className="font-medium text-secondary">{t("calendar.unscheduledTitle")}</span>
+              <span className="text-hint">{draggingSession ? t("calendar.unscheduledEmpty") : t("calendar.allScheduled")}</span>
             </div>
           ) : (
             <div data-testid="staging-area" className="flex flex-col gap-1.5">
-              <h3 className="text-block-title font-medium text-secondary">Unscheduled</h3>
+              <h3 className="text-block-title font-medium text-secondary">{t("calendar.unscheduledTitle")}</h3>
               {staged.map(({ session }) => (
                 <div
                   key={session.id}
@@ -179,8 +182,8 @@ export function DayTimeline({
                   draggable={session.duration !== null && canReschedule(session)}
                   title={
                     session.duration === null
-                      ? "Set a duration first — the timeline needs a length"
-                      : "Drag onto the timeline to give it a start time"
+                      ? t("calendar.durationNeeded")
+                      : t("calendar.dragToTimeline")
                   }
                   aria-disabled={!canReschedule(session) || undefined}
                   onDragStart={(event) => {
@@ -196,7 +199,7 @@ export function DayTimeline({
                   <span className={cn("truncate", session.finished && "text-hint line-through")}>
                     {session.title}
                   </span>
-                  <span className="ml-2 shrink-0 text-hint">{formatDuration(session.duration)}</span>
+                  <span className="ml-2 shrink-0 text-hint">{formatDuration(session.duration ?? 0)}</span>
                 </div>
               ))}
             </div>
@@ -273,12 +276,12 @@ export function DayTimeline({
                   <div className="min-w-0 flex-1 overflow-hidden" style={{ maxHeight: height }}>
                     <span className="block truncate font-medium leading-5">{session.title}</span>
                     {height >= 40 && <span className="block truncate text-[11px] leading-4 text-secondary">
-                      {localClock(slot.starts_at)}–{localClock(slot.ends_at)}{conflict ? " · overlaps" : ""}
+                      {localClock(slot.starts_at)}–{localClock(slot.ends_at)}{conflict ? ` · ${t("calendar.overlaps")}` : ""}
                     </span>}
                   </div>
                   {reorderable && <button type="button" draggable={false}
-                    aria-label={`Edit schedule for ${session.title}`} aria-haspopup="menu" aria-expanded={editingSessionId === session.id}
-                    title="Edit time and duration or move to Unscheduled"
+                    aria-label={t("calendar.editSchedule", { title: session.title })} aria-haspopup="dialog" aria-expanded={editingSessionId === session.id}
+                    title={t("calendar.editScheduleTitle")}
                     onClick={(event) => {
                       event.stopPropagation(); editAnchorRef.current = event.currentTarget;
                       setEditingSessionId(session.id); setEditingStart(localClock(slot.starts_at));
@@ -295,47 +298,47 @@ export function DayTimeline({
       ) : (
         // 该日还没有日周期：与工作台同款空状态，唯一入口一键创建。
         <EmptyState
-          title="Day plan"
-          description={`Nothing planned for ${date} yet.`}
+          title={t("calendar.dayPlanTitle")}
+          description={t("calendar.nothingPlanned", { date: displayDate })}
           action={
             <Button variant="primary" onClick={() => onCreateDay(date)}>
-              Create day plan
+              {t("calendar.createDay")}
             </Button>
           }
         />
       )}
 
       <Popover open={!!editingItem} onClose={() => { if (!saving) setEditingSessionId(null); }} anchorRef={editAnchorRef}
-        label="Focus block time" className="w-72 p-3">
+        role="dialog" label={t("calendar.focusBlockTime")} className="w-72 p-3">
         {editingItem && <>
           <p className="mb-1 truncate text-menu font-medium text-primary">{editingItem.session.title}</p>
-          <p className="mb-3 text-caption text-hint">{date}</p>
+          <p className="mb-3 text-caption text-hint">{displayDate}</p>
           <form onSubmit={(event) => { event.preventDefault(); finishTimeEdit(editingItem.session.id); }}>
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
               <div>
-                <label className="mb-1 block text-caption text-secondary" htmlFor="focus-start">Start time</label>
-                <input id="focus-start" aria-label={`Start time for ${editingItem.session.title}`} type="time" step={60}
+                <label className="mb-1 block text-caption text-secondary" htmlFor="focus-start">{t("calendar.startTime")}</label>
+                <input id="focus-start" aria-label={t("calendar.startTimeFor", { title: editingItem.session.title })} type="time" step={60}
                   required value={editingStart} disabled={saving} onChange={(event) => setEditingStart(event.target.value)}
                   className="h-10 w-full min-w-0 rounded-md border border-control bg-content px-2 py-2 text-menu text-primary outline-none focus:border-focus" />
               </div>
               <div>
-                <label className="mb-1 block text-caption text-secondary" htmlFor="focus-duration">Duration <span className="text-hint">· min</span></label>
-                  <input id="focus-duration" aria-label={`Duration in minutes for ${editingItem.session.title}`} type="number" min={1} step={1}
+                <label className="mb-1 block text-caption text-secondary" htmlFor="focus-duration">{t("calendar.durationMinutes")}</label>
+                  <input id="focus-duration" aria-label={t("calendar.durationFor", { title: editingItem.session.title })} type="number" min={1} step={1}
                     required value={editingDuration} disabled={saving} onChange={(event) => setEditingDuration(event.target.value)}
                     className="h-10 w-full min-w-0 rounded-md border border-control bg-content px-2 py-2 text-menu text-primary outline-none focus:border-focus" />
               </div>
             </div>
             <p className="my-3 min-h-4 text-caption text-hint" aria-live="polite">
-              {validEdit ? <>Ends at {localClock(editedEndsAt.getTime())}{endsOnAnotherDay && ` · ${editedEndsAt.toLocaleDateString("en", { month: "short", day: "numeric" })}`}</> : "Enter a start time and a whole number of minutes greater than 0."}
+              {validEdit ? <>{t("calendar.endsAt", { time: localClock(editedEndsAt.getTime()) })}{endsOnAnotherDay && ` · ${formatDate(editedEndsAt, { month: "short", day: "numeric" })}`}</> : t("calendar.editValidation")}
             </p>
             <div className="flex justify-end gap-2">
-              <Button disabled={saving} onClick={() => setEditingSessionId(null)}>Cancel</Button>
-              <Button type="submit" variant="primary" disabled={saving || !validEdit} aria-label={`Save schedule for ${editingItem.session.title}`}>{saving ? "Saving…" : "Save"}</Button>
+              <Button disabled={saving} onClick={() => setEditingSessionId(null)}>{t("calendar.cancel")}</Button>
+              <Button type="submit" variant="primary" disabled={saving || !validEdit} aria-label={t("calendar.saveSchedule", { title: editingItem.session.title })}>{saving ? t("calendar.saving") : t("calendar.save")}</Button>
             </div>
           </form>
-          <button type="button" disabled={saving} aria-label={`Move ${editingItem.session.title} to Unscheduled`}
+          <button type="button" disabled={saving} aria-label={t("calendar.moveUnscheduled", { title: editingItem.session.title })}
             onClick={() => void save(editingItem.session.id, null, null)}
-            className="mt-3 w-full border-t border-light pt-3 text-left text-caption text-secondary hover:text-primary disabled:opacity-50">Move to Unscheduled</button>
+            className="mt-3 w-full border-t border-light pt-3 text-left text-caption text-secondary hover:text-primary disabled:opacity-50">{t("calendar.moveToUnscheduled")}</button>
         </>}
       </Popover>
       <BudgetBar budget={budget} />
@@ -347,16 +350,18 @@ export function DayTimeline({
  * 预算条三态（tasks.md §5.8 的测试对象之一）：
  * unset → null（不渲染任何东西）；under → 进度 + 剩余；over → 危险色 + 超出量。
  */
+function budgetDuration(minutes: number, t: (key: string, options?: Record<string, unknown>) => string): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? t("calendar.hoursMinutesShort", { hours, minutes: rest }) : t("calendar.minutesShort", { count: rest });
+}
+
 export function BudgetBar({ budget }: { budget: TimeBudget | null }) {
+  const { t } = useTranslation("planning");
   if (budget === null) return null;
   const state = budgetState(budget);
   if (state.kind === "unset") return null; // 单点/未设置数据不渲染误导性图表
 
-  const hours = (minutes: number) => {
-    const h = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    return h > 0 ? `${h}h ${rest}m` : `${rest}m`;
-  };
   const percent = Math.min(
     100,
     Math.round((budget.scheduled_minutes / budget.capacity_minutes!) * 100),
@@ -366,12 +371,12 @@ export function BudgetBar({ budget }: { budget: TimeBudget | null }) {
     <div data-testid="budget-bar" className="flex flex-col gap-1">
       <div className="flex items-center justify-between text-caption">
         <span className="text-secondary">
-          {budget.scheduled_minutes} of {budget.capacity_minutes} min scheduled
+          {t("calendar.budgetScheduled", { scheduled: budget.scheduled_minutes, capacity: budget.capacity_minutes })}
         </span>
         {state.kind === "under" ? (
-          <span className="text-secondary">{hours(state.remainingMinutes)} left</span>
+          <span className="text-secondary">{t("calendar.left", { duration: budgetDuration(state.remainingMinutes, t) })}</span>
         ) : (
-          <span className="font-medium text-danger">Over by {hours(state.overMinutes)}</span>
+          <span className="font-medium text-danger">{t("calendar.overBy", { duration: budgetDuration(state.overMinutes, t) })}</span>
         )}
       </div>
       <div

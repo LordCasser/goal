@@ -37,8 +37,8 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::ai::agent::context::{load_context, render};
 use crate::ai::actions::{self, Action, PrioritizationAction};
+use crate::ai::agent::context::{load_context, render};
 use crate::ai::agent::prompt::planning_skill_for_cycle;
 use crate::ai::agent::turn::{ToolExecutor, ToolOutcome};
 use crate::ai::breakdown;
@@ -80,8 +80,9 @@ struct StartPlanningArgs {}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LoadSkillArgs { name: String }
-
+struct LoadSkillArgs {
+    name: String,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -167,13 +168,22 @@ impl ToolExecutor for ToolRegistry {
         }
         let mut definitions = vec![def_get_cycle_context(), def_get_task_details()];
         match skill {
-            AgentSkill::None => {},
+            AgentSkill::None => {}
             AgentSkill::PeriodAnalysis => definitions.push(def_get_period_context()),
             AgentSkill::PlanningIssues => definitions.push(def_get_planning_issues()),
             _ => {
-                definitions.extend([def_create_goal(), def_update_goal(), def_delete_goal(), def_update_goal_breakdown()]);
-                if skill == AgentSkill::Prioritization { definitions.push(def_update_prioritization_breakdown()); }
-                if skill == AgentSkill::Review { definitions.push(def_start_review()); }
+                definitions.extend([
+                    def_create_goal(),
+                    def_update_goal(),
+                    def_delete_goal(),
+                    def_update_goal_breakdown(),
+                ]);
+                if skill == AgentSkill::Prioritization {
+                    definitions.push(def_update_prioritization_breakdown());
+                }
+                if skill == AgentSkill::Review {
+                    definitions.push(def_start_review());
+                }
             }
         }
         definitions.extend(crate::ai::tool_catalog::definitions(skill));
@@ -214,23 +224,54 @@ impl ToolRegistry {
         cycle_id: &str,
         call: &ToolCallRecord,
     ) -> AppResult<(serde_json::Value, Option<AgentSkill>)> {
-        if ["create_goal","update_goal","delete_goal","update_goal_breakdown","update_prioritization_breakdown"].contains(&call.name.as_str()) && call.arguments.get("rationale").and_then(serde_json::Value::as_str).is_some_and(|r|r.trim().is_empty()) {
-            return Err(AppError::validation("missing_reason","A nonempty rationale is required"));
+        if [
+            "create_goal",
+            "update_goal",
+            "delete_goal",
+            "update_goal_breakdown",
+            "update_prioritization_breakdown",
+        ]
+        .contains(&call.name.as_str())
+            && call
+                .arguments
+                .get("rationale")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|r| r.trim().is_empty())
+        {
+            return Err(AppError::validation(
+                "missing_reason",
+                "A nonempty rationale is required",
+            ));
         }
         match call.name.as_str() {
             "load_skill" => {
                 let args: LoadSkillArgs = parse_args(call)?;
-                let skill = crate::ai::skills::Skill::parse(&args.name).ok_or_else(|| AppError::validation("unknown_skill", "Choose a skill name from the tool catalog."))?;
+                let skill = crate::ai::skills::Skill::parse(&args.name).ok_or_else(|| {
+                    AppError::validation(
+                        "unknown_skill",
+                        "Choose a skill name from the tool catalog.",
+                    )
+                })?;
                 let instructions = crate::ai::skills::load(skill)?;
-                Ok((json!({ "skill": skill.name(), "instructions": instructions }), Some(skill.agent_skill())))
+                Ok((
+                    json!({ "skill": skill.name(), "instructions": instructions }),
+                    Some(skill.agent_skill()),
+                ))
             }
             "get_period_context" => {
                 let args: crate::ai::period_analysis::PeriodRequest = parse_args(call)?;
-                Ok((serde_json::to_value(crate::ai::period_analysis::facts(db, &args)?).map_err(|e| AppError::Internal(e.to_string()))?, None))
+                Ok((
+                    serde_json::to_value(crate::ai::period_analysis::facts(db, &args)?)
+                        .map_err(|e| AppError::Internal(e.to_string()))?,
+                    None,
+                ))
             }
             "get_planning_issues" => {
                 let _: StartPlanningArgs = parse_args(call)?;
-                Ok((json!({ "issues": crate::ai::review::review_cycle(db, cycle_id) }), None))
+                Ok((
+                    json!({ "issues": crate::ai::review::review_cycle(db, cycle_id) }),
+                    None,
+                ))
             }
             // -- read (5.1) ------------------------------------------------
             "get_cycle_context" => {
@@ -570,8 +611,12 @@ fn update_goal(db: &Db, args: &UpdateGoalArgs) -> AppResult<serde_json::Value> {
     if let Some(title) = &args.title {
         input.title = title.clone();
     }
-    if let Some(completed) = args.completed { input.completed = completed; }
-    if let Some(subtasks) = &args.subtasks { input.subtasks = subtasks.clone(); }
+    if let Some(completed) = args.completed {
+        input.completed = completed;
+    }
+    if let Some(subtasks) = &args.subtasks {
+        input.subtasks = subtasks.clone();
+    }
     let mutation = proposals::apply_update_preview(db, &args.task_id, &input)?;
     Ok(json!({"status":"proposed", "task_id":mutation.value.id, "title":mutation.value.title}))
 }
@@ -1386,7 +1431,10 @@ mod tests {
         // the whole-cycle document before the user confirms it.
         let conn = db.pool().get().unwrap();
         let stored = prioritization::load_for_cycle(&conn, &cycle).unwrap();
-        assert!(stored.is_none(), "model call must not persist prioritization");
+        assert!(
+            stored.is_none(),
+            "model call must not persist prioritization"
+        );
         drop(conn);
 
         // Rejecting the pending action leaves the committed document empty.
@@ -1443,7 +1491,10 @@ mod tests {
         let stored = prioritization::load_for_cycle(&conn, &cycle)
             .unwrap()
             .unwrap();
-        assert!(stored.bottlenecks.is_empty(), "reject must preserve approved state");
+        assert!(
+            stored.bottlenecks.is_empty(),
+            "reject must preserve approved state"
+        );
         drop(conn);
 
         // An empty reason remains a validation error and must not create an
@@ -1608,15 +1659,21 @@ mod tests {
         let cycle = month_cycle(&db);
         let outcome = run(&db, &cycle, "load_skill", json!({"name":"period-analysis"}));
         assert_eq!(outcome.activated_skill, Some(AgentSkill::PeriodAnalysis));
-        assert!(outcome.result["instructions"].as_str().unwrap().contains("read-only"));
+        assert!(outcome.result["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"));
         let outcome = run(&db, &cycle, "load_skill", json!({"name":"daily-planning"}));
         assert_eq!(outcome.activated_skill, Some(AgentSkill::DailyPlanning));
         let bad = run(&db, &cycle, "load_skill", json!({"name":"../../outside"}));
-        assert!(bad.is_error); assert!(bad.activated_skill.is_none());
+        assert!(bad.is_error);
+        assert!(bad.activated_skill.is_none());
         for skill in [AgentSkill::PeriodAnalysis, AgentSkill::PlanningIssues] {
             let tools = ToolRegistry.definitions(skill, true);
             assert!(tools.iter().any(|t| t.name == "load_skill"));
-            assert!(!tools.iter().any(|t| t.name == "create_goal" || t.name == "delete_goal"));
+            assert!(!tools
+                .iter()
+                .any(|t| t.name == "create_goal" || t.name == "delete_goal"));
         }
     }
 
@@ -1625,28 +1682,48 @@ mod tests {
     #[test]
     fn definitions_match_the_skill_state() {
         let registry = ToolRegistry;
-        let skills=[AgentSkill::None, AgentSkill::GoalSetting, AgentSkill::LongTermPlanning, AgentSkill::ShortTermPlanning, AgentSkill::WeeklyPlanning, AgentSkill::DailyPlanning, AgentSkill::Prioritization, AgentSkill::Review, AgentSkill::PeriodAnalysis, AgentSkill::PlanningIssues];
-        let mut all=std::collections::BTreeSet::new();
+        let skills = [
+            AgentSkill::None,
+            AgentSkill::GoalSetting,
+            AgentSkill::LongTermPlanning,
+            AgentSkill::ShortTermPlanning,
+            AgentSkill::WeeklyPlanning,
+            AgentSkill::DailyPlanning,
+            AgentSkill::Prioritization,
+            AgentSkill::Review,
+            AgentSkill::PeriodAnalysis,
+            AgentSkill::PlanningIssues,
+        ];
+        let mut all = std::collections::BTreeSet::new();
         for skill in skills {
-            let defs=registry.definitions(skill,true);
-            assert!(defs.len()<=19);
-            assert!(registry.definitions(skill,false).is_empty());
-            let names:Vec<_>=defs.iter().map(|d|d.name.as_str()).collect();
+            let defs = registry.definitions(skill, true);
+            assert!(defs.len() <= 19);
+            assert!(registry.definitions(skill, false).is_empty());
+            let names: Vec<_> = defs.iter().map(|d| d.name.as_str()).collect();
             assert!(names.contains(&"load_skill"));
             assert!(!names.contains(&"move_goal"));
             assert!(!names.contains(&"resolve_agent_action"));
-            assert_eq!(names.contains(&"propose_settings"),skill==AgentSkill::None);
-            if matches!(skill,AgentSkill::PeriodAnalysis|AgentSkill::PlanningIssues) {
-                assert!(!names.iter().any(|n|n.starts_with("propose_")||n.starts_with("update_")||n.starts_with("create_")||n.starts_with("delete_")));
+            assert_eq!(
+                names.contains(&"propose_settings"),
+                skill == AgentSkill::None
+            );
+            if matches!(
+                skill,
+                AgentSkill::PeriodAnalysis | AgentSkill::PlanningIssues
+            ) {
+                assert!(!names.iter().any(|n| n.starts_with("propose_")
+                    || n.starts_with("update_")
+                    || n.starts_with("create_")
+                    || n.starts_with("delete_")));
             }
             for def in defs {
                 assert!(!def.description.is_empty());
-                assert_eq!(def.input_schema["type"],"object");
-                assert_eq!(def.input_schema["additionalProperties"],false);
+                assert_eq!(def.input_schema["type"], "object");
+                assert_eq!(def.input_schema["additionalProperties"], false);
                 all.insert(def.name);
             }
         }
-        assert_eq!(all.len(),24);
+        assert_eq!(all.len(), 24);
     }
 
     // -- write tools respect ended cycles via the service rule -----------------

@@ -16,6 +16,7 @@ import { getPlannerState, getSettings, LATER_CYCLE_ID, startPlanning } from "./l
 import { initEventInvalidation, invalidateAgentEffects, qk } from "./lib/events";
 import { PanelMotion } from "./ui/PanelMotion";
 import { applyTheme, isTheme } from "./lib/theme";
+import { applyLocale, isLocale } from "./lib/i18n";
 
 /**
  * Workspace shell: the unified window bar on top, the optional Later panel on
@@ -110,6 +111,10 @@ export default function App() {
     const theme = settings?.theme;
     if (isTheme(theme)) applyTheme(theme);
   }, [settings?.theme]);
+
+  useEffect(() => {
+    if (isLocale(settings?.locale)) applyLocale(settings.locale);
+  }, [settings?.locale]);
 
   // The platform primary modifier toggles Later, outside modal interactions.
   useEffect(() => {

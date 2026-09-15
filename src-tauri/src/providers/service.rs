@@ -47,9 +47,15 @@ impl AiSettingsState {
 /// Shared by the settings selector and a human-approved Coach action.
 /// Callers hold `mutations` while validating and activating the exact pair.
 pub fn activate_model(ai: &AiSettingsState, provider_id: &str, model_id: &str) -> AppResult<()> {
-    let provider = ai.store.get(provider_id).ok_or_else(|| crate::error::AppError::not_found("provider", provider_id))?;
+    let provider = ai
+        .store
+        .get(provider_id)
+        .ok_or_else(|| crate::error::AppError::not_found("provider", provider_id))?;
     if provider.connection_verified_at.is_none() {
-        return Err(crate::error::AppError::validation("provider_not_verified", "Test the provider connection before activating it."));
+        return Err(crate::error::AppError::validation(
+            "provider_not_verified",
+            "Test the provider connection before activating it.",
+        ));
     }
     ai.store.set_active_model(provider_id, model_id)
 }

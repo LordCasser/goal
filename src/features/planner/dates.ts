@@ -5,6 +5,8 @@
  * starts_on 的说明）。展示格式固定英文短格式，与列头大写标识一致。
  */
 
+import { formatDate as localizedDate, formatDuration as localizedDuration } from "../../lib/i18n";
+
 const MS_PER_DAY = 86_400_000;
 
 /** 本地时区的今天，`YYYY-MM-DD`（design.md §9.2：时长预览用本地今天）。 */
@@ -64,24 +66,14 @@ export function isoWeekNumber(iso: string): number | null {
   return Math.ceil(((thursday.getTime() - yearStart) / MS_PER_DAY + 1) / 7);
 }
 
-function utcFormatter(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  // timeZone 固定 UTC：直接用 ISO 字符串构造 UTC 午夜，格式化不漂移。
-  return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" });
-}
-
-const shortDateFmt = utcFormatter({ month: "short", day: "numeric" });
-const weekdayFmt = utcFormatter({ weekday: "long" });
-
-/** `Sep 15`；非法输入返回原串。 */
+/** Locale-aware short date display; ISO-only values remain local calendar dates. */
 export function formatShortDate(iso: string): string {
-  const day = parseISODay(iso);
-  return day === null ? iso : shortDateFmt.format(new Date(day * MS_PER_DAY));
+  return localizedDate(iso, { month: "short", day: "numeric" });
 }
 
-/** `Tuesday`；非法输入返回原串。 */
+/** Locale-aware weekday display for a date-only identifier. */
 export function weekdayName(iso: string): string {
-  const day = parseISODay(iso);
-  return day === null ? iso : weekdayFmt.format(new Date(day * MS_PER_DAY));
+  return localizedDate(iso, { weekday: "long" });
 }
 
 /** `Sep 14 – Sep 20`；起止相同只显示一端。 */
@@ -99,15 +91,10 @@ export function remainingWeeks(endsOn: string | null, today: string): number | n
   return left <= 0 ? 0 : Math.ceil(left / 7);
 }
 
-/** 毫秒 → `45m` / `1h 30m`；null（未设时长）返回 "—"。 */
+/** 毫秒 → 当前语言的时长；null（未设时长）返回 "—"。 */
 export function formatDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return "—";
-  const totalMinutes = Math.floor(ms / 60_000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours <= 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+  return localizedDuration(ms);
 }
 
 /** 毫秒 → `12:34` / `1:02:03`；负数钳到 0（计时读数不出现负号）。 */

@@ -148,6 +148,47 @@ describe("useDesktopWindow", () => {
     expect(screen.getByTestId("window-state").textContent).toBe("native|false|true|false");
   });
 
+  it("falls back from a rejected pending shell handshake without showing custom controls", async () => {
+    const native = nativeWindow();
+    const pending: ShellState = { mode: "pending", revision: 1, maximized: false, focused: true };
+    const ipc = ipcMocks(pending);
+    ipc.getState.mockRejectedValueOnce(new Error("permission denied"));
+    const { useDesktopWindow } = await loadHook("windows", native, ipc);
+    render(<Harness useDesktopWindow={useDesktopWindow} />);
+
+    await waitFor(() => expect(screen.getByTestId("window-state").textContent).toBe("native|false|true|false"));
+    expect(ipc.ready).not.toHaveBeenCalled();
+  });
+
+  it("falls back from a rejected pending ready call", async () => {
+    const native = nativeWindow();
+    const pending: ShellState = { mode: "pending", revision: 1, maximized: false, focused: true };
+    const ipc = ipcMocks(pending);
+    ipc.ready.mockRejectedValueOnce(new Error("ready denied"));
+    const { useDesktopWindow } = await loadHook("windows", native, ipc);
+    render(<Harness useDesktopWindow={useDesktopWindow} />);
+
+    await waitFor(() => expect(ipc.ready).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId("window-state").textContent).toBe("native|false|true|false"));
+  });
+
+  it("keeps custom controls visible when a later custom layout update fails", async () => {
+    const native = nativeWindow();
+    const pending: ShellState = { mode: "pending", revision: 1, maximized: false, focused: true };
+    const custom: ShellState = { mode: "custom", revision: 2, maximized: true, focused: true };
+    const ipc = ipcMocks(pending, custom);
+    ipc.getState.mockResolvedValueOnce(pending).mockResolvedValue(custom);
+    ipc.regions.mockRejectedValue(new Error("transient resize failure"));
+    const { useDesktopWindow } = await loadHook("windows", native, ipc);
+    render(<Harness useDesktopWindow={useDesktopWindow} />);
+
+    await waitFor(() => expect(screen.getByTestId("window-state").textContent).toBe("custom|true|true|false"));
+    const onResize = native.onResized.mock.calls[0]?.[0] as (() => void) | undefined;
+    onResize?.();
+    await waitFor(() => expect(ipc.regions).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("window-state").textContent).toBe("custom|true|true|false");
+  });
+
   it("executes a Windows action once and refreshes state from the native window", async () => {
     const native = nativeWindow();
     const pending: ShellState = { mode: "pending", revision: 1, maximized: false, focused: true };

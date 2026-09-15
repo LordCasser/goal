@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Button, Dialog } from "../../ui";
+import { useTranslation } from "../../lib/i18n";
 import {
   acknowledgeExitPollShown,
   continueAfterExitPoll,
@@ -30,13 +31,14 @@ export interface ExitPollDialogProps {
 }
 
 const REASONS: Array<{ value: string; label: string }> = [
-  { value: "missing_feature", label: "A feature I need is missing" },
-  { value: "too_complicated", label: "It felt too complicated" },
-  { value: "did_not_stick", label: "I didn't keep up the habit" },
-  { value: "other", label: "Something else" },
+  { value: "missing_feature", label: "onboarding.exit.reason.missingFeature" },
+  { value: "too_complicated", label: "onboarding.exit.reason.tooComplicated" },
+  { value: "did_not_stick", label: "onboarding.exit.reason.didNotStick" },
+  { value: "other", label: "onboarding.exit.reason.other" },
 ];
 
 export function ExitPollDialog({ open, onClose }: ExitPollDialogProps) {
+  const { t } = useTranslation("shell");
   const [reason, setReason] = useState<string>("missing_feature");
   const [detail, setDetail] = useState("");
   const [rating, setRating] = useState<number | null>(null);
@@ -83,12 +85,12 @@ export function ExitPollDialog({ open, onClose }: ExitPollDialogProps) {
     <Dialog
       open={open}
       onClose={() => void run("dismissed")}
-      title="Before you go — what got in the way?"
+      title={t("onboarding.exit.title")}
     >
       <div className="flex flex-col gap-4">
         <fieldset className="flex flex-col gap-2">
           <legend className="text-body font-medium text-primary">
-            What kept you from using the app?
+            {t("onboarding.exit.reasonLegend")}
           </legend>
           {REASONS.map((option) => (
             <label
@@ -102,25 +104,25 @@ export function ExitPollDialog({ open, onClose }: ExitPollDialogProps) {
                 checked={reason === option.value}
                 onChange={() => setReason(option.value)}
               />
-              {option.label}
+              {t(option.label)}
             </label>
           ))}
         </fieldset>
         <label className="flex flex-col gap-1">
           <span className="text-body font-medium text-primary">
-            Anything you would like to tell us? (optional)
+            {t("onboarding.exit.detailLabel")}
           </span>
           <textarea
             value={detail}
             onChange={(event) => setDetail(event.target.value)}
             rows={3}
             className="w-full rounded-sm border border-control bg-content px-2 py-1 text-[14px] text-primary placeholder:text-hint"
-            placeholder="A sentence is plenty."
+            placeholder={t("onboarding.exit.detailPlaceholder")}
           />
         </label>
         <fieldset className="flex items-center gap-2">
           <legend className="text-body font-medium text-primary">
-            How likely are you to come back?
+            {t("onboarding.exit.ratingLegend")}
           </legend>
           {[1, 2, 3, 4, 5].map((value) => (
             <button
@@ -145,14 +147,14 @@ export function ExitPollDialog({ open, onClose }: ExitPollDialogProps) {
           disabled={settling}
           onClick={() => void run("continued")}
         >
-          Keep using the app
+          {t("onboarding.exit.keepUsing")}
         </Button>
         <Button
           variant="primary"
           loading={settling}
           onClick={() => void run("submitted")}
         >
-          Submit and quit
+          {t("onboarding.exit.submitQuit")}
         </Button>
       </div>
     </Dialog>

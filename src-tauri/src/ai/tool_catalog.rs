@@ -50,6 +50,7 @@ pub fn definitions(skill: AgentSkill) -> Vec<ToolDef> {
     if skill == AgentSkill::None {
         defs.push(ToolDef::new("get_settings","Read user preferences and saved, verified provider/model choices. Credentials, endpoints and headers are excluded. To change a setting, propose_settings then wait for GUI approval.",object(json!({}),&[])));
         defs.push(proposal("propose_settings","Change one preference or activate one previously verified provider/model pair. Null explicitly disables the nullable setting; never enter API keys here.",vec![
+            variant("setting","locale",json!({"value":choice(&["en","zh-CN"])}),&["value"]),
             variant("setting","theme",json!({"value":choice(&["white","gray"])}),&["value"]),
             variant("setting","week_start_day",json!({"value":{"type":"integer","minimum":1,"maximum":7,"description":"1=Monday … 7=Sunday"}}),&["value"]),
             variant("setting","coach_idle_minutes",json!({"value":duration()}),&["value"]),

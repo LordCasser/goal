@@ -53,8 +53,14 @@ fn manual_creation_spreads_long_term_root_colors_and_leaves_other_levels_uncolor
     tasks::set_task_parent_link(&db.db, &daily.id, Some(&weekly.id)).unwrap();
     let later = add_task(&db.db, LATER_CYCLE_ID, "Later", NOW + 8);
 
-    assert_eq!(weekly.root_color_key, None, "weekly rows inherit through links");
-    assert_eq!(daily.root_color_key, None, "daily rows inherit through links");
+    assert_eq!(
+        weekly.root_color_key, None,
+        "weekly rows inherit through links"
+    );
+    assert_eq!(
+        daily.root_color_key, None,
+        "daily rows inherit through links"
+    );
     assert_eq!(later.root_color_key, None, "Later does not allocate colors");
 }
 
@@ -127,7 +133,10 @@ fn ai_preview_reuses_or_creates_colored_roots_and_rejection_restores_state() {
     let month = create_long_term(&db.db, TODAY, 1);
     let empty = add_task(&db.db, &month.id, "", NOW);
     let allocated_color = empty.root_color_key.clone();
-    assert!(allocated_color.is_some(), "blank root is preallocated deterministically");
+    assert!(
+        allocated_color.is_some(),
+        "blank root is preallocated deterministically"
+    );
 
     let reused = proposals::apply_upsert_preview(
         &db.db,
@@ -162,9 +171,11 @@ fn ai_preview_reuses_or_creates_colored_roots_and_rejection_restores_state() {
     .value;
     assert_eq!(explicit.root_color_key.as_deref(), Some("indigo"));
     proposals::undo_task_preview(&db.db, &explicit.id).unwrap();
-    assert!(planner_lib::repository::tasks::get(&db.conn(), &explicit.id)
-        .unwrap()
-        .is_none());
+    assert!(
+        planner_lib::repository::tasks::get(&db.conn(), &explicit.id)
+            .unwrap()
+            .is_none()
+    );
 
     let fresh = proposals::apply_upsert_preview(
         &db.db,

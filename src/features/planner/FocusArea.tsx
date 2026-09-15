@@ -11,9 +11,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Input, ProgressDot } from "../../ui";
 import { addSession, finishCycle, startCycle, type Cycle } from "../../lib/ipc";
-import { formatClock, formatDuration } from "./dates";
+import { formatClock } from "./dates";
 import { invalidateCycles, useActionError } from "./actions";
 import { CycleOptionsMenu } from "./CycleOptionsMenu";
+import { useTranslation, formatDuration as formatLocalizedDuration } from "../../lib/i18n";
 
 const DURATION_PRESETS: ReadonlyArray<{ label: string; ms: number | null }> = [
   { label: "No duration", ms: null },
@@ -44,6 +45,7 @@ export function FocusArea({
   sessions: Cycle[];
   runningSessionId: string | null;
 }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const locked = day.finished;
   const [adding, setAdding] = useState(false);
@@ -65,26 +67,25 @@ export function FocusArea({
   };
 
   return (
-    <section aria-label="Focus blocks" className="flex h-full min-h-0 flex-col">
+    <section aria-label={t("focus.blocks")} className="flex h-full min-h-0 flex-col">
       <header className="shrink-0 border-b border-light px-6 pb-5 pt-5">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-caption font-medium text-secondary">Time blocks</span>
-          {!locked && <Button size="icon" variant="ghost" aria-label="Add focus block" title="Add focus block" onClick={() => setAdding(true)}>
+          <h3 className="text-section-title font-semibold text-primary">{t("focus.blocks")}</h3>
+          {!locked && <Button size="icon" variant="ghost" aria-label={t("focus.add")} title={t("focus.add")} onClick={() => setAdding(true)}>
             <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M8 3v10M3 8h10" strokeLinecap="round" /></svg>
           </Button>}
         </div>
-        <h3 className="mt-1 text-section-title font-semibold text-primary">Focus blocks</h3>
         <p className="mt-0.5 text-caption text-hint">
-          {formatDuration(day.focused_time)} focused · {formatDuration(sorted.reduce((sum, session) => sum + (session.duration ?? 0), 0))} planned
+          {t("focus.focusedPlanned", { focused: formatLocalizedDuration(day.focused_time), planned: formatLocalizedDuration(sorted.reduce((sum, session) => sum + (session.duration ?? 0), 0)) })}
         </p>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
       {sorted.length === 0 && !adding && (
         <div className="rounded-lg border border-light bg-content px-5 py-6">
           <svg className="mb-4 h-7 w-7 text-hint" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="2" /><path d="M4 3h16M4 21h16" strokeLinecap="round" /></svg>
-          <p className="text-block-title font-medium text-primary">Make time for your day</p>
-          <p className="mb-4 mt-2 text-menu text-secondary">Set aside a stretch of time for what needs your attention.</p>
-          {!locked && <Button size="compact" onClick={() => setAdding(true)}>Add your first block</Button>}
+          <p className="text-block-title font-medium text-primary">{t("focus.makeTime")}</p>
+          <p className="mb-4 mt-2 text-menu text-secondary">{t("focus.description")}</p>
+          {!locked && <Button size="compact" onClick={() => setAdding(true)}>{t("focus.addFirst")}</Button>}
         </div>
       )}
       <ol className="flex flex-col gap-3">
@@ -110,26 +111,26 @@ export function FocusArea({
                 <p className="flex items-baseline gap-1.5 text-block-title font-semibold text-primary">
                   <span className="truncate">{session.title}</span>
                   {session.repeat_id && (
-                    <span className="text-caption font-normal text-hint" title="Repeats daily">
-                      ↻ daily
+                    <span className="text-caption font-normal text-hint" title={t("focus.repeatDaily")}>
+                      ↻ {t("focus.repeatDaily")}
                     </span>
                   )}
                 </p>
                 <p className="text-caption text-hint">
                   {session.finished
-                    ? `${formatDuration(session.focused_time)} / ${formatDuration(session.duration)}`
-                    : `${formatDuration(session.duration)} planned`}
+                    ? `${formatLocalizedDuration(session.focused_time)} / ${formatLocalizedDuration(session.duration ?? 0)}`
+                    : t("focus.planned", { duration: formatLocalizedDuration(session.duration ?? 0) })}
                 </p>
               </div>
               {running && remaining !== null && (
                 /* 计时读数：等宽数字 + 固定字号，逐秒更新不抖布局（§4.2/§10）。 */
-                <span className="text-timer tabular-nums text-accent-strong" aria-label="Time remaining">
+                <span className="text-timer tabular-nums text-accent-strong" aria-label={t("focus.timeRemaining")}>
                   {formatClock(remaining)}
                 </span>
               )}
               {running ? (
                 <Button size="compact" onClick={() => void onStop(session)}>
-                  Stop
+                  {t("focus.stop")}
                 </Button>
               ) : (
                 !session.finished &&
@@ -143,14 +144,14 @@ export function FocusArea({
                     }
                     title={
                       hasRunning && session.id !== runningSessionId
-                        ? "Another focus block is running"
+                        ? t("focus.anotherRunning")
                         : session.duration === null || session.duration <= 0
-                          ? "Set a duration first"
-                          : "Start this focus block"
+                          ? t("focus.durationFirst")
+                          : t("focus.start")
                     }
                     onClick={() => void onStart(session)}
                   >
-                    Start
+                    {t("focus.start")}
                   </Button>
                 )
               )}
@@ -191,6 +192,7 @@ function AddFocusBlockForm({
   onCancel: () => void;
   onAdded: () => void;
 }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [durationMs, setDurationMs] = useState<number | null>(null);
@@ -228,8 +230,8 @@ function AddFocusBlockForm({
       <Input
         autoFocus
         value={title}
-        aria-label="Focus block title"
-        placeholder="Focus block title"
+        aria-label={t("focus.addTitle")}
+        placeholder={t("focus.addTitle")}
         disabled={saving}
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={(e) => {
@@ -242,7 +244,7 @@ function AddFocusBlockForm({
           const selected = durationMs === preset.ms;
           return (
             <button
-              key={preset.label}
+              key={preset.ms === null ? t("focus.noDuration") : t(`focus.preset${preset.ms / 60_000}`)}
               type="button"
               aria-pressed={selected}
               onClick={() => setDurationMs(preset.ms)}
@@ -252,16 +254,16 @@ function AddFocusBlockForm({
                 selected ? "border-focus bg-focus-surface text-focus" : "border-control text-secondary hover:bg-hover",
               ].join(" ")}
             >
-              {preset.label}
+              {preset.ms === null ? t("focus.noDuration") : t(`focus.preset${preset.ms / 60_000}`)}
             </button>
           );
         })}
         <span className="flex-1" />
         <Button type="submit" size="compact" variant="primary" loading={saving} disabled={!title.trim()}>
-          Add
+          {t("focus.add")}
         </Button>
         <Button type="button" size="compact" onClick={onCancel} disabled={saving}>
-          Cancel
+          {t("focus.cancel")}
         </Button>
       </div>
       {error && (

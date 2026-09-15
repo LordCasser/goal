@@ -4,6 +4,7 @@ import { TaskList } from "../planner/TaskList";
 import { taskColor, type RelationView } from "../planner/relations";
 import { calendarTasks } from "./calendar-model";
 import { PlanWithAI } from "../agent/PlanWithAI";
+import { useTranslation, formatDate } from "../../lib/i18n";
 
 /** Calendar edits the existing day workspace; goal context uses the same task ids and colors. */
 export function CalendarPlan({ active = true, date, day, cycles, workspaces, relations, onCreateDay, onReviewIssues, onPlanWithAI }: {
@@ -17,6 +18,8 @@ export function CalendarPlan({ active = true, date, day, cycles, workspaces, rel
   onReviewIssues?: (cycleId: string) => void;
   onPlanWithAI?: (cycleId: string) => void;
 }) {
+  const { t } = useTranslation("planning");
+  const displayDate = formatDate(date, { year: "numeric", month: "short", day: "numeric" });
   const week = cycles.find((cycle) => cycle.type === "week" && cycle.starts_on && cycle.ends_on && cycle.starts_on <= date && date < cycle.ends_on);
   const weeklyTasks = calendarTasks(week ? workspaces[week.id]?.tasks ?? [] : []);
   const longTermGoals = new Map<string, TaskNode>();
@@ -30,32 +33,32 @@ export function CalendarPlan({ active = true, date, day, cycles, workspaces, rel
     }
   }
   const goalRow = (task: TaskNode) => <button key={task.id} type="button" title={task.title}
-    aria-label={`Show connections for ${task.title}`} onClick={() => relations.select(task.id)}
+    aria-label={t("calendar.showConnections", { title: task.title })} onClick={() => relations.select(task.id)}
     className={cn("flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-menu hover:bg-hover",
       relations.highlighted.has(task.id) && "bg-focus-surface", task.completed && "text-hint line-through")}>
     <span className="task-color-slot mt-0.5 shrink-0" aria-hidden="true" style={{ backgroundColor: taskColor(task, relations.tasks) ?? "transparent", borderColor: taskColor(task, relations.tasks) ?? undefined }} />
     <span>{task.title}</span>
   </button>;
 
-  return <div className="min-h-0 flex-1 overflow-y-auto" aria-label={`Day plan ${date}`}>
+  return <div className="min-h-0 flex-1 overflow-y-auto" aria-label={t("calendar.dayPlan", { date: displayDate })}>
     <section className="plan-ai-scope pb-4">
-      <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.06em] text-secondary">Daily tasks</h3>
+      <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.06em] text-secondary">{t("calendar.dailyTasks")}</h3>
       {day ? <TaskList active={active} key={day.id} cycleId={day.id} cycleType="day" locked={day.finished} relations={relations}
         onReviewIssues={onReviewIssues ? () => onReviewIssues(day.id) : undefined} />
         : <div className="rounded-lg border border-light p-3">
-          <p className="mb-3 text-menu text-secondary">No day plan yet. Add tasks when you are ready.</p>
-          <Button size="compact" onClick={() => onCreateDay(date)}>Create day plan</Button>
+          <p className="mb-3 text-menu text-secondary">{t("calendar.noDayPlan")}</p>
+          <Button size="compact" onClick={() => onCreateDay(date)}>{t("calendar.createDay")}</Button>
         </div>}
       {day && onPlanWithAI && <PlanWithAI active={active} cycle={day} onPlan={onPlanWithAI} />}
     </section>
-    <section className="border-t border-light py-4" aria-label="Weekly goals">
-      <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.06em] text-secondary">Weekly goals</h3>
-      {weeklyTasks.length ? weeklyTasks.map(goalRow) : <p className="text-caption text-hint">No tasks in this week yet.</p>}
+    <section className="border-t border-light py-4" aria-label={t("calendar.weeklyGoals")}>
+      <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.06em] text-secondary">{t("calendar.weeklyGoals")}</h3>
+      {weeklyTasks.length ? weeklyTasks.map(goalRow) : <p className="text-caption text-hint">{t("calendar.noWeekTasks")}</p>}
     </section>
-    <section className="border-t border-light py-4" aria-label="Long-term goals">
-      <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.06em] text-secondary">Long-term goals</h3>
-      {longTermGoals.size ? [...longTermGoals.values()].map(goalRow) : <p className="text-caption text-hint">No long-term goals linked. Weekly and daily tasks can stay independent.</p>}
+    <section className="border-t border-light py-4" aria-label={t("calendar.longTermGoals")}>
+      <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.06em] text-secondary">{t("calendar.longTermGoals")}</h3>
+      {longTermGoals.size ? [...longTermGoals.values()].map(goalRow) : <p className="text-caption text-hint">{t("calendar.noLongTerm")}</p>}
     </section>
-    <p className="text-caption text-hint">Select a goal to highlight its related work. Colors match Workspace.</p>
+    <p className="text-caption text-hint">{t("calendar.selectGoal")}</p>
   </div>;
 }

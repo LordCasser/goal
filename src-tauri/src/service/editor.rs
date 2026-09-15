@@ -105,15 +105,23 @@ fn workspace_for(conn: &rusqlite::Connection, cycle_id: &str) -> AppResult<Edito
     let mut tasks = tasks_repo::list_with_proposals_by_cycle(conn, cycle_id)?;
     // An ancestor deletion cascades through links, even across planning levels.
     // Project that effect into the editor without creating extra proposals.
-    let mut statement = conn.prepare("WITH RECURSIVE affected(id) AS (
+    let mut statement = conn
+        .prepare(
+            "WITH RECURSIVE affected(id) AS (
         SELECT id FROM tasks WHERE proposal = 'delete'
         UNION SELECT t.id FROM tasks t JOIN affected a ON t.parent_id = a.id
-    ) SELECT id FROM affected").map_err(|e| crate::error::AppError::Db(e.to_string()))?;
-    let deleting = statement.query_map([], |row| row.get::<_, String>(0))
+    ) SELECT id FROM affected",
+        )
+        .map_err(|e| crate::error::AppError::Db(e.to_string()))?;
+    let deleting = statement
+        .query_map([], |row| row.get::<_, String>(0))
         .map_err(|e| crate::error::AppError::Db(e.to_string()))?
-        .collect::<Result<HashSet<_>, _>>().map_err(|e| crate::error::AppError::Db(e.to_string()))?;
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|e| crate::error::AppError::Db(e.to_string()))?;
     for task in &mut tasks {
-        if deleting.contains(&task.id) { task.proposal = Some(crate::domain::proposal::ProposalKind::Delete); }
+        if deleting.contains(&task.id) {
+            task.proposal = Some(crate::domain::proposal::ProposalKind::Delete);
+        }
     }
     Ok(EditorWorkspace {
         work_mix: work_mix(conn, &cycle, &tasks)?,

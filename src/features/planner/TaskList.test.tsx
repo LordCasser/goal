@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Cycle, TaskNode } from "../../lib/ipc";
 const mocks = vi.hoisted(() => ({ getEditorWorkspace: vi.fn(), getPreviewSummary: vi.fn(), addTask: vi.fn(), patchTask: vi.fn(), reorderTasks: vi.fn(), setTaskParentLink: vi.fn() }));
@@ -7,6 +7,7 @@ vi.mock("../../lib/ipc", async (original) => ({ ...(await original<typeof import
 import { TaskList } from "./TaskList";
 import { TASK_DRAG_TYPE, TaskDragProvider } from "./TaskDragContext";
 import { indexTasks, type RelationView } from "./relations";
+import { applyLocale } from "../../lib/i18n";
 const empty = { id: "empty", title: "", parent_id: null, completed: false, children: [], proposal: null } as unknown as TaskNode;
 function mount(active = true) { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><TaskList active={active} cycleId="c1" cycleType="day" locked={false} /></QueryClientProvider>); }
 beforeEach(() => {
@@ -63,10 +64,10 @@ describe("task drag interactions", () => {
   });
   it("rolls an optimistic reorder back and reports a persistence failure", async () => {
     mocks.getEditorWorkspace.mockResolvedValue({ tasks: [task("First"), task("Second"), empty] });
-    mocks.reorderTasks.mockRejectedValue({ code: "db_error", message: "Order could not be saved" });
+    mocks.reorderTasks.mockRejectedValue({ code: "db_error", message: "Could not access local data. Try again or check the diagnostic logs." });
     mount(); await screen.findByDisplayValue("Second");
     fireEvent.drop(row("Second"), { dataTransfer: start("First") });
-    await screen.findByText("Order could not be saved");
+    await screen.findByText("Could not access local data. Try again or check the diagnostic logs.");
     expect((screen.getAllByRole("textbox")[0] as HTMLTextAreaElement).value).toBe("First");
   });
   it("cancels with Escape and ignores subsequent stale or unrelated drops", async () => {
@@ -138,6 +139,22 @@ describe("task drag interactions", () => {
   });
 });
 describe("task editing", () => {
+  it("localizes goal color names in the picker and current color label", async () => {
+    await act(async () => { applyLocale("zh-CN"); });
+    try {
+      mocks.getEditorWorkspace.mockResolvedValue({ tasks: [{ ...empty, id: "goal", title: "Goal", root_color_key: "blue" }, empty] });
+      render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <TaskList active cycleId="month" cycleType="month" locked={false} />
+      </QueryClientProvider>);
+      const color = await screen.findByRole("button", { name: "目标颜色: 蓝色" });
+      fireEvent.click(color);
+      expect(await screen.findByRole("menuitem", { name: "蓝色" })).toBeTruthy();
+      expect(screen.queryByRole("menuitem", { name: "blue" })).toBeNull();
+    } finally {
+      await act(async () => { applyLocale("en"); });
+    }
+  });
+
   it("a retained inactive editor does not create an input row", async () => {
     mocks.getEditorWorkspace.mockResolvedValue({ tasks: [{ ...empty, id: "goal", title: "Existing task" }] });
     mount(false);
@@ -159,12 +176,12 @@ describe("task editing", () => {
     expect(mocks.addTask).not.toHaveBeenCalled();
   });
   it("keeps the draft and stops advancing when saving fails", async () => {
-    mocks.patchTask.mockRejectedValue({ code: "db_error", message: "Save failed" });
+    mocks.patchTask.mockRejectedValue({ code: "db_error", message: "Could not access local data. Try again or check the diagnostic logs." });
     mount();
     const input = await screen.findByRole("textbox");
     fireEvent.change(input, { target: { value: "Write the outline" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await screen.findByText("Save failed");
+    await screen.findByText("Could not access local data. Try again or check the diagnostic logs.");
     expect((input as HTMLInputElement).value).toBe("Write the outline");
     expect(mocks.addTask).not.toHaveBeenCalled();
   });

@@ -116,6 +116,9 @@ pub enum RepeatAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "setting", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SettingAction {
+    Locale {
+        value: String,
+    },
     Theme {
         value: String,
     },
@@ -194,8 +197,11 @@ pub struct PendingAction {
     pub action: Action,
     pub rationale: String,
     pub summary: String,
-    pub details: Vec<String>,
+    pub summary_key: String,
+    pub details: Vec<crate::i18n::LocalizedMessage>,
     pub state: String,
+    #[serde(skip)]
+    legacy_details: bool,
 }
 
 fn invalid(message: impl Into<String>) -> AppError {
@@ -246,7 +252,9 @@ impl Action {
                 minutes(*duration_minutes)?;
             }
             Self::Focus(FocusAction::Schedule { starts_at, .. }) => {
-                if let Some(start) = starts_at { timestamp(start)?; }
+                if let Some(start) = starts_at {
+                    timestamp(start)?;
+                }
             }
             Self::Reminder(ReminderAction::Create {
                 target_kind,
@@ -267,6 +275,9 @@ impl Action {
                 return Err(invalid("Unknown goal color"))
             }
             Self::Settings(setting) => match setting {
+                SettingAction::Locale { value } if crate::i18n::Locale::parse(value).is_none() => {
+                    return Err(invalid("Choose English or Simplified Chinese"))
+                }
                 SettingAction::Theme { value } if !service::settings::is_valid_theme(value) => {
                     return Err(invalid("Theme must be white or gray"))
                 }
@@ -355,7 +366,9 @@ impl Action {
     }
 
     /// Labels resolve IDs from the database, not from untrusted model prose.
-    fn describe(&self, db: &Db) -> AppResult<(String, Vec<String>)> {
+    /// The returned key and arguments are stable across interface locales, so
+    /// approval freshness never changes when the user switches language.
+    fn describe(&self, db: &Db) -> AppResult<(String, Vec<crate::i18n::LocalizedMessage>)> {
         let conn = db.pool().get()?;
         let cycle = |id: &str| -> AppResult<String> {
             let c = repo::cycles::require(&conn, id)?;
@@ -366,222 +379,317 @@ impl Action {
             ))
         };
         let task = |id: &str| -> AppResult<String> { Ok(repo::tasks::require(&conn, id)?.title) };
-        let (summary, details) = match self {
+        let m = |key: &str, args: Value| {
+            crate::i18n::LocalizedMessage::new(format!("backend-actions:{key}"), args)
+        };
+        let target = |key: &str, value: String| m(key, json!({"target": value}));
+        let cycle_type_message = |value: &str| {
+            m(
+                match value {
+                    "month" => "cycle.type.month",
+                    "week" => "cycle.type.week",
+                    "day" => "cycle.type.day",
+                    _ => "cycle.type.unknown",
+                },
+                json!({"code": value}),
+            )
+        };
+        let color_message = |value: &str| {
+            m(
+                match value {
+                    "red" => "task.color.red",
+                    "amber" => "task.color.amber",
+                    "gold" => "task.color.gold",
+                    "green" => "task.color.green",
+                    "teal" => "task.color.teal",
+                    "blue" => "task.color.blue",
+                    "indigo" => "task.color.indigo",
+                    "plum" => "task.color.plum",
+                    _ => "task.color.unknown",
+                },
+                json!({"code": value}),
+            )
+        };
+        let strategy = |value: Option<&str>| match value {
+            Some("merge") => m("day_move.strategy.merge", json!({"code": "merge"})),
+            Some("swap") => m("day_move.strategy.swap", json!({"code": "swap"})),
+            Some(value) => m("day_move.strategy.unknown", json!({"code": value})),
+            None => m("day_move.strategy_fail", json!({})),
+        };
+        match self {
             Self::Cycle(CycleAction::Create {
                 cycle_type,
                 date,
                 title,
                 duration_months,
                 parent_id,
-            }) => (
-                "创建计划周期",
+            }) => Ok((
+                "backend-actions:cycle.create".into(),
                 vec![
-                    format!(
-                        "类型：{cycle_type}；名称：{}",
-                        title.as_deref().unwrap_or("按日期命名")
+                    m(
+                        "cycle.create.type",
+                        json!({
+                            "type": serde_json::to_value(cycle_type_message(cycle_type)).unwrap(),
+                            "type_code": cycle_type,
+                            "name": title.as_deref().map(|value| Value::String(value.to_owned())).unwrap_or_else(|| serde_json::to_value(m("cycle.create.default_name", json!({}))).unwrap()),
+                        }),
                     ),
-                    format!(
-                        "日期：{}；长期周期：{}",
-                        date.as_deref().unwrap_or("今天"),
-                        duration_months
-                            .map(|n| format!("{n} × 28 天"))
-                            .unwrap_or("—".into())
+                    m(
+                        "cycle.create.date",
+                        json!({
+                            "date": date.as_deref().map(|value| Value::String(value.to_owned())).unwrap_or_else(|| serde_json::to_value(m("cycle.create.today", json!({}))).unwrap()),
+                            "duration": duration_months.map(|months| serde_json::to_value(m("cycle.create.duration", json!({"months": months}))).unwrap()).unwrap_or_else(|| serde_json::to_value(m("cycle.create.no_duration", json!({}))).unwrap()),
+                        }),
                     ),
-                    format!(
-                        "上级周期：{}",
-                        parent_id
-                            .as_deref()
-                            .map(&cycle)
-                            .transpose()?
-                            .unwrap_or("无".into())
+                    m(
+                        "cycle.create.parent",
+                        json!({
+                            "parent": parent_id.as_deref().map(&cycle).transpose()?.map(Value::String).unwrap_or_else(|| serde_json::to_value(m("cycle.create.no_parent", json!({}))).unwrap()),
+                        }),
                     ),
                 ],
-            ),
+            )),
             Self::Cycle(change) => {
-                let (label, id) = match change {
-                    CycleAction::Start { cycle_id } => ("开始周期 / 专注", cycle_id),
-                    CycleAction::Finish { cycle_id } => ("结束周期 / 专注", cycle_id),
-                    CycleAction::Delete { cycle_id } => ("删除周期及其内容", cycle_id),
+                let (summary, cycle_id) = match change {
+                    CycleAction::Start { cycle_id } => ("backend-actions:cycle.start", cycle_id),
+                    CycleAction::Finish { cycle_id } => ("backend-actions:cycle.finish", cycle_id),
+                    CycleAction::Delete { cycle_id } => ("backend-actions:cycle.delete", cycle_id),
                     CycleAction::CopyUncompleted { cycle_id } => {
-                        ("承接上一周期未完成事务", cycle_id)
+                        ("backend-actions:cycle.copy_uncompleted", cycle_id)
                     }
-                    _ => unreachable!(),
+                    CycleAction::Create { .. } => unreachable!(),
                 };
-                let mut d = vec![cycle(id)?];
+                let mut details = vec![target("cycle.target", cycle(cycle_id)?)];
                 if matches!(change, CycleAction::Delete { .. }) {
-                    let impact = service::cycles::get_cycle_deletion_preview(db, id)?;
+                    let impact = service::cycles::get_cycle_deletion_preview(db, cycle_id)?;
                     if let Some(code) = impact.guard_code {
                         return Err(AppError::validation(
                             code,
                             impact.guard_message.unwrap_or_default(),
                         ));
                     }
-                    d.push(format!(
-                        "将删除 {} 个下级周期、{} 项事务。",
-                        impact.descendant_cycles, impact.tasks
+                    details.push(m(
+                        "cycle.delete.impact",
+                        json!({"cycles": impact.descendant_cycles, "tasks": impact.tasks}),
                     ));
                 }
-                (label, d)
+                Ok((summary.into(), details))
             }
             Self::Focus(FocusAction::Create {
                 day_cycle_id,
                 title,
                 duration_minutes,
-            }) => (
-                "添加专注块",
+            }) => Ok((
+                "backend-actions:focus.create".into(),
                 vec![
-                    cycle(day_cycle_id)?,
-                    format!("{title} · {duration_minutes} 分钟"),
+                    target("focus.target", cycle(day_cycle_id)?),
+                    m(
+                        "focus.duration",
+                        json!({"title": title, "minutes": duration_minutes}),
+                    ),
                 ],
-            ),
+            )),
             Self::Focus(FocusAction::Update {
                 session_id,
                 title,
                 duration_minutes,
-            }) => (
-                "修改专注块",
+            }) => Ok((
+                "backend-actions:focus.update".into(),
                 vec![
-                    cycle(session_id)?,
-                    format!("改为 {title} · {duration_minutes} 分钟"),
+                    target("focus.target", cycle(session_id)?),
+                    m(
+                        "focus.updated",
+                        json!({"title": title, "minutes": duration_minutes}),
+                    ),
                 ],
-            ),
+            )),
             Self::Focus(FocusAction::Schedule {
                 session_id,
                 starts_at,
-            }) => (
-                if starts_at.is_some() { "安排专注时间" } else { "移回未安排" },
-                vec![cycle(session_id)?, starts_at.clone().unwrap_or("保留专注块及原有时长".into())],
-            ),
+            }) => {
+                let detail = match starts_at {
+                    Some(value) => m("focus.schedule.start", json!({"startsAt": value})),
+                    None => m("focus.schedule.unscheduled", json!({})),
+                };
+                Ok((
+                    if starts_at.is_some() {
+                        "backend-actions:focus.schedule"
+                    } else {
+                        "backend-actions:focus.unschedule"
+                    }
+                    .into(),
+                    vec![target("focus.target", cycle(session_id)?), detail],
+                ))
+            }
             Self::Focus(FocusAction::Reorder {
                 day_cycle_id,
                 session_ids,
-            }) => (
-                "调整专注块顺序",
+            }) => Ok((
+                "backend-actions:focus.reorder".into(),
                 vec![
-                    cycle(day_cycle_id)?,
-                    session_ids
-                        .iter()
-                        .map(|id| cycle(id))
-                        .collect::<AppResult<Vec<_>>>()?
-                        .join(" → "),
+                    target("focus.target", cycle(day_cycle_id)?),
+                    m(
+                        "focus.reorder.order",
+                        json!({"items": session_ids.iter().map(|id| cycle(id)).collect::<AppResult<Vec<_>>>()?.join(" → ")}),
+                    ),
                 ],
-            ),
+            )),
             Self::Task(TaskAction::Move {
                 task_id,
                 target_cycle_id,
-            }) => (
-                "移动事务及子任务",
-                vec![task(task_id)?, format!("目标：{}", cycle(target_cycle_id)?)],
-            ),
-            Self::Task(TaskAction::Link { task_id, parent_id }) => (
-                "调整事务归属",
+            }) => Ok((
+                "backend-actions:task.move".into(),
                 vec![
-                    task(task_id)?,
-                    format!(
-                        "归属：{}",
-                        parent_id
-                            .as_deref()
-                            .map(&task)
-                            .transpose()?
-                            .unwrap_or("独立事务".into())
+                    target("task.target", task(task_id)?),
+                    m(
+                        "task.destination",
+                        json!({"target": cycle(target_cycle_id)?}),
                     ),
                 ],
-            ),
-            Self::Task(TaskAction::Color { task_id, color }) => (
-                "修改目标颜色",
-                vec![task(task_id)?, color.clone().unwrap_or("无颜色".into())],
-            ),
+            )),
+            Self::Task(TaskAction::Link { task_id, parent_id }) => Ok((
+                "backend-actions:task.link".into(),
+                vec![
+                    target("task.target", task(task_id)?),
+                    m(
+                        "task.parent",
+                        json!({
+                            "parent": parent_id.as_deref().map(&task).transpose()?.map(Value::String).unwrap_or_else(|| serde_json::to_value(m("task.independent", json!({}))).unwrap()),
+                        }),
+                    ),
+                ],
+            )),
+            Self::Task(TaskAction::Color { task_id, color }) => Ok((
+                "backend-actions:task.color".into(),
+                vec![
+                    target("task.target", task(task_id)?),
+                    m(
+                        "task.color.value",
+                        json!({
+                            "color": color.as_deref().map(color_message).map(|message| serde_json::to_value(message).unwrap()).unwrap_or_else(|| serde_json::to_value(m("task.color.none", json!({}))).unwrap()),
+                            "color_code": color,
+                        }),
+                    ),
+                ],
+            )),
             Self::Task(TaskAction::Reorder {
                 cycle_id, task_ids, ..
-            }) => (
-                "调整事务顺序",
+            }) => Ok((
+                "backend-actions:task.reorder".into(),
                 vec![
-                    cycle(cycle_id)?,
-                    task_ids
-                        .iter()
-                        .map(|id| task(id))
-                        .collect::<AppResult<Vec<_>>>()?
-                        .join(" → "),
+                    target("task.target", cycle(cycle_id)?),
+                    m(
+                        "task.reorder.order",
+                        json!({"items": task_ids.iter().map(|id| task(id)).collect::<AppResult<Vec<_>>>()?.join(" → ")}),
+                    ),
                 ],
-            ),
+            )),
             Self::Reminder(ReminderAction::Create {
                 target_kind,
                 target_id,
                 fire_at,
                 respect_quiet_hours,
-            }) => (
-                "添加提醒",
+            }) => Ok((
+                "backend-actions:reminder.create".into(),
                 vec![
-                    if target_kind == "task" {
-                        task(target_id)?
-                    } else {
-                        cycle(target_id)?
-                    },
-                    fire_at.clone(),
-                    format!("遵循免打扰：{respect_quiet_hours}"),
+                    target(
+                        "reminder.target",
+                        if target_kind == "task" {
+                            task(target_id)?
+                        } else {
+                            cycle(target_id)?
+                        },
+                    ),
+                    m("reminder.fire_at", json!({"fireAt": fire_at})),
+                    m(
+                        "reminder.quiet_hours",
+                        json!({"respect": respect_quiet_hours}),
+                    ),
                 ],
-            ),
+            )),
             Self::Reminder(ReminderAction::Update {
                 reminder_id,
                 fire_at,
                 respect_quiet_hours,
-            }) => (
-                "修改提醒",
+            }) => Ok((
+                "backend-actions:reminder.update".into(),
                 vec![
-                    reminder_label(&conn, reminder_id)?,
-                    fire_at.clone(),
-                    format!("遵循免打扰：{respect_quiet_hours}"),
+                    target("reminder.target", reminder_label(&conn, reminder_id)?),
+                    m("reminder.fire_at", json!({"fireAt": fire_at})),
+                    m(
+                        "reminder.quiet_hours",
+                        json!({"respect": respect_quiet_hours}),
+                    ),
                 ],
-            ),
-            Self::Reminder(ReminderAction::Delete { reminder_id }) => {
-                ("删除提醒", vec![reminder_label(&conn, reminder_id)?])
-            }
-            Self::Repeat(RepeatAction::Create { session_id }) => {
-                ("每日重复此专注块", vec![cycle(session_id)?])
-            }
+            )),
+            Self::Reminder(ReminderAction::Delete { reminder_id }) => Ok((
+                "backend-actions:reminder.delete".into(),
+                vec![target(
+                    "reminder.target",
+                    reminder_label(&conn, reminder_id)?,
+                )],
+            )),
+            Self::Repeat(RepeatAction::Create { session_id }) => Ok((
+                "backend-actions:repeat.create".into(),
+                vec![target("repeat.target", cycle(session_id)?)],
+            )),
             Self::Repeat(RepeatAction::Update {
                 repeat_id,
                 title,
                 duration_minutes,
-            }) => (
-                "修改重复模板",
+            }) => Ok((
+                "backend-actions:repeat.update".into(),
                 vec![
-                    repo::repeats::require(&conn, repeat_id)?.title,
-                    format!("{title} · {duration_minutes} 分钟；仅影响未来实例"),
-                ],
-            ),
-            Self::Repeat(RepeatAction::Stop { repeat_id }) => (
-                "停止每日重复",
-                vec![
-                    repo::repeats::require(&conn, repeat_id)?.title,
-                    "已有专注块保留".into(),
-                ],
-            ),
-            Self::DayMove(change) => (
-                "移动日计划",
-                vec![
-                    cycle(&change.cycle_id)?,
-                    format!(
-                        "目标：{}；冲突处理：{}",
-                        change.target_date,
-                        change.strategy.as_deref().unwrap_or("遇到已有计划时停止")
+                    target(
+                        "repeat.target",
+                        repo::repeats::require(&conn, repeat_id)?.title,
+                    ),
+                    m(
+                        "repeat.updated",
+                        json!({"title": title, "minutes": duration_minutes}),
                     ),
                 ],
-            ),
-            Self::Settings(setting) => ("修改设置", setting_details(db, setting)?),
+            )),
+            Self::Repeat(RepeatAction::Stop { repeat_id }) => Ok((
+                "backend-actions:repeat.stop".into(),
+                vec![
+                    target(
+                        "repeat.target",
+                        repo::repeats::require(&conn, repeat_id)?.title,
+                    ),
+                    m("repeat.keep_existing", json!({})),
+                ],
+            )),
+            Self::DayMove(change) => Ok((
+                "backend-actions:day_move".into(),
+                vec![
+                    target("day_move.target", cycle(&change.cycle_id)?),
+                    m(
+                        "day_move.destination",
+                        json!({
+                            "date": change.target_date,
+                            "strategy": serde_json::to_value(strategy(change.strategy.as_deref())).unwrap(),
+                            "strategy_code": change.strategy,
+                        }),
+                    ),
+                ],
+            )),
+            Self::Settings(setting) => Ok((
+                "backend-actions:settings".into(),
+                setting_details_structured(db, setting)?,
+            )),
             Self::Prioritization(PrioritizationAction::Update { cycle_id, update }) => {
-                describe_prioritization(db, cycle_id, update)?
+                describe_prioritization_structured(db, cycle_id, update)
             }
-        };
-        Ok((summary.into(), details))
+        }
     }
 }
 
-fn describe_prioritization(
+fn describe_prioritization_structured(
     db: &Db,
     cycle_id: &str,
     update: &prioritization::PrioritizationBreakdownUpdate,
-) -> AppResult<(&'static str, Vec<String>)> {
+) -> AppResult<(String, Vec<crate::i18n::LocalizedMessage>)> {
     let conn = db.pool().get()?;
     let cycle = repo::cycles::require(&conn, cycle_id)?;
     let tasks = repo::tasks::list_visible_by_cycle(&conn, cycle_id)?;
@@ -593,35 +701,112 @@ fn describe_prioritization(
         .iter()
         .map(|task| (task.id.clone(), task.title.clone()))
         .collect();
-    let bucket = |name: &str, items: &[prioritization::BucketItem]| {
+    let bucket = |items: &[prioritization::BucketItem]| {
         if items.is_empty() {
-            return format!("{name}：无");
+            return serde_json::to_value(crate::i18n::LocalizedMessage::new(
+                "backend-actions:prioritization.none",
+                json!({}),
+            ))
+            .unwrap();
         }
-        let values = items
-            .iter()
-            .map(|item| {
-                format!(
-                    "{} · {}：{}",
-                    item.task_id,
-                    titles.get(&item.task_id).map(String::as_str).unwrap_or("未知事务"),
-                    item.reason
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("；");
-        format!("{name}：{values}")
+        Value::Array(items.iter().map(|item| serde_json::to_value(crate::i18n::LocalizedMessage::new(
+            "backend-actions:prioritization.item",
+            json!({
+                "id": item.task_id,
+                "title": titles.get(&item.task_id).map(|title| Value::String(title.clone())).unwrap_or_else(|| serde_json::to_value(crate::i18n::LocalizedMessage::new("backend-actions:prioritization.unknown_task", json!({}))).unwrap()),
+                "reason": item.reason,
+            }),
+        )).unwrap()).collect())
+    };
+    let m = |key: &str, args: Value| {
+        crate::i18n::LocalizedMessage::new(format!("backend-actions:{key}"), args)
     };
     Ok((
-        "更新优先级排序",
+        "backend-actions:prioritization.update".into(),
         vec![
-            format!("计划：{}", cycle.title),
-            bucket("大胜", &merged.big_wins),
-            bucket("瓶颈", &merged.bottlenecks),
-            bucket("必须做", &merged.non_negotiables),
-            bucket("暂缓", &merged.deprioritized),
-            format!("待排序：{}", merged.pending_review.join("、")),
+            m("prioritization.cycle", json!({"plan": cycle.title})),
+            m(
+                "prioritization.bucket",
+                json!({"name": serde_json::to_value(m("prioritization.name.big_wins", json!({}))).unwrap(), "items": bucket(&merged.big_wins)}),
+            ),
+            m(
+                "prioritization.bucket",
+                json!({"name": serde_json::to_value(m("prioritization.name.bottlenecks", json!({}))).unwrap(), "items": bucket(&merged.bottlenecks)}),
+            ),
+            m(
+                "prioritization.bucket",
+                json!({"name": serde_json::to_value(m("prioritization.name.non_negotiables", json!({}))).unwrap(), "items": bucket(&merged.non_negotiables)}),
+            ),
+            m(
+                "prioritization.bucket",
+                json!({"name": serde_json::to_value(m("prioritization.name.deprioritized", json!({}))).unwrap(), "items": bucket(&merged.deprioritized)}),
+            ),
+            m(
+                "prioritization.pending",
+                json!({"items": merged.pending_review}),
+            ),
         ],
     ))
+}
+
+fn setting_details_structured(
+    db: &Db,
+    setting: &SettingAction,
+) -> AppResult<Vec<crate::i18n::LocalizedMessage>> {
+    let before = read_settings(db)?;
+    let value = serde_json::to_value(setting).map_err(|e| invalid(e.to_string()))?;
+    let key = value["setting"].as_str().unwrap_or("active_model");
+    let m = |key: &str, args: Value| {
+        crate::i18n::LocalizedMessage::new(format!("backend-actions:{key}"), args)
+    };
+    let theme_message = |code: &str| {
+        m(
+            match code {
+                "white" => "settings.theme.white",
+                "gray" => "settings.theme.gray",
+                _ => "settings.theme.unknown",
+            },
+            json!({"code": code}),
+        )
+    };
+    let display = |setting_key: &str, v: &Value| match (setting_key, v) {
+        ("theme", Value::String(code)) => serde_json::to_value(theme_message(code)).unwrap(),
+        (_, Value::Null) => serde_json::to_value(crate::i18n::LocalizedMessage::new(
+            "backend-actions:settings.value.unset",
+            json!({}),
+        ))
+        .unwrap(),
+        (_, Value::Bool(v)) => serde_json::to_value(crate::i18n::LocalizedMessage::new(
+            if *v {
+                "backend-actions:settings.value.on"
+            } else {
+                "backend-actions:settings.value.off"
+            },
+            json!({}),
+        ))
+        .unwrap(),
+        (_, Value::String(s)) => Value::String(s.clone()),
+        (_, value) => Value::String(value.to_string()),
+    };
+    let after = match setting {
+        SettingAction::QuietHours { start, end } => serde_json::to_value(crate::i18n::LocalizedMessage::new(
+            "backend-actions:settings.quiet_hours.value",
+            json!({
+                "start": start.as_deref().map(|value| Value::String(value.to_owned())).unwrap_or_else(|| serde_json::to_value(crate::i18n::LocalizedMessage::new("backend-actions:settings.value.off", json!({}))).unwrap()),
+                "end": end.as_deref().map(|value| Value::String(value.to_owned())).unwrap_or_else(|| serde_json::to_value(crate::i18n::LocalizedMessage::new("backend-actions:settings.value.off", json!({}))).unwrap()),
+            }),
+        )).unwrap(),
+        SettingAction::ActiveModel { provider_id, model_id } => Value::String(format!("{provider_id} / {model_id}")),
+        _ => display(key, &value["value"]),
+    };
+    let label = crate::i18n::LocalizedMessage::new(
+        format!("backend-actions:settings.label.{key}"),
+        json!({}),
+    );
+    Ok(vec![crate::i18n::LocalizedMessage::new(
+        "backend-actions:settings.changed",
+        json!({"label": label, "before": display(key, &before[key]), "after": after}),
+    )])
 }
 
 fn reminder_label(conn: &rusqlite::Connection, id: &str) -> AppResult<String> {
@@ -639,51 +824,12 @@ fn reminder_label(conn: &rusqlite::Connection, id: &str) -> AppResult<String> {
     ))
 }
 
-fn setting_details(db: &Db, setting: &SettingAction) -> AppResult<Vec<String>> {
-    let before = read_settings(db)?;
-    let value = serde_json::to_value(setting).map_err(|e| invalid(e.to_string()))?;
-    let key = value["setting"].as_str().unwrap();
-    let label = match key {
-        "theme" => "主题",
-        "week_start_day" => "每周起始日",
-        "coach_idle_minutes" => "Coach 上下文有效期（分钟）",
-        "plan_with_ai" => "Plan with AI 入口",
-        "daily_capacity_minutes" => "每天可用时间（分钟）",
-        "daily_reminder" => "每日计划提醒",
-        "quiet_hours" => "免打扰时段",
-        "log_level" => "日志级别",
-        _ => "当前 AI 模型",
-    };
-    let display = |v: &Value| match v {
-        Value::Null => "关闭 / 未设置".to_string(),
-        Value::Bool(v) => if *v { "开启" } else { "关闭" }.into(),
-        Value::String(s) => s.clone(),
-        _ => v.to_string(),
-    };
-    let after = match setting {
-        SettingAction::QuietHours { start, end } => format!(
-            "{} – {}",
-            start.as_deref().unwrap_or("关闭"),
-            end.as_deref().unwrap_or("关闭")
-        ),
-        SettingAction::ActiveModel {
-            provider_id,
-            model_id,
-        } => format!("{provider_id} / {model_id}"),
-        _ => display(&value["value"]),
-    };
-    Ok(vec![
-        label.into(),
-        format!("{} → {after}", display(&before[key])),
-    ])
-}
-
 pub fn read_settings(db: &Db) -> AppResult<Value> {
     let conn = db.pool().get()?;
     let settings = service::settings::get(db)?;
     let reminders = service::reminders::get_settings(db)?;
     Ok(
-        json!({"theme": settings.theme.unwrap_or("white".into()), "week_start_day": service::settings::week_start_day_or_default(&conn)?,
+        json!({"locale": settings.locale, "theme": settings.theme.unwrap_or("white".into()), "week_start_day": service::settings::week_start_day_or_default(&conn)?,
         "coach_idle_minutes": repo::agent::context_idle_minutes(&conn)?,
         "plan_with_ai": service::settings::get_app_flag(db, "ui.plan-with-ai".into())?.as_deref() != Some("false"),
         "daily_capacity_minutes": service::calendar::get_daily_capacity_minutes(&conn)?,
@@ -704,19 +850,25 @@ pub fn stage(db: &Db, source_cycle_id: &str, action: Action, rationale: &str) ->
         return Err(invalid("A short, nonempty rationale is required"));
     }
     action.validate()?;
-    let (summary, details) = action.describe(db)?;
+    let (summary_key, details) = action.describe(db)?;
+    let summary = crate::i18n::render_message(
+        crate::i18n::Locale::En,
+        &crate::i18n::LocalizedMessage::new(summary_key.clone(), json!({})),
+    );
     let encoded = serde_json::to_string(&action).map_err(|e| invalid(e.to_string()))?;
     let conn = db.pool().get()?;
     // The same still-pending intent is reused if a model repeats its call.
     repo::cycles::require(&conn, source_cycle_id)?;
     use rusqlite::OptionalExtension;
     if let Some(id) = conn.query_row("SELECT id FROM agent_actions WHERE source_cycle_id=?1 AND action_json=?2 AND state='pending'", rusqlite::params![source_cycle_id, encoded], |r| r.get::<_,String>(0)).optional().map_err(db_error)? {
-        return Ok(json!({"status":"proposed", "action_id":id, "summary":summary}));
+        return Ok(json!({"status":"proposed", "action_id":id, "summary":summary, "summary_key":summary_key, "details":details}));
     }
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute("INSERT INTO agent_actions (id,source_cycle_id,action_json,rationale,summary,details_json,state,created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending',?7)",
-        rusqlite::params![id,source_cycle_id,encoded,rationale,summary,serde_json::to_string(&details).unwrap(),service::now_ms()]).map_err(db_error)?;
-    Ok(json!({"status":"proposed", "action_id":id,"summary":summary}))
+        rusqlite::params![id,source_cycle_id,encoded,rationale,summary_key,serde_json::to_string(&details).map_err(|e| invalid(e.to_string()))?,service::now_ms()]).map_err(db_error)?;
+    Ok(
+        json!({"status":"proposed", "action_id":id,"summary":summary,"summary_key":summary_key,"details":details}),
+    )
 }
 
 pub fn list(db: &Db, source_cycle_id: &str) -> AppResult<Vec<PendingAction>> {
@@ -740,14 +892,52 @@ pub fn list(db: &Db, source_cycle_id: &str) -> AppResult<Vec<PendingAction>> {
     rows.into_iter()
         .map(
             |(id, source_cycle_id, raw, rationale, summary, details, state)| {
+                let action: Action =
+                    serde_json::from_str(&raw).map_err(|e| invalid(e.to_string()))?;
+                let structured_summary = summary.starts_with("backend-actions:");
+                let summary_key = if structured_summary {
+                    summary.clone()
+                } else {
+                    String::new()
+                };
+                let summary = if structured_summary {
+                    crate::i18n::render_message(
+                        crate::i18n::Locale::En,
+                        &crate::i18n::LocalizedMessage::new(summary_key.clone(), json!({})),
+                    )
+                } else {
+                    summary
+                };
+                let (details, legacy_details) =
+                    match serde_json::from_str::<Vec<crate::i18n::LocalizedMessage>>(&details) {
+                        Ok(details) => (details, !structured_summary),
+                        Err(_) => {
+                            let legacy = serde_json::from_str::<Vec<String>>(&details)
+                                .unwrap_or_else(|_| vec![details]);
+                            (
+                                legacy
+                                    .into_iter()
+                                    .map(|value| {
+                                        crate::i18n::LocalizedMessage::new(
+                                            "backend-actions:literal",
+                                            json!({"value": value}),
+                                        )
+                                    })
+                                    .collect(),
+                                true,
+                            )
+                        }
+                    };
                 Ok(PendingAction {
                     id,
                     source_cycle_id,
-                    action: serde_json::from_str(&raw).map_err(|e| invalid(e.to_string()))?,
+                    action,
                     rationale,
                     summary,
-                    details: serde_json::from_str(&details).map_err(|e| invalid(e.to_string()))?,
+                    summary_key,
+                    details,
                     state,
+                    legacy_details,
                 })
             },
         )
@@ -762,13 +952,16 @@ pub fn claim(db: &Db, source_cycle_id: &str, id: &str, approve: bool) -> AppResu
         .find(|p| p.id == id)
         .ok_or_else(|| AppError::not_found("action", id))?;
     if approve {
-        let (_, fresh_details) = item.action.describe(db)?;
-        if fresh_details != item.details {
+        let (fresh_summary_key, fresh_details) = item.action.describe(db)?;
+        if item.legacy_details
+            || fresh_summary_key != item.summary_key
+            || fresh_details != item.details
+        {
             db.pool()
                 .get()?
                 .execute(
-                    "UPDATE agent_actions SET details_json=?2 WHERE id=?1 AND state='pending'",
-                    rusqlite::params![id, serde_json::to_string(&fresh_details).unwrap()],
+                    "UPDATE agent_actions SET summary=?2,details_json=?3 WHERE id=?1 AND state='pending'",
+                    rusqlite::params![id, fresh_summary_key, serde_json::to_string(&fresh_details).map_err(|e| invalid(e.to_string()))?],
                 )
                 .map_err(db_error)?;
             return Err(AppError::conflict(
@@ -987,6 +1180,7 @@ pub async fn apply(db: &Db, ai: &AiSettingsState, action: &Action) -> AppResult<
             }
         },
         Action::Settings(setting) => match setting {
+            SettingAction::Locale { value } => service::settings::set_locale(db, value.clone())?,
             SettingAction::Theme { value } => service::settings::set_theme(db, value.clone())?,
             SettingAction::WeekStartDay { value } => {
                 service::settings::set_week_start_day(db, *value)?
@@ -1058,6 +1252,7 @@ pub fn resolve_task_preview(
     task_id: &str,
     approve: bool,
 ) -> AppResult<service::Mutation<()>> {
+    let locale = crate::i18n::for_db(db)?;
     let mut conn = db.pool().get()?;
     let tx = conn
         .transaction()
@@ -1066,10 +1261,43 @@ pub fn resolve_task_preview(
     if task.proposal.is_none() {
         return Err(AppError::not_found("preview", task_id));
     }
-    let original=repo::proposals::get_snapshot(&tx,task_id)?;
-    let prefix=if !approve { "已放弃改动" } else if task.proposal==Some(crate::domain::proposal::ProposalKind::Delete) { "已删除任务" } else if original.as_ref().is_some_and(|o| !o.original_exists || o.title.as_deref().is_none_or(|t|t.trim().is_empty())) { "已添加任务" } else { "已更新任务" };
-    let text=format!("{prefix}「{}」。",task.title);
-    crate::ai::agent::turn::record_decision(&tx,source_cycle_id,json!({"text":text,"target_kind":"task","target_id":task_id,"decision":if approve {"applied"} else {"rejected"}}))?;
+    let original = repo::proposals::get_snapshot(&tx, task_id)?;
+    let summary_key = if !approve {
+        "backend-actions:preview.rejected"
+    } else if task.proposal == Some(crate::domain::proposal::ProposalKind::Delete) {
+        "backend-actions:preview.deleted"
+    } else if original.as_ref().is_some_and(|o| {
+        !o.original_exists || o.title.as_deref().is_none_or(|t| t.trim().is_empty())
+    }) {
+        "backend-actions:preview.added"
+    } else {
+        "backend-actions:preview.updated"
+    };
+    let status_key = if approve {
+        "backend-actions:receipt.applied"
+    } else {
+        "backend-actions:receipt.rejected"
+    };
+    let summary = crate::i18n::render_message(
+        locale,
+        &crate::i18n::LocalizedMessage::new(summary_key, json!({})),
+    );
+    let details = vec![crate::i18n::LocalizedMessage::new(
+        "backend-actions:preview.title",
+        json!({"title": task.title}),
+    )];
+    let text = crate::i18n::render_message(
+        locale,
+        &crate::i18n::LocalizedMessage::new(
+            "backend-actions:receipt.task",
+            json!({"status": crate::i18n::render_message(locale, &crate::i18n::LocalizedMessage::new(status_key, json!({}))), "summary": summary, "title": task.title}),
+        ),
+    );
+    crate::ai::agent::turn::record_decision(
+        &tx,
+        source_cycle_id,
+        json!({"text":text,"result":{"summary_key":summary_key,"details":details,"decision":if approve {"applied"} else {"rejected"},"operation":"task_preview"},"target_kind":"task","target_id":task_id,"decision":if approve {"applied"} else {"rejected"}}),
+    )?;
     if approve {
         service::proposals::keep_one(&tx, task_id)?;
     } else {
@@ -1128,6 +1356,144 @@ mod tests {
         assert_eq!(read_settings(&db).unwrap()["coach_idle_minutes"], 30);
         assert!(list(&db, &cycle).unwrap().is_empty());
     }
+
+    #[tokio::test]
+    async fn structured_details_are_locale_independent_for_claim_freshness() {
+        let (_dir, db, _ai, cycle) = setup();
+        let staged = stage(
+            &db,
+            &cycle,
+            Action::Settings(SettingAction::Theme {
+                value: "gray".into(),
+            }),
+            "切换主题",
+        )
+        .unwrap();
+        assert_eq!(staged["summary_key"], "backend-actions:settings");
+        assert_eq!(
+            staged["details"][0]["key"],
+            "backend-actions:settings.changed"
+        );
+        let before = list(&db, &cycle).unwrap().remove(0);
+        service::settings::set_locale(&db, "zh-CN".into()).unwrap();
+        let after = list(&db, &cycle).unwrap().remove(0);
+        assert_eq!(before.summary_key, after.summary_key);
+        assert_eq!(before.details, after.details);
+        assert_ne!(
+            crate::i18n::render_message(crate::i18n::Locale::En, &before.details[0]),
+            crate::i18n::render_message(crate::i18n::Locale::ZhCn, &before.details[0]),
+        );
+        let claimed = claim(&db, &cycle, staged["action_id"].as_str().unwrap(), true).unwrap();
+        assert_eq!(claimed.summary_key, "backend-actions:settings");
+    }
+
+    #[tokio::test]
+    async fn legacy_string_details_refresh_once_before_approval() {
+        let (_dir, db, _ai, cycle) = setup();
+        let staged = stage(
+            &db,
+            &cycle,
+            Action::Settings(SettingAction::Theme {
+                value: "gray".into(),
+            }),
+            "切换主题",
+        )
+        .unwrap();
+        db.pool()
+            .get()
+            .unwrap()
+            .execute(
+                "UPDATE agent_actions SET summary='修改设置',details_json='[\"旧详情\"]' WHERE id=?1",
+                [staged["action_id"].as_str().unwrap()],
+            )
+            .unwrap();
+        let err = claim(&db, &cycle, staged["action_id"].as_str().unwrap(), true).unwrap_err();
+        assert!(matches!(err, AppError::Conflict { code, .. } if code == "action_changed"));
+        let refreshed = list(&db, &cycle).unwrap().remove(0);
+        assert_eq!(refreshed.summary_key, "backend-actions:settings");
+        assert!(refreshed
+            .details
+            .iter()
+            .all(|detail| detail.key != "旧详情"));
+        assert!(claim(&db, &cycle, staged["action_id"].as_str().unwrap(), true).is_ok());
+    }
+
+    #[test]
+    fn pending_actions_remain_listable_and_rejectable_after_new_target_is_deleted() {
+        let (_dir, db, _ai, day) = setup();
+        let task = service::tasks::add_task(
+            &db,
+            &service::tasks::AddTaskArgs {
+                cycle_id: day.clone(),
+                title: "Pending target".into(),
+                ..Default::default()
+            },
+            1,
+        )
+        .unwrap()
+        .value;
+        let staged = stage(
+            &db,
+            &day,
+            Action::Task(TaskAction::Color {
+                task_id: task.id.clone(),
+                color: Some("blue".into()),
+            }),
+            "改色",
+        )
+        .unwrap();
+        service::tasks::delete_task(&db, &task.id).unwrap();
+        let listed = list(&db, &day).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].legacy_details);
+        assert!(claim(&db, &day, staged["action_id"].as_str().unwrap(), true).is_err());
+        assert!(claim(&db, &day, staged["action_id"].as_str().unwrap(), false).is_ok());
+        assert!(list(&db, &day).unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_pending_actions_use_persisted_fallback_after_new_target_is_deleted() {
+        let (_dir, db, _ai, day) = setup();
+        let task = service::tasks::add_task(
+            &db,
+            &service::tasks::AddTaskArgs {
+                cycle_id: day.clone(),
+                title: "Legacy pending target".into(),
+                ..Default::default()
+            },
+            1,
+        )
+        .unwrap()
+        .value;
+        let staged = stage(
+            &db,
+            &day,
+            Action::Task(TaskAction::Color {
+                task_id: task.id.clone(),
+                color: Some("blue".into()),
+            }),
+            "改色",
+        )
+        .unwrap();
+        db.pool()
+            .get()
+            .unwrap()
+            .execute(
+                "UPDATE agent_actions SET summary='修改目标颜色',details_json='[\"旧详情\"]' WHERE id=?1",
+                [staged["action_id"].as_str().unwrap()],
+            )
+            .unwrap();
+        service::tasks::delete_task(&db, &task.id).unwrap();
+        let listed = list(&db, &day).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].summary_key, "");
+        assert_eq!(listed[0].summary, "修改目标颜色");
+        assert!(listed[0].legacy_details);
+        assert_eq!(listed[0].details[0].key, "backend-actions:literal");
+        assert!(claim(&db, &day, staged["action_id"].as_str().unwrap(), true).is_err());
+        assert!(claim(&db, &day, staged["action_id"].as_str().unwrap(), false).is_ok());
+        assert!(list(&db, &day).unwrap().is_empty());
+    }
     #[tokio::test]
     async fn focus_schedule_repeat_and_reminder_share_gui_services() {
         let (_dir, db, ai, day) = setup();
@@ -1168,14 +1534,32 @@ mod tests {
             Some(timestamp("2026-09-15T14:00:00+08:00").unwrap())
         );
         approve(
-            &db, &ai, &day,
-            Action::Focus(FocusAction::Schedule { session_id: session.id.clone(), starts_at: None }),
-        ).await;
-        let slot: Option<i64> = db.pool().get().unwrap().query_row(
-            "SELECT scheduled_start_at FROM cycles WHERE id = ?1", [&session.id], |row| row.get(0),
-        ).unwrap();
+            &db,
+            &ai,
+            &day,
+            Action::Focus(FocusAction::Schedule {
+                session_id: session.id.clone(),
+                starts_at: None,
+            }),
+        )
+        .await;
+        let slot: Option<i64> = db
+            .pool()
+            .get()
+            .unwrap()
+            .query_row(
+                "SELECT scheduled_start_at FROM cycles WHERE id = ?1",
+                [&session.id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(slot, None);
-        assert_eq!(repo::cycles::require(&db.pool().get().unwrap(), &session.id).unwrap().duration, Some(25 * 60_000));
+        assert_eq!(
+            repo::cycles::require(&db.pool().get().unwrap(), &session.id)
+                .unwrap()
+                .duration,
+            Some(25 * 60_000)
+        );
         approve(
             &db,
             &ai,
@@ -1364,7 +1748,11 @@ mod tests {
         service::settings::set_theme(&db, "gray".into()).unwrap();
         let id = result["action_id"].as_str().unwrap();
         assert!(claim(&db, &day, id, true).is_err());
-        assert!(list(&db, &day).unwrap()[0].details[1].contains("gray → gray"));
+        assert!(crate::i18n::render_message(
+            crate::i18n::Locale::En,
+            &list(&db, &day).unwrap()[0].details[0],
+        )
+        .contains("gray → gray"));
         claim(&db, &day, id, true).unwrap();
         assert!(claim(&db, &day, id, true).is_err());
         claim(&db, &day, id, false).unwrap(); // GUI acknowledgement after inspecting an interrupted write.

@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
@@ -81,6 +82,7 @@ function renderPanel(): ReturnType<typeof render> {
 }
 
 beforeEach(() => {
+  applyLocale("en");
   invokeMock.mockReset();
   clearDraft(CYCLE);
 });
@@ -117,7 +119,7 @@ describe("ReviewPanel", () => {
     renderPanel();
 
     expect(await screen.findByText("50% (1/2)")).toBeTruthy();
-    expect(screen.getByText("1h")).toBeTruthy();
+    expect(screen.getByText("1 h")).toBeTruthy();
     expect(screen.getByText(/Snapshotted/)).toBeTruthy();
     expect(screen.getByText(/interim/)).toBeTruthy();
   });

@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
+import { formatDate } from "../../lib/i18n";
 
 export type TargetKind = "task" | "session" | "day" | "cycle";
 
@@ -63,7 +64,7 @@ export interface MissedSummary {
 
 /** Mirrors `service::reminders::DeliveryStatus`. */
 export interface DeliveryStatus {
-  permission: "granted" | "denied" | "prompt" | null;
+  permission: "granted" | "denied" | "prompt" | "system_managed" | null;
   last_error: string | null;
   last_delivery_at: number | null;
 }
@@ -239,13 +240,11 @@ export function fromLocalInputValue(value: string): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-const FIRE_AT_FORMAT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 export function formatFireAt(fireAt: number): string {
-  return FIRE_AT_FORMAT.format(new Date(fireAt));
+  return formatDate(fireAt, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

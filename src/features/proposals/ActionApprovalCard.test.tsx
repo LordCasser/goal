@@ -1,19 +1,20 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 const invoke=vi.hoisted(()=>vi.fn());
 vi.mock("@tauri-apps/api/core",()=>({invoke}));
 import { ActionApprovalCard, type PendingAction } from "./ActionApprovalCard";
-const item:PendingAction={id:"action",source_cycle_id:"day",summary:"修改设置",details:["Coach 上下文有效期（分钟）","15 → 30"],rationale:"用户希望保留更久",state:"pending"};
+const item:PendingAction={id:"action",source_cycle_id:"day",summary_key:"backend-actions:settings",summary:"修改设置",details:[{key:"backend-actions:settings.changed",args:{label:{key:"backend-actions:settings.label.coach_idle_minutes",args:{}},before:"15",after:"30"}}],rationale:"用户希望保留更久",state:"pending"};
 let pending:PendingAction[];
-beforeEach(()=>{pending=[item];invoke.mockReset().mockImplementation(async(cmd)=>{
+beforeEach(()=>{applyLocale("zh-CN");pending=[item];invoke.mockReset().mockImplementation(async(cmd)=>{
   if(cmd==="get_agent_actions") return pending;
   if(cmd==="resolve_agent_action") {pending=[];return null;}
 });});
 afterEach(cleanup);
 function mount(){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})}><ActionApprovalCard cycleId="day"/></QueryClientProvider>);}
 it("does not execute on display, then confirms the exact action once and removes the footer item",async()=>{
-  mount(); expect(await screen.findByText("15 → 30")).toBeTruthy();
+  mount(); expect(await screen.findByText(/15 → 30/)).toBeTruthy();
   expect(invoke.mock.calls.every(([name])=>name==="get_agent_actions")).toBe(true);
   fireEvent.click(screen.getByRole("button",{name:"确认应用"}));
   await waitFor(()=>expect(screen.queryByLabelText("待确认的操作")).toBeNull());
@@ -25,6 +26,11 @@ it("rejects without applying and preserves failed approvals for retry",async()=>
   mount();fireEvent.click(await screen.findByRole("button",{name:"放弃"}));
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(invoke).toHaveBeenCalledWith("resolve_agent_action",{cycleId:"day",actionId:"action",approve:false});
-  expect(screen.getByText("15 → 30")).toBeTruthy();
+  expect(screen.getByText(/15 → 30/)).toBeTruthy();
   expect(screen.queryByRole("status")).toBeNull();
+});
+it("keeps a historical summary when its structured key is unavailable", async () => {
+  pending = [{ ...item, summary_key: "", summary: "历史动作摘要" }];
+  mount();
+  expect(await screen.findByText("历史动作摘要")).toBeTruthy();
 });

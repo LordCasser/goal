@@ -5,7 +5,10 @@ mod common;
 
 use common::{add_task, create_day, create_long_term, create_week, TestDb, NOW, TODAY};
 use planner_lib::error::AppError;
-use planner_lib::repository::{cycles as cycle_repo, reminders::{self, TargetKind}};
+use planner_lib::repository::{
+    cycles as cycle_repo,
+    reminders::{self, TargetKind},
+};
 use planner_lib::service::cycles::{self, AddSessionArgs};
 use planner_lib::service::proposals::{self, TaskInput};
 
@@ -56,13 +59,10 @@ fn finished_focus_block_can_be_deleted_and_reverses_its_aggregate() {
     let other_started_at = NOW + 100;
     let other_elapsed = 11 * 60 * 1000;
     cycles::start_cycle(&db.db, &other_session.id, other_started_at).unwrap();
-    let other_finished = cycles::finish_cycle(
-        &db.db,
-        &other_session.id,
-        other_started_at + other_elapsed,
-    )
-    .unwrap()
-    .value;
+    let other_finished =
+        cycles::finish_cycle(&db.db, &other_session.id, other_started_at + other_elapsed)
+            .unwrap()
+            .value;
 
     // A session remains deletable after its containing day has ended.
     cycles::start_cycle(&db.db, &day.id, other_started_at + other_elapsed + 1).unwrap();
@@ -162,8 +162,14 @@ fn running_focus_block_can_be_deleted_without_accruing_time() {
     .unwrap()
     .is_none());
     assert_eq!(cycle_repo::require(&conn, &day.id).unwrap().focused_time, 0);
-    assert_eq!(cycle_repo::require(&conn, &week.id).unwrap().focused_time, 0);
-    assert_eq!(cycle_repo::require(&conn, &month.id).unwrap().focused_time, 0);
+    assert_eq!(
+        cycle_repo::require(&conn, &week.id).unwrap().focused_time,
+        0
+    );
+    assert_eq!(
+        cycle_repo::require(&conn, &month.id).unwrap().focused_time,
+        0
+    );
 }
 
 #[test]
@@ -204,14 +210,11 @@ fn proposal_lock_rejects_container_delete_without_partial_session_changes() {
     let before_month = cycle_repo::require(&db.conn(), &month.id).unwrap();
     let before_task = planner_lib::repository::tasks::require(&db.conn(), &task.id).unwrap();
     let reminder_at = started_at + 3_600_000;
-    assert!(reminders::find_for_target(
-        &db.conn(),
-        TargetKind::Session,
-        &session.id,
-        reminder_at,
-    )
-    .unwrap()
-    .is_some());
+    assert!(
+        reminders::find_for_target(&db.conn(), TargetKind::Session, &session.id, reminder_at,)
+            .unwrap()
+            .is_some()
+    );
 
     let err = cycles::delete_cycle(&db.db, &day.id).unwrap_err();
     assert_eq!(err_code(&err), "task_preview_locked");
@@ -225,12 +228,9 @@ fn proposal_lock_rejects_container_delete_without_partial_session_changes() {
         before_task
     );
     assert!(cycle_repo::get(&conn, &session.id).unwrap().is_some());
-    assert!(reminders::find_for_target(
-        &conn,
-        TargetKind::Session,
-        &session.id,
-        reminder_at,
-    )
-    .unwrap()
-    .is_some());
+    assert!(
+        reminders::find_for_target(&conn, TargetKind::Session, &session.id, reminder_at,)
+            .unwrap()
+            .is_some()
+    );
 }

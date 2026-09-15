@@ -1,0 +1,9 @@
+{
+  "duration.minutes_one": "{{count}} 分钟",
+  "duration.minutes_other": "{{count}} 分钟",
+  "duration.hours_one": "{{count}} 小时",
+  "duration.hours_other": "{{count}} 小时",
+  "duration.hoursMinutes": "{{hours}} 小时 {{minutes}} 分钟",
+  "error.generic": "操作失败，请重试。",
+  "error.detail": "操作未完成：{{detail}}"
+}

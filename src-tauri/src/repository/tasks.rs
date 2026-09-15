@@ -188,7 +188,10 @@ pub fn least_used_root_color(conn: &Connection, cycle_id: &str) -> AppResult<Str
         .map_err(from_rusqlite)?;
     for row in rows {
         let (key, count) = row.map_err(from_rusqlite)?;
-        if let Some(index) = ROOT_COLOR_KEYS.iter().position(|candidate| *candidate == key) {
+        if let Some(index) = ROOT_COLOR_KEYS
+            .iter()
+            .position(|candidate| *candidate == key)
+        {
             counts[index] = count;
         }
     }

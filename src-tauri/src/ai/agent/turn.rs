@@ -177,14 +177,39 @@ fn stored(
 
 /// Human decisions are transcript events, not model prose or a footer toast.
 /// Caller may use a transaction to commit the decision and its receipt together.
-pub fn record_decision(conn: &rusqlite::Connection, cycle_id: &str, result: serde_json::Value) -> AppResult<()> {
-    if crate::repository::cycles::get(conn,cycle_id)?.is_none() { return Ok(()); }
-    let conversation=repo::get_or_create_conversation(conn,cycle_id,now_ms())?;
-    if conversation.active_turn_id.is_some() { return Err(AppError::conflict("turn_in_progress","Wait for the current Coach response before confirming changes")); }
-    let payload=MessagePayload::AppToolResult {name:"approval_decision".into(),result};
-    let message=stored(&conversation.id,&uuid::Uuid::new_v4().to_string(),repo::max_sequence(conn,&conversation.id)?+1,&payload);
-    repo::insert_message(conn,&message)?;
-    repo::finish_turn(conn,&conversation.id,now_ms(),None,conversation.last_error.as_deref())?;
+pub fn record_decision(
+    conn: &rusqlite::Connection,
+    cycle_id: &str,
+    result: serde_json::Value,
+) -> AppResult<()> {
+    if crate::repository::cycles::get(conn, cycle_id)?.is_none() {
+        return Ok(());
+    }
+    let conversation = repo::get_or_create_conversation(conn, cycle_id, now_ms())?;
+    if conversation.active_turn_id.is_some() {
+        return Err(AppError::conflict(
+            "turn_in_progress",
+            "Wait for the current Coach response before confirming changes",
+        ));
+    }
+    let payload = MessagePayload::AppToolResult {
+        name: "approval_decision".into(),
+        result,
+    };
+    let message = stored(
+        &conversation.id,
+        &uuid::Uuid::new_v4().to_string(),
+        repo::max_sequence(conn, &conversation.id)? + 1,
+        &payload,
+    );
+    repo::insert_message(conn, &message)?;
+    repo::finish_turn(
+        conn,
+        &conversation.id,
+        now_ms(),
+        None,
+        conversation.last_error.as_deref(),
+    )?;
     Ok(())
 }
 
@@ -251,7 +276,14 @@ pub fn get_conversation(db: &Db, cycle_id: &str) -> AppResult<Option<Conversatio
     let context_idle_minutes = repo::context_idle_minutes(&conn)?;
     Ok(Some(ConversationView {
         context_idle_minutes,
-        expires_at: if messages.is_empty() && conversation.active_skill.is_none() && conversation.last_error.is_none() { None } else { repo::expires_at(&conversation, context_idle_minutes) },
+        expires_at: if messages.is_empty()
+            && conversation.active_skill.is_none()
+            && conversation.last_error.is_none()
+        {
+            None
+        } else {
+            repo::expires_at(&conversation, context_idle_minutes)
+        },
         id: conversation.id,
         cycle_id: conversation.cycle_id,
         revision: conversation.revision,
@@ -376,7 +408,11 @@ async fn drive_turn(
     loop {
         let request = AgentRequest {
             skill,
-            system: build_system_instruction(skill, cycle_context.cycle.cycle_type)?,
+            system: format!(
+                "{}\n{}",
+                build_system_instruction(skill, cycle_context.cycle.cycle_type)?,
+                crate::i18n::for_db(db)?.instruction()
+            ),
             context_block: context_xml.clone(),
             history: history.clone(),
             user_message: if rounds == 0 {
@@ -429,12 +465,21 @@ async fn drive_turn(
             tool_call_id: None,
         });
         for call in &response.tool_calls {
-            let allowed = executor.definitions(skill, resolved.tools_supported).iter().any(|tool| tool.name == call.name);
-            let outcome = if allowed { executor.execute(db, cycle_id, call) } else { ToolOutcome {
-                tool_call_id: call.id.clone(), name: call.name.clone(),
-                result: serde_json::json!({"error":{"code":"tool_not_available","message":"Load the appropriate skill before using this tool."}}),
-                is_error: true, activated_skill: None,
-            } };
+            let allowed = executor
+                .definitions(skill, resolved.tools_supported)
+                .iter()
+                .any(|tool| tool.name == call.name);
+            let outcome = if allowed {
+                executor.execute(db, cycle_id, call)
+            } else {
+                ToolOutcome {
+                    tool_call_id: call.id.clone(),
+                    name: call.name.clone(),
+                    result: serde_json::json!({"error":{"code":"tool_not_available","message":"Load the appropriate skill before using this tool."}}),
+                    is_error: true,
+                    activated_skill: None,
+                }
+            };
             if let Some(new_skill) = outcome.activated_skill {
                 skill = new_skill;
                 activated = Some(new_skill);
@@ -539,21 +584,47 @@ mod tests {
 
     #[test]
     fn approved_task_receipt_is_committed_with_the_task_and_replayed_in_context() {
-        let (db,_dir)=db(); let cycle=month_cycle(&db);
-        let task=crate::service::proposals::apply_upsert_preview(&db,&cycle,&crate::service::proposals::TaskInput {title:"A useful step".into(),..Default::default()},now_ms()).unwrap().value;
-        crate::ai::actions::resolve_task_preview(&db,&cycle,&task.id,true).unwrap();
-        let view=get_conversation(&db,&cycle).unwrap().unwrap();
-        assert_eq!(view.messages.len(),1);
-        let payload:MessagePayload=serde_json::from_value(view.messages[0].payload.clone()).unwrap();
-        let MessagePayload::AppToolResult {name,result}=&payload else {panic!("receipt expected")};
-        assert_eq!(name,"approval_decision");
+        let (db, _dir) = db();
+        let cycle = month_cycle(&db);
+        crate::service::settings::set_locale(&db, "zh-CN".into()).unwrap();
+        let task = crate::service::proposals::apply_upsert_preview(
+            &db,
+            &cycle,
+            &crate::service::proposals::TaskInput {
+                title: "A useful step".into(),
+                ..Default::default()
+            },
+            now_ms(),
+        )
+        .unwrap()
+        .value;
+        crate::ai::actions::resolve_task_preview(&db, &cycle, &task.id, true).unwrap();
+        let view = get_conversation(&db, &cycle).unwrap().unwrap();
+        assert_eq!(view.messages.len(), 1);
+        let payload: MessagePayload =
+            serde_json::from_value(view.messages[0].payload.clone()).unwrap();
+        let MessagePayload::AppToolResult { name, result } = &payload else {
+            panic!("receipt expected")
+        };
+        assert_eq!(name, "approval_decision");
         assert_eq!(result["text"], "已添加任务「A useful step」。");
         assert_eq!(result["target_id"], task.id);
         assert_eq!(result["target_kind"], "task");
         assert_eq!(result["decision"], "applied");
-        assert!(payload.to_history().unwrap().content.contains("A useful step"));
-        assert!(crate::ai::actions::resolve_task_preview(&db,&cycle,&task.id,true).is_err());
-        assert_eq!(get_conversation(&db,&cycle).unwrap().unwrap().messages.len(),1);
+        assert!(payload
+            .to_history()
+            .unwrap()
+            .content
+            .contains("A useful step"));
+        assert!(crate::ai::actions::resolve_task_preview(&db, &cycle, &task.id, true).is_err());
+        assert_eq!(
+            get_conversation(&db, &cycle)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            1
+        );
     }
 
     fn db() -> (Arc<Db>, tempfile::TempDir) {
@@ -618,6 +689,67 @@ mod tests {
 
     fn executor() -> Arc<dyn ToolExecutor> {
         Arc::new(NopExecutor)
+    }
+
+    #[tokio::test]
+    async fn each_turn_reads_the_interface_language_without_rewriting_history() {
+        #[derive(Default)]
+        struct Recorder(Mutex<Vec<AgentRequest>>);
+        impl LlmProvider for Recorder {
+            fn generate_agent(
+                &self,
+                request: AgentRequest,
+            ) -> crate::ai::llm::BoxFuture<'_, Result<crate::ai::llm::AgentResponse, AgentError>>
+            {
+                self.0.lock().unwrap().push(request);
+                Box::pin(async {
+                    Ok(crate::ai::llm::AgentResponse {
+                        text: "Original reply".into(),
+                        tool_calls: vec![],
+                        usage: None,
+                    })
+                })
+            }
+            fn generate_json(
+                &self,
+                _: crate::ai::llm::LlmRequest,
+            ) -> crate::ai::llm::BoxFuture<'_, Result<serde_json::Value, AgentError>> {
+                unreachable!()
+            }
+        }
+        let (db, _dir) = db();
+        let cycle = month_cycle(&db);
+        let provider = Arc::new(Recorder::default());
+        for locale in ["en", "zh-CN"] {
+            crate::service::settings::set_locale(&db, locale.into()).unwrap();
+            run_turn(
+                &db,
+                provider.clone(),
+                fake_resolved(),
+                executor(),
+                &cycle,
+                "设计 review",
+                None,
+            )
+            .await
+            .unwrap();
+        }
+        let requests = provider.0.lock().unwrap();
+        assert!(requests[0]
+            .system
+            .contains("Default response language: English."));
+        assert!(requests[1]
+            .system
+            .contains("Default response language: Simplified Chinese"));
+        assert!(requests[1]
+            .history
+            .iter()
+            .any(|m| m.content == "Original reply"));
+        assert!(requests[1]
+            .history
+            .iter()
+            .any(|m| m.content == "设计 review"));
+        assert_eq!(requests[1].user_message, "设计 review");
     }
 
     #[tokio::test]
@@ -784,29 +916,68 @@ mod tests {
     async fn skill_activation_reloads_instructions_and_tools_in_the_same_turn() {
         struct Recorder(std::sync::atomic::AtomicUsize);
         impl LlmProvider for Recorder {
-            fn generate_agent(&self, req: AgentRequest) -> crate::ai::llm::BoxFuture<'_, Result<crate::ai::llm::AgentResponse, crate::ai::llm::AgentError>> {
+            fn generate_agent(
+                &self,
+                req: AgentRequest,
+            ) -> crate::ai::llm::BoxFuture<
+                '_,
+                Result<crate::ai::llm::AgentResponse, crate::ai::llm::AgentError>,
+            > {
                 let first = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
                 if first {
                     assert_eq!(req.skill, AgentSkill::None);
                     assert_eq!(req.user_message, "Plan this cycle");
                     assert!(!req.tools.iter().any(|t| t.name == "create_goal"));
                 } else {
-                    assert_eq!(req.history.iter().filter(|m| m.role == AgentRole::User && m.content == "Plan this cycle").count(), 1);
+                    assert_eq!(
+                        req.history
+                            .iter()
+                            .filter(|m| m.role == AgentRole::User && m.content == "Plan this cycle")
+                            .count(),
+                        1
+                    );
                     assert_eq!(req.history.first().unwrap().content, "Plan this cycle");
                     assert_eq!(req.skill, AgentSkill::LongTermPlanning);
                     assert!(req.system.contains("# long-term-planning"));
                     assert!(req.tools.iter().any(|t| t.name == "create_goal"));
                 }
-                Box::pin(async move { Ok(crate::ai::llm::AgentResponse {
-                    text: if first { String::new() } else { "Ready".into() },
-                    tool_calls: if first { vec![ToolCallRecord { id: "activate".into(), name: "load_skill".into(), arguments: serde_json::json!({"name":"long-term-planning"}) }] } else { vec![] }, usage: None,
-                }) })
+                Box::pin(async move {
+                    Ok(crate::ai::llm::AgentResponse {
+                        text: if first { String::new() } else { "Ready".into() },
+                        tool_calls: if first {
+                            vec![ToolCallRecord {
+                                id: "activate".into(),
+                                name: "load_skill".into(),
+                                arguments: serde_json::json!({"name":"long-term-planning"}),
+                            }]
+                        } else {
+                            vec![]
+                        },
+                        usage: None,
+                    })
+                })
             }
-            fn generate_json(&self, _: crate::ai::llm::LlmRequest) -> crate::ai::llm::BoxFuture<'_, Result<serde_json::Value, crate::ai::llm::AgentError>> { unreachable!() }
+            fn generate_json(
+                &self,
+                _: crate::ai::llm::LlmRequest,
+            ) -> crate::ai::llm::BoxFuture<'_, Result<serde_json::Value, crate::ai::llm::AgentError>>
+            {
+                unreachable!()
+            }
         }
         let (db, _dir) = db();
         let cycle = month_cycle(&db);
-        let result = run_turn(&db, Arc::new(Recorder(std::sync::atomic::AtomicUsize::new(0))), fake_resolved(), Arc::new(crate::ai::tools::ToolRegistry), &cycle, "Plan this cycle", None).await.unwrap();
+        let result = run_turn(
+            &db,
+            Arc::new(Recorder(std::sync::atomic::AtomicUsize::new(0))),
+            fake_resolved(),
+            Arc::new(crate::ai::tools::ToolRegistry),
+            &cycle,
+            "Plan this cycle",
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(result.reply, "Ready");
         assert_eq!(result.active_skill.as_deref(), Some("long_term_planning"));
     }
@@ -817,52 +988,177 @@ mod tests {
         const INSTRUCTION: &str = "Create exactly Approval integration goal";
         struct Planner(std::sync::atomic::AtomicUsize);
         impl LlmProvider for Planner {
-            fn generate_agent(&self, req: AgentRequest) -> crate::ai::llm::BoxFuture<'_, Result<crate::ai::llm::AgentResponse, AgentError>> {
+            fn generate_agent(
+                &self,
+                req: AgentRequest,
+            ) -> crate::ai::llm::BoxFuture<'_, Result<crate::ai::llm::AgentResponse, AgentError>>
+            {
                 let round = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if round == 0 {
                     assert_eq!(req.user_message, INSTRUCTION);
                 } else {
-                    assert_eq!(req.history.iter().filter(|m| m.role == AgentRole::User && m.content == INSTRUCTION).count(), 1);
-                    let instruction = req.history.iter().position(|m| m.content == INSTRUCTION).unwrap();
-                    let call = req.history.iter().position(|m| !m.tool_calls.is_empty()).unwrap();
-                    assert!(instruction < call, "current request precedes its tool activity");
+                    assert_eq!(
+                        req.history
+                            .iter()
+                            .filter(|m| m.role == AgentRole::User && m.content == INSTRUCTION)
+                            .count(),
+                        1
+                    );
+                    let instruction = req
+                        .history
+                        .iter()
+                        .position(|m| m.content == INSTRUCTION)
+                        .unwrap();
+                    let call = req
+                        .history
+                        .iter()
+                        .position(|m| !m.tool_calls.is_empty())
+                        .unwrap();
+                    assert!(
+                        instruction < call,
+                        "current request precedes its tool activity"
+                    );
                 }
                 let tool_calls = match round {
-                    0 => vec![ToolCallRecord { id: "load".into(), name: "load_skill".into(), arguments: serde_json::json!({"name":"long-term-planning"}) }],
-                    1 => vec![ToolCallRecord { id: "create".into(), name: "create_goal".into(), arguments: serde_json::json!({"title":"Approval integration goal","rationale":"user requested it"}) }],
+                    0 => vec![ToolCallRecord {
+                        id: "load".into(),
+                        name: "load_skill".into(),
+                        arguments: serde_json::json!({"name":"long-term-planning"}),
+                    }],
+                    1 => vec![ToolCallRecord {
+                        id: "create".into(),
+                        name: "create_goal".into(),
+                        arguments: serde_json::json!({"title":"Approval integration goal","rationale":"user requested it"}),
+                    }],
                     _ => vec![],
                 };
-                Box::pin(async move { Ok(crate::ai::llm::AgentResponse { text: "Preview ready".into(), tool_calls, usage: None }) })
+                Box::pin(async move {
+                    Ok(crate::ai::llm::AgentResponse {
+                        text: "Preview ready".into(),
+                        tool_calls,
+                        usage: None,
+                    })
+                })
             }
-            fn generate_json(&self, _: crate::ai::llm::LlmRequest) -> crate::ai::llm::BoxFuture<'_, Result<serde_json::Value, AgentError>> { unreachable!() }
+            fn generate_json(
+                &self,
+                _: crate::ai::llm::LlmRequest,
+            ) -> crate::ai::llm::BoxFuture<'_, Result<serde_json::Value, AgentError>> {
+                unreachable!()
+            }
         }
         let (db, _dir) = db();
         let cycle = month_cycle(&db);
-        run_turn(&db, Arc::new(FakeProvider::with_script(vec![FakeTurn::Text("Old table example".into())])), fake_resolved(), executor(), &cycle, "Show a table", None).await.unwrap();
-        let result = run_turn(&db, Arc::new(Planner(std::sync::atomic::AtomicUsize::new(0))), fake_resolved(), Arc::new(crate::ai::tools::ToolRegistry), &cycle, INSTRUCTION, None).await.unwrap();
-        assert_eq!(result.messages.iter().filter(|m| m.message_type == "user").count(), 1);
+        run_turn(
+            &db,
+            Arc::new(FakeProvider::with_script(vec![FakeTurn::Text(
+                "Old table example".into(),
+            )])),
+            fake_resolved(),
+            executor(),
+            &cycle,
+            "Show a table",
+            None,
+        )
+        .await
+        .unwrap();
+        let result = run_turn(
+            &db,
+            Arc::new(Planner(std::sync::atomic::AtomicUsize::new(0))),
+            fake_resolved(),
+            Arc::new(crate::ai::tools::ToolRegistry),
+            &cycle,
+            INSTRUCTION,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result
+                .messages
+                .iter()
+                .filter(|m| m.message_type == "user")
+                .count(),
+            1
+        );
         let preview = proposals::get_preview_summary(&db, &cycle).unwrap();
         assert_eq!(preview.count, 1);
         let id = preview.tasks[0].id.clone();
         assert_eq!(preview.tasks[0].title, "Approval integration goal");
         assert!(!preview.originals[&id].original_exists);
-        assert!(editor::get_editor_workspace(&db, &cycle).unwrap().tasks[0].task.proposal.is_some());
+        assert!(editor::get_editor_workspace(&db, &cycle).unwrap().tasks[0]
+            .task
+            .proposal
+            .is_some());
         proposals::keep_task_preview(&db, &id).unwrap();
-        assert_eq!(editor::get_editor_workspace(&db, &cycle).unwrap().tasks[0].task.title, "Approval integration goal");
+        assert_eq!(
+            editor::get_editor_workspace(&db, &cycle).unwrap().tasks[0]
+                .task
+                .title,
+            "Approval integration goal"
+        );
 
-        let update = ToolCallRecord { id: "update".into(), name: "update_goal".into(), arguments: serde_json::json!({"task_id":id,"title":"Revised goal","rationale":"test change"}) };
-        run_turn(&db, Arc::new(FakeProvider::with_script(vec![FakeTurn::Calls(vec![update]), FakeTurn::Text("Changed".into())])), fake_resolved(), Arc::new(crate::ai::tools::ToolRegistry), &cycle, "Revise it", None).await.unwrap();
+        let update = ToolCallRecord {
+            id: "update".into(),
+            name: "update_goal".into(),
+            arguments: serde_json::json!({"task_id":id,"title":"Revised goal","rationale":"test change"}),
+        };
+        run_turn(
+            &db,
+            Arc::new(FakeProvider::with_script(vec![
+                FakeTurn::Calls(vec![update]),
+                FakeTurn::Text("Changed".into()),
+            ])),
+            fake_resolved(),
+            Arc::new(crate::ai::tools::ToolRegistry),
+            &cycle,
+            "Revise it",
+            None,
+        )
+        .await
+        .unwrap();
         let preview = proposals::get_preview_summary(&db, &cycle).unwrap();
-        assert_eq!(preview.originals[&id].title.as_deref(), Some("Approval integration goal"));
+        assert_eq!(
+            preview.originals[&id].title.as_deref(),
+            Some("Approval integration goal")
+        );
         assert_eq!(preview.tasks[0].title, "Revised goal");
         proposals::undo_task_preview(&db, &id).unwrap();
-        assert_eq!(editor::get_editor_workspace(&db, &cycle).unwrap().tasks[0].task.title, "Approval integration goal");
+        assert_eq!(
+            editor::get_editor_workspace(&db, &cycle).unwrap().tasks[0]
+                .task
+                .title,
+            "Approval integration goal"
+        );
 
-        let delete = ToolCallRecord { id: "delete".into(), name: "delete_goal".into(), arguments: serde_json::json!({"task_id":id,"rationale":"remove test goal"}) };
-        run_turn(&db, Arc::new(FakeProvider::with_script(vec![FakeTurn::Calls(vec![delete]), FakeTurn::Text("Deletion ready".into())])), fake_resolved(), Arc::new(crate::ai::tools::ToolRegistry), &cycle, "Remove it", None).await.unwrap();
+        let delete = ToolCallRecord {
+            id: "delete".into(),
+            name: "delete_goal".into(),
+            arguments: serde_json::json!({"task_id":id,"rationale":"remove test goal"}),
+        };
+        run_turn(
+            &db,
+            Arc::new(FakeProvider::with_script(vec![
+                FakeTurn::Calls(vec![delete]),
+                FakeTurn::Text("Deletion ready".into()),
+            ])),
+            fake_resolved(),
+            Arc::new(crate::ai::tools::ToolRegistry),
+            &cycle,
+            "Remove it",
+            None,
+        )
+        .await
+        .unwrap();
         proposals::keep_task_preview(&db, &id).unwrap();
-        assert_eq!(proposals::get_preview_summary(&db, &cycle).unwrap().count, 0);
-        assert!(editor::get_editor_workspace(&db, &cycle).unwrap().tasks.is_empty());
+        assert_eq!(
+            proposals::get_preview_summary(&db, &cycle).unwrap().count,
+            0
+        );
+        assert!(editor::get_editor_workspace(&db, &cycle)
+            .unwrap()
+            .tasks
+            .is_empty());
     }
 
     #[test]

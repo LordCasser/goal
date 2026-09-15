@@ -21,9 +21,9 @@ function temporaryDirectory() {
 
 function writeFixture(rootDir) {
   fs.mkdirSync(path.join(rootDir, "src-tauri"), { recursive: true });
-  fs.writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ version: "0.1.0" }));
-  fs.writeFileSync(path.join(rootDir, "src-tauri", "tauri.conf.json"), JSON.stringify({ version: "0.1.0" }));
-  fs.writeFileSync(path.join(rootDir, "src-tauri", "Cargo.toml"), '[package]\nname = "planner"\nversion = "0.1.0"\n');
+  fs.writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ version: "0.1.1" }));
+  fs.writeFileSync(path.join(rootDir, "src-tauri", "tauri.conf.json"), JSON.stringify({ version: "0.1.1" }));
+  fs.writeFileSync(path.join(rootDir, "src-tauri", "Cargo.toml"), '[package]\nname = "planner"\nversion = "0.1.1"\n');
 }
 
 function writeBundles(rootDir, targetId) {
@@ -31,7 +31,7 @@ function writeBundles(rootDir, targetId) {
   for (const bundle of target.bundles) {
     const directory = path.join(rootDir, "src-tauri", "target", target.triple, "release", "bundle", bundle.directory);
     fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(path.join(directory, `Goal-0.1.0${bundle.extension}`), `${targetId}:${bundle.directory}`);
+    fs.writeFileSync(path.join(directory, `Goal-0.1.1${bundle.extension}`), `${targetId}:${bundle.directory}`);
   }
 }
 
@@ -75,8 +75,8 @@ describe("release artifact contract", () => {
   it("requires matching package, Cargo, Tauri, and tag versions", () => {
     const rootDir = temporaryDirectory();
     writeFixture(rootDir);
-    expect(assertProductVersion({ rootDir, tag: "v0.1.0" })).toBe("0.1.0");
-    expect(() => assertProductVersion({ rootDir, tag: "v0.2.0" })).toThrow(/must equal v0.1.0/);
+    expect(assertProductVersion({ rootDir, tag: "v0.1.1" })).toBe("0.1.1");
+    expect(() => assertProductVersion({ rootDir, tag: "v0.2.0" })).toThrow(/must equal v0.1.1/);
   });
 
   it("stages each native bundle with the stable six-target naming scheme", () => {
@@ -89,14 +89,14 @@ describe("release artifact contract", () => {
     }
     const files = verifyReleaseDirectory({ rootDir, outputDir });
     expect(files.map((filePath) => path.basename(filePath))).toEqual([
-      "Goal-v0.1.0-linux-amd64.AppImage",
-      "Goal-v0.1.0-linux-amd64.deb",
-      "Goal-v0.1.0-linux-arm64.AppImage",
-      "Goal-v0.1.0-linux-arm64.deb",
-      "Goal-v0.1.0-macos-amd64.dmg",
-      "Goal-v0.1.0-macos-arm64.dmg",
-      "Goal-v0.1.0-windows-amd64-setup.exe",
-      "Goal-v0.1.0-windows-arm64-setup.exe",
+      "Goal-v0.1.1-linux-amd64.AppImage",
+      "Goal-v0.1.1-linux-amd64.deb",
+      "Goal-v0.1.1-linux-arm64.AppImage",
+      "Goal-v0.1.1-linux-arm64.deb",
+      "Goal-v0.1.1-macos-amd64.dmg",
+      "Goal-v0.1.1-macos-arm64.dmg",
+      "Goal-v0.1.1-windows-amd64-setup.exe",
+      "Goal-v0.1.1-windows-arm64-setup.exe",
     ]);
     const checksumPath = writeChecksums({ outputDir, files });
     expect(fs.readFileSync(checksumPath, "utf8").trim().split("\n")).toHaveLength(8);

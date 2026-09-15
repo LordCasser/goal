@@ -10,14 +10,23 @@ use crate::service::proposals::{self, PreviewSummary};
 use super::emit_mutation;
 
 #[tauri::command]
-pub fn get_pending_task_cycles(db: State<'_, Db>) -> AppResult<Vec<String>> { proposals::pending_cycle_ids(&db) }
+pub fn get_pending_task_cycles(db: State<'_, Db>) -> AppResult<Vec<String>> {
+    proposals::pending_cycle_ids(&db)
+}
 
 #[tauri::command]
-pub fn resolve_coach_task_preview(app:tauri::AppHandle<tauri::Wry>,db:State<'_,Db>,source_cycle_id:String,task_id:String,approve:bool)->AppResult<()> {
-    let mutation=crate::ai::actions::resolve_task_preview(&db,&source_cycle_id,&task_id,approve)?;
-    emit_mutation(&app,&mutation);
+pub fn resolve_coach_task_preview(
+    app: tauri::AppHandle<tauri::Wry>,
+    db: State<'_, Db>,
+    source_cycle_id: String,
+    task_id: String,
+    approve: bool,
+) -> AppResult<()> {
+    let mutation =
+        crate::ai::actions::resolve_task_preview(&db, &source_cycle_id, &task_id, approve)?;
+    emit_mutation(&app, &mutation);
     use tauri::Emitter;
-    let _=app.emit("agent:actions_changed",());
+    let _ = app.emit("agent:actions_changed", ());
     Ok(())
 }
 

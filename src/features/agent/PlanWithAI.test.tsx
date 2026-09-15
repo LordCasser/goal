@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Cycle } from "../../lib/ipc";
+import { applyLocale } from "../../lib/i18n";
 const backend = vi.hoisted(() => ({ getAiAvailability: vi.fn(), getAppFlag: vi.fn() }));
 vi.mock("../../lib/ipc", () => backend);
 import { AI_AVAILABILITY_KEY, PLAN_WITH_AI_KEY, PlanWithAI } from "./PlanWithAI";
 
-beforeEach(() => { vi.clearAllMocks(); backend.getAiAvailability.mockResolvedValue(true); backend.getAppFlag.mockResolvedValue(null); });
+beforeEach(() => { applyLocale("en"); vi.clearAllMocks(); backend.getAiAvailability.mockResolvedValue(true); backend.getAppFlag.mockResolvedValue(null); });
 describe("contextual planning entry", () => {
   it.each(["month", "week", "day"] as const)("uses the exact %s cycle, and follows verification and preference changes", async (type) => {
     const cycle = { id: `${type}-target`, type, finished: false, archived: false } as Cycle;

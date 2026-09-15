@@ -24,8 +24,7 @@ use rusqlite::Connection;
 
 use crate::db::Db;
 use crate::domain::calendar::{
-    align_range_to_weeks, dates_between, day_key, format_date, parse_date,
-    truncate_schedule_to_day,
+    align_range_to_weeks, dates_between, day_key, format_date, parse_date, truncate_schedule_to_day,
 };
 use crate::domain::cycle::{Cycle, CycleType};
 use crate::error::{AppError, AppResult};
@@ -402,11 +401,15 @@ fn move_to_empty_day(
 ) -> AppResult<Mutation<MoveDayOutcome>> {
     ensure_no_running_session(tx, source)?;
     let target_day = cycles_service::get_or_create_day_in_tx(tx, target, week_start_day, now)?;
-    // Repeat templates materialize on the newly claimed date, same as opening
-    // that day in the workspace would (spec: 模板自动出现).
-    let generated = crate::service::repeats::generate_for_day_in_tx(tx, &target_day.id, now)?;
-
+    // Move the source sessions before materializing repeats. Otherwise a
+    // source instance is copied into the target by the generator and then
+    // moved there as a second instance with the same repeat_id.
     let mut mutation = merge_days(tx, source, &target_day)?;
+    // Repeat templates materialize on the newly claimed date, same as opening
+    // that day in the workspace would (spec: 模板自动出现). The moved source
+    // instances now make their template rows idempotent, while other active
+    // templates still get one instance.
+    let generated = crate::service::repeats::generate_for_day_in_tx(tx, &target_day.id, now)?;
     mutation.value.strategy = MoveStrategy::Move.as_str();
     for id in generated {
         mutation.cycles.push(id);
@@ -561,10 +564,18 @@ pub fn set_session_schedule(
                 "This focus block has no duration yet; set one before scheduling it",
             )
         })?;
-        Some(SessionSchedule::build(day_cycle_id.clone(), session_id.to_string(), start, duration))
+        Some(SessionSchedule::build(
+            day_cycle_id.clone(),
+            session_id.to_string(),
+            start,
+            duration,
+        ))
     } else {
         if duration_ms.is_some() {
-            return Err(AppError::validation("unschedule_duration", "Removing a time slot must keep its duration"));
+            return Err(AppError::validation(
+                "unschedule_duration",
+                "Removing a time slot must keep its duration",
+            ));
         }
         None
     };
@@ -683,10 +694,13 @@ pub fn get_time_budget(db: &Db, date: &str) -> AppResult<TimeBudget> {
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::calendar;
+    use std::collections::HashSet;
+
     use super::*;
+    use crate::domain::calendar;
     use crate::repository::tasks as tasks_repo;
     use crate::service::cycles::{AddSessionArgs, CreateCycleArgs};
+    use crate::service::repeats::{self, AddRepeatArgs};
     use crate::service::tasks::{add_task, AddTaskArgs};
 
     /// Wednesday 2026-09-16, matching tests/common (unit tests cannot import
@@ -789,6 +803,16 @@ mod tests {
             .into_iter()
             .map(|s| s.title)
             .collect()
+    }
+
+    fn session_count(db: &Db) -> i64 {
+        let conn = db.pool().get().expect("conn");
+        conn.query_row(
+            "SELECT COUNT(*) FROM cycles WHERE type = 'session'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("session count")
     }
 
     fn day_at(db: &Db, date: &str) -> Option<Cycle> {
@@ -949,6 +973,110 @@ mod tests {
     }
 
     #[test]
+    fn moving_repeated_day_back_and_forth_preserves_instances_and_materializes_missing_templates_once(
+    ) {
+        let (f, _month, week) = fixture_with_week();
+        let source = create_day(&f.db, &week.id, "2026-09-15");
+        let original = add_block(&f.db, &source.id, "template title", 30);
+        let repeat = repeats::add_repeat(
+            &f.db,
+            &AddRepeatArgs {
+                session_id: original.id.clone(),
+            },
+            NOW,
+        )
+        .expect("repeat created")
+        .value;
+
+        // Existing instances may diverge from their template and still keep
+        // their lifecycle state while moving between dates.
+        let edited = cycles_service::update_session(
+            &f.db,
+            &original.id,
+            "edited title".into(),
+            Some(45 * 60_000),
+        )
+        .expect("session edited")
+        .value;
+        cycles_service::start_cycle(&f.db, &edited.id, NOW).expect("session started");
+        let edited = cycles_service::finish_cycle(&f.db, &edited.id, NOW)
+            .expect("session finished")
+            .value;
+        assert!(edited.finished);
+
+        // Keep a second active template without a source instance. Moving the
+        // day must materialize it once after the source content is transferred.
+        let missing_source = add_block(&f.db, &source.id, "missing template", 20);
+        let missing_repeat = repeats::add_repeat(
+            &f.db,
+            &AddRepeatArgs {
+                session_id: missing_source.id.clone(),
+            },
+            NOW,
+        )
+        .expect("second repeat created")
+        .value;
+        {
+            let conn = f.db.pool().get().expect("conn");
+            repo::delete(&conn, &missing_source.id).expect("remove source instance");
+        }
+
+        let expected_ids = |db: &Db, day_id: &str| {
+            let conn = db.pool().get().expect("conn");
+            let sessions = repo::list_sessions_by_day(&conn, day_id).expect("sessions");
+            let ids: HashSet<String> = sessions.iter().map(|session| session.id.clone()).collect();
+            assert_eq!(ids.len(), sessions.len(), "no duplicate session ids");
+            assert_eq!(session_count(db), 2, "one instance per active template");
+
+            let source_instance = repo::list_by_repeat(&conn, &repeat.id).expect("source repeat");
+            assert_eq!(source_instance.len(), 1);
+            assert_eq!(source_instance[0].id, original.id);
+            assert_eq!(source_instance[0].title, "edited title");
+            assert_eq!(source_instance[0].duration, Some(45 * 60_000));
+            assert!(source_instance[0].finished);
+
+            let missing_instance =
+                repo::list_by_repeat(&conn, &missing_repeat.id).expect("missing repeat");
+            assert_eq!(
+                missing_instance.len(),
+                1,
+                "missing template materializes once"
+            );
+            assert!(ids.contains(&original.id));
+            assert!(ids.contains(&missing_instance[0].id));
+            ids
+        };
+
+        let mut current_day_id = source.id.clone();
+        let mut instance_ids: Option<HashSet<String>> = None;
+        for target_date in ["2026-09-16", "2026-09-15", "2026-09-17", "2026-09-15"] {
+            let mutation = move_day_cycle(&f.db, &current_day_id, target_date, None, NOW)
+                .expect("move to empty date succeeds");
+            current_day_id = mutation.value.target_day_id;
+
+            let ids = expected_ids(&f.db, &current_day_id);
+            if let Some(previous) = &instance_ids {
+                assert_eq!(
+                    ids, *previous,
+                    "moving a day does not create or lose blocks"
+                );
+            } else {
+                instance_ids = Some(ids);
+            }
+
+            // Workspace opening uses this path; it must not add another copy
+            // after the calendar move already materialized the target date.
+            cycles_service::get_or_create_day(
+                &f.db,
+                parse_date(target_date).expect("target date"),
+                NOW,
+            )
+            .expect("opening moved day succeeds");
+            expected_ids(&f.db, &current_day_id);
+        }
+    }
+
+    #[test]
     fn move_creates_an_independent_week_when_needed() {
         let (f, _month, week) = fixture_with_week();
         let source = create_day(&f.db, &week.id, "2026-09-15");
@@ -1002,12 +1130,28 @@ mod tests {
     fn swap_keeps_an_optional_day_parent_and_both_days_content() {
         let (f, _month, week) = fixture_with_week();
         let grouped = create_day(&f.db, &week.id, "2026-09-15");
-        let independent = cycles_service::create_planning_cycle(&f.db, &cycles_service::CreateCycleArgs {
-            cycle_type: "day".into(), date: Some("2026-09-16".into()), ..Default::default()
-        }, parse_date("2026-09-16").unwrap(), NOW).unwrap().value;
+        let independent = cycles_service::create_planning_cycle(
+            &f.db,
+            &cycles_service::CreateCycleArgs {
+                cycle_type: "day".into(),
+                date: Some("2026-09-16".into()),
+                ..Default::default()
+            },
+            parse_date("2026-09-16").unwrap(),
+            NOW,
+        )
+        .unwrap()
+        .value;
         add_block(&f.db, &grouped.id, "grouped work", 25);
         add_block(&f.db, &independent.id, "independent work", 25);
-        move_day_cycle(&f.db, &grouped.id, "2026-09-16", Some(MoveStrategy::Swap), NOW).unwrap();
+        move_day_cycle(
+            &f.db,
+            &grouped.id,
+            "2026-09-16",
+            Some(MoveStrategy::Swap),
+            NOW,
+        )
+        .unwrap();
         let on_15 = day_at(&f.db, "2026-09-15").unwrap();
         let on_16 = day_at(&f.db, "2026-09-16").unwrap();
         assert_eq!(on_15.id, independent.id);
@@ -1306,13 +1450,18 @@ mod tests {
         .expect("session")
         .value;
         assert_eq!(
-            validation_code(set_session_schedule(&f.db, &naked.id, Some(day_start), None)),
+            validation_code(set_session_schedule(
+                &f.db,
+                &naked.id,
+                Some(day_start),
+                None
+            )),
             "schedule_duration_required"
         );
 
         // Omitting duration keeps the block's commitment and only moves start.
-        let mutation =
-            set_session_schedule(&f.db, &block.id, Some(day_start + 3_600_000), None).expect("schedule");
+        let mutation = set_session_schedule(&f.db, &block.id, Some(day_start + 3_600_000), None)
+            .expect("schedule");
         assert_eq!(mutation.value.unwrap().duration_ms, 30 * 60_000);
 
         // A started block may move but may not change its duration.
@@ -1332,7 +1481,12 @@ mod tests {
         // Ended pages are review-only.
         cycles_service::finish_cycle(&f.db, &block.id, NOW).expect("finish");
         assert_eq!(
-            conflict_code(set_session_schedule(&f.db, &block.id, Some(day_start), None)),
+            conflict_code(set_session_schedule(
+                &f.db,
+                &block.id,
+                Some(day_start),
+                None
+            )),
             "cycle_ended"
         );
     }
@@ -1350,21 +1504,36 @@ mod tests {
         assert!(get_schedule_overlaps(&f.db, &day.id).unwrap().is_empty());
 
         let changed_start = nine + 7 * 60_000;
-        let changed = set_session_schedule(&f.db, &first.id, Some(changed_start), Some(60 * 60_000)).unwrap();
+        let changed =
+            set_session_schedule(&f.db, &first.id, Some(changed_start), Some(60 * 60_000)).unwrap();
         let slot = changed.value.unwrap();
         assert_eq!(slot.starts_at, changed_start);
         assert_eq!(slot.ends_at, changed_start + 60 * 60_000);
         assert!(changed.cycles.ids().contains(&first.id));
         assert!(changed.cycles.ids().contains(&day.id));
-        assert_eq!(repo::require(&f.db.pool().get().unwrap(), &first.id).unwrap().duration, Some(60 * 60_000));
+        assert_eq!(
+            repo::require(&f.db.pool().get().unwrap(), &first.id)
+                .unwrap()
+                .duration,
+            Some(60 * 60_000)
+        );
         assert_eq!(get_time_budget(&f.db, TODAY).unwrap().scheduled_minutes, 90);
         assert_eq!(get_schedule_overlaps(&f.db, &day.id).unwrap().len(), 1);
 
-        assert_eq!(validation_code(set_session_schedule(&f.db, &first.id, Some(nine), Some(-1))), "invalid_duration");
+        assert_eq!(
+            validation_code(set_session_schedule(&f.db, &first.id, Some(nine), Some(-1))),
+            "invalid_duration"
+        );
         let conn = f.db.pool().get().unwrap();
         let saved = repo::require(&conn, &first.id).unwrap();
         assert_eq!(saved.duration, Some(60 * 60_000));
-        let start: i64 = conn.query_row("SELECT scheduled_start_at FROM cycles WHERE id = ?1", [&first.id], |row| row.get(0)).unwrap();
+        let start: i64 = conn
+            .query_row(
+                "SELECT scheduled_start_at FROM cycles WHERE id = ?1",
+                [&first.id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(start, changed_start);
     }
 
@@ -1385,7 +1554,10 @@ mod tests {
         set_session_schedule(&f.db, &block.id, Some(NOW), None).unwrap();
         cycles_service::start_cycle(&f.db, &block.id, NOW).unwrap();
         cycles_service::finish_cycle(&f.db, &block.id, NOW).unwrap();
-        assert_eq!(conflict_code(set_session_schedule(&f.db, &block.id, None, None)), "cycle_ended");
+        assert_eq!(
+            conflict_code(set_session_schedule(&f.db, &block.id, None, None)),
+            "cycle_ended"
+        );
         assert!(is_scheduled(&f.db, &block.id));
     }
 
@@ -1406,7 +1578,8 @@ mod tests {
         let first = add_block(&f.db, &day.id, "first", 30);
         let second = add_block(&f.db, &day.id, "second", 45);
         set_session_schedule(&f.db, &first.id, Some(day_start), None).expect("schedule");
-        set_session_schedule(&f.db, &second.id, Some(day_start + 3_600_000), None).expect("schedule");
+        set_session_schedule(&f.db, &second.id, Some(day_start + 3_600_000), None)
+            .expect("schedule");
 
         // Under: 75 of 120 minutes planned.
         let budget = get_time_budget(&f.db, TODAY).expect("budget");
@@ -1415,7 +1588,8 @@ mod tests {
 
         // Over: a not-yet-started but scheduled block counts too (spec: 含未开始已排).
         let third = add_block(&f.db, &day.id, "third", 60);
-        set_session_schedule(&f.db, &third.id, Some(day_start + 5 * 3_600_000), None).expect("schedule");
+        set_session_schedule(&f.db, &third.id, Some(day_start + 5 * 3_600_000), None)
+            .expect("schedule");
         let budget = get_time_budget(&f.db, TODAY).expect("budget");
         assert_eq!(budget.scheduled_minutes, 135);
         assert!(budget.scheduled_minutes > budget.capacity_minutes.unwrap());

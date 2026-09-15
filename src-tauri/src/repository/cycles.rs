@@ -644,9 +644,16 @@ pub fn move_tasks_between_cycles(
 
 /// Planning intervals intersecting an inclusive analysis range. Archive is
 /// lifecycle state, not deletion: past plans remain evidence for retrospective analysis.
-pub fn list_planning_cycles_overlapping(conn: &Connection, start: &str, end: &str) -> AppResult<Vec<Cycle>> {
+pub fn list_planning_cycles_overlapping(
+    conn: &Connection,
+    start: &str,
+    end: &str,
+) -> AppResult<Vec<Cycle>> {
     let mut stmt = conn.prepare(&format!("SELECT {CYCLE_COLUMNS} FROM cycles WHERE id != 'later' AND type != 'session' AND starts_on <= ?2 AND (ends_on > ?1 OR (ends_on IS NULL AND starts_on >= ?1)) ORDER BY starts_on, type, id")).map_err(from_rusqlite)?;
-    let result = stmt.query_map(params![start, end], row_to_cycle).map_err(from_rusqlite)?
-        .collect::<rusqlite::Result<Vec<_>>>().map_err(from_rusqlite)?;
+    let result = stmt
+        .query_map(params![start, end], row_to_cycle)
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
     Ok(result)
 }

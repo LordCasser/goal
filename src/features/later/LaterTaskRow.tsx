@@ -19,6 +19,7 @@ import {
 } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import { Button, Checkbox, Popover, PopoverItem, cn } from "../../ui";
+import { useTranslation } from "../../lib/i18n";
 
 export type LaterTaskRowProps = {
   task: TaskNode;
@@ -39,6 +40,7 @@ export function LaterTaskRow({
   autoFocusTitle,
   onRowCreated,
 }: LaterTaskRowProps) {
+  const { t } = useTranslation("planning");
   const queryClient = useQueryClient();
   const preview = task.proposal != null;
   const [title, setTitle] = useState(task.title);
@@ -121,7 +123,7 @@ export function LaterTaskRow({
   return (
     <div
       data-proposal={task.proposal ?? undefined}
-      title={preview ? "预览已锁定，请在 Coach 中确认或放弃" : undefined}
+      title={preview ? t("later.previewLocked") : undefined}
       className={cn("group flex items-start gap-1 rounded-md py-0.5", preview && "bg-focus-surface/60 ring-1 ring-inset ring-focus/15")}
       style={{ paddingLeft: depth * 20 }}
     >
@@ -129,7 +131,7 @@ export function LaterTaskRow({
         checked={task.completed}
         onChange={(completed) => toggleCompleted.mutate(completed)}
         disabled={preview || toggleCompleted.isPending}
-        aria-label={task.title ? `Complete ${task.title}` : "Complete task"}
+        aria-label={task.title ? t("later.complete", { title: task.title }) : t("later.completeTask")}
       />
       {/* 行内标题编辑器：无边线，完成态用提示文字色 + 删除线（design.md 5.2）。 */}
       <input
@@ -139,15 +141,15 @@ export function LaterTaskRow({
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={onTitleKeyDown}
         onBlur={commit}
-        aria-label="Task title"
-        placeholder={depth === 0 ? "New parked goal" : "New step"}
+        aria-label={t("later.taskTitle")}
+        placeholder={depth === 0 ? t("later.newGoal") : t("later.newStep")}
         className={cn(
           "h-7 min-w-0 flex-1 rounded-sm bg-transparent px-1 text-body text-primary",
           "placeholder:text-hint",
           (task.completed || task.proposal === "delete") && "text-secondary line-through",
         )}
       />
-      {preview && <span className="h-7 shrink-0 pr-2 text-[11px] leading-7 text-secondary">{task.proposal === "delete" ? "待删除 · 已锁定" : "预览 · 已锁定"}</span>}
+      {preview && <span className="h-7 shrink-0 pr-2 text-[11px] leading-7 text-secondary">{task.proposal === "delete" ? t("later.previewDelete") : t("later.preview")}</span>}
       {/* 行内动作在 hover 或键盘进入条目时显露（design.md 5.1/10）。 */}
       <div className={preview ? "hidden" : "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"}>
         <span ref={promoteAnchor} className="inline-flex">
@@ -158,8 +160,8 @@ export function LaterTaskRow({
             disabled={preview || monthCycles.length === 0 || promote.isPending}
             aria-haspopup={monthCycles.length > 1 ? "menu" : undefined}
             aria-expanded={monthCycles.length > 1 ? promoteOpen : undefined}
-            aria-label="Promote to a long-term cycle"
-            title="Promote to a long-term cycle"
+            aria-label={t("later.promote")}
+            title={t("later.promote")}
           >
             <PromoteIcon />
           </Button>
@@ -169,8 +171,8 @@ export function LaterTaskRow({
           size="icon"
           onClick={() => remove.mutate()}
           disabled={preview || remove.isPending}
-          aria-label="Delete parked goal"
-          title="Delete parked goal"
+          aria-label={t("later.delete")}
+          title={t("later.delete")}
         >
           <DeleteIcon />
         </Button>
@@ -179,7 +181,7 @@ export function LaterTaskRow({
         open={!preview && promoteOpen}
         onClose={() => setPromoteOpen(false)}
         anchorRef={promoteAnchor}
-        label="Promote to long-term cycle"
+        label={t("later.promoteMenu")}
       >
         {monthCycles.map((cycle) => (
           <PopoverItem

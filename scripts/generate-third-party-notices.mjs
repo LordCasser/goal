@@ -7,6 +7,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { RELEASE_TARGETS } from "./release-artifacts.mjs";
+import { npmCliInvocation } from "./npm-cli.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.resolve(process.argv[2] ?? path.join(root, "public/licenses/dependencies.txt"));
@@ -48,7 +49,8 @@ function localLicenseFiles(directory) {
 }
 
 function npmPackages() {
-  const directories = run("npm", ["ls", "--omit=dev", "--all", "--parseable"])
+  const npm = npmCliInvocation(["ls", "--omit=dev", "--all", "--parseable"]);
+  const directories = run(npm.command, npm.args)
     .split(/\r?\n/)
     .filter(Boolean);
   const packages = [];
@@ -64,7 +66,7 @@ function npmPackages() {
       name: metadata.name,
       version: metadata.version,
       expression,
-      files: localLicenseFiles(directory),
+      files: [...localLicenseFiles(directory), ...upstreamLicenseFiles(metadata)],
     });
   }
   return uniqueByKey(packages);
@@ -253,7 +255,7 @@ if (missingLockOnly.length) {
 }
 lines.push("", "## Copied license texts", "");
 for (const [id, entry] of [...texts.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-  lines.push(`### ${id}`, "", `Used by: ${entry.owners.map(markdown).join(", ")}`, "", "```text", entry.text.trimEnd(), "```", "");
+  lines.push(`### ${id}`, "", `Used by: ${entry.owners.map(markdown).join(", ")}`, "", "```text", entry.text.replaceAll("\r\n", "\n").replace(/[ \t]+$/gm, "").trimEnd(), "```", "");
 }
 
 fs.mkdirSync(path.dirname(output), { recursive: true });

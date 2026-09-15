@@ -9,6 +9,7 @@ import {
 } from "react";
 import { cn } from "./cn";
 import { createPortal } from "react-dom";
+import { useTranslation } from "../lib/i18n";
 
 // Only the uppermost dialog owns Escape and Tab; provider/model dialogs may nest.
 const DialogDepth = createContext(0);
@@ -54,6 +55,7 @@ export function Dialog({
   className,
   bodyClassName,
 }: DialogProps) {
+  const { t } = useTranslation("shell");
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -140,7 +142,7 @@ export function Dialog({
         {title !== undefined && (
           <header className="flex shrink-0 items-center justify-between gap-4 px-6 pb-4 pt-5">
             <h2 id={titleId} className="text-dialog-title font-semibold text-primary">{title}</h2>
-            <button type="button" aria-label="Close dialog" onClick={onClose}
+            <button type="button" aria-label={t("dialog.close")} onClick={onClose}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-secondary hover:bg-hover">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
             </button>

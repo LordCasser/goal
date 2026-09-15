@@ -31,24 +31,24 @@ describe("desktop frontend build marker", () => {
 
   it("round-trips the target and product version", () => {
     const outputDir = temporaryDirectory();
-    expect(writeBuildManifest(outputDir, "macos", "0.1.0")).toEqual({
+    expect(writeBuildManifest(outputDir, "macos", "0.1.1")).toEqual({
       platform: "macos",
-      version: "0.1.0",
+      version: "0.1.1",
     });
-    expect(assertBuildManifest({ outputDir, platform: "macos", version: "0.1.0" })).toEqual({
+    expect(assertBuildManifest({ outputDir, platform: "macos", version: "0.1.1" })).toEqual({
       platform: "macos",
-      version: "0.1.0",
+      version: "0.1.1",
     });
   });
 
   it.each([
-    ["wrong platform", { platform: "windows", version: "0.1.0" }, /target mismatch/],
+    ["wrong platform", { platform: "windows", version: "0.1.1" }, /target mismatch/],
     ["wrong version", { platform: "macos", version: "9.9.9" }, /version mismatch/],
   ])("rejects a %s marker", (_label, marker, error) => {
     const outputDir = temporaryDirectory();
     fs.mkdirSync(outputDir, { recursive: true });
     fs.writeFileSync(path.join(outputDir, "desktop-build.json"), `${JSON.stringify(marker)}\n`);
-    expect(() => assertBuildManifest({ outputDir, platform: "macos", version: "0.1.0" })).toThrow(error);
+    expect(() => assertBuildManifest({ outputDir, platform: "macos", version: "0.1.1" })).toThrow(error);
   });
 
   it("rejects a missing or augmented marker instead of treating it as Web", () => {
@@ -56,8 +56,15 @@ describe("desktop frontend build marker", () => {
     expect(() => assertBuildManifest({ outputDir, platform: "macos" })).toThrow(/Missing desktop-build.json/);
     fs.writeFileSync(
       path.join(outputDir, "desktop-build.json"),
-      JSON.stringify({ platform: "macos", version: "0.1.0", target: "stale" }),
+      JSON.stringify({ platform: "macos", version: "0.1.1", target: "stale" }),
     );
     expect(() => assertBuildManifest({ outputDir, platform: "macos" })).toThrow(/only platform and version/);
+  });
+
+  it("requires the direct npm CLI invocation and has no shell fallback", () => {
+    const source = fs.readFileSync(path.resolve("scripts/desktop-build.mjs"), "utf8");
+    expect(source).toContain("npmCliInvocation");
+    expect(source).not.toContain("npm.cmd");
+    expect(source).not.toContain("shell:");
   });
 });

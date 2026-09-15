@@ -22,6 +22,11 @@ pub fn set_theme(db: State<'_, Db>, theme: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub fn set_locale(db: State<'_, Db>, locale: String) -> AppResult<()> {
+    settings::set_locale(&db, locale)
+}
+
+#[tauri::command]
 pub fn set_log_level(db: State<'_, Db>, level: String) -> AppResult<()> {
     settings::set_log_level(&db, level)
 }

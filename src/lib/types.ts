@@ -228,6 +228,7 @@ export interface RepeatPatch {
 
 /** `service::settings::Settings`. */
 export interface Settings {
+  locale: import("./i18n").Locale;
   /** null until the user's week start day has been determined (1=Mon…7=Sun). */
   week_start_day: number | null;
   /** Preferred surface theme; null until first chosen (client defaults to white). */
@@ -393,6 +394,8 @@ export interface TurnResult {
 
 /** `ai::review::PlanningIssue` — one diagnosed plan problem. */
 export interface PlanningIssue {
+  message_key?: string | null;
+  message_params?: Record<string, string | number | string[]> | null;
   issue_type:
     | "too_many_goals"
     | "too_many_tasks"

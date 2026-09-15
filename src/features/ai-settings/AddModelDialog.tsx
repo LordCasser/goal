@@ -10,6 +10,7 @@ import { useEffect, useId, useState, type JSX } from "react";
 
 import { Button, Checkbox, Dialog, Input } from "../../ui";
 import type { ModelConfig } from "../../lib/ipc";
+import { useTranslation } from "../../lib/i18n";
 
 export type AddModelDialogProps = {
   open: boolean;
@@ -38,6 +39,7 @@ function LockIcon(): JSX.Element {
 }
 
 export function AddModelDialog({ open, onClose, onSave }: AddModelDialogProps): JSX.Element {
+  const { t } = useTranslation("ai");
   const modelIdInputId = useId();
   const contextInputId = useId();
   const outputInputId = useId();
@@ -62,9 +64,9 @@ export function AddModelDialog({ open, onClose, onSave }: AddModelDialogProps): 
   const contextInvalid = !Number.isInteger(contextValue) || contextValue <= 0;
   const outputInvalid = !Number.isInteger(outputValue) || outputValue <= 0;
   const missing: string[] = [];
-  if (modelId.trim() === "") missing.push("模型 ID");
-  if (contextInvalid) missing.push("上下文窗口（正整数）");
-  if (outputInvalid) missing.push("最大输出 Token（正整数）");
+  if (modelId.trim() === "") missing.push(t("settings.modelId"));
+  if (contextInvalid) missing.push(t("settings.contextWindow"));
+  if (outputInvalid) missing.push(t("settings.maxOutput"));
   const canSave = missing.length === 0;
 
   const save = () => {
@@ -83,14 +85,14 @@ export function AddModelDialog({ open, onClose, onSave }: AddModelDialogProps): 
     <Dialog
       open={open}
       onClose={onClose}
-      title="添加模型"
+      title={t("settings.addModel")}
       footer={
         <>
           <Button variant="secondary" size="compact" onClick={onClose}>
-            取消
+            {t("settings.cancel")}
           </Button>
           <Button variant="primary" size="compact" disabled={!canSave} onClick={save}>
-            保存
+            {t("settings.save")}
           </Button>
         </>
       }
@@ -98,18 +100,18 @@ export function AddModelDialog({ open, onClose, onSave }: AddModelDialogProps): 
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <label htmlFor={modelIdInputId} className="text-caption text-secondary">
-            模型 ID
+            {t("settings.modelId")}
           </label>
           <Input
             id={modelIdInputId}
             value={modelId}
             onChange={(e) => setModelId(e.currentTarget.value)}
-            placeholder="如 llama3、claude-sonnet-4"
+            placeholder={t("settings.modelIdPlaceholder")}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={contextInputId} className="text-caption text-secondary">
-            上下文窗口
+            {t("settings.contextWindow")}
           </label>
           <Input
             id={contextInputId}
@@ -121,7 +123,7 @@ export function AddModelDialog({ open, onClose, onSave }: AddModelDialogProps): 
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={outputInputId} className="text-caption text-secondary">
-            最大输出 Token
+            {t("settings.maxOutput")}
           </label>
           <Input
             id={outputInputId}
@@ -133,31 +135,31 @@ export function AddModelDialog({ open, onClose, onSave }: AddModelDialogProps): 
         </div>
         {/* 文本为协议必需能力，锁定展示（禁用勾选 + 锁形图标）。 */}
         <div className="flex items-center justify-between gap-3">
-          <span className="text-caption text-secondary">输入类型</span>
+          <span className="text-caption text-secondary">{t("settings.inputType")}</span>
           <span className="flex items-center gap-1">
             <Checkbox checked onChange={() => {}} disabled>
-              <span className="text-body text-primary">文本</span>
+              <span className="text-body text-primary">{t("settings.text")}</span>
             </Checkbox>
             <LockIcon />
           </span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-caption text-secondary">输出类型</span>
+          <span className="text-caption text-secondary">{t("settings.outputType")}</span>
           <span className="flex items-center gap-1">
             <Checkbox checked onChange={() => {}} disabled>
-              <span className="text-body text-primary">文本</span>
+              <span className="text-body text-primary">{t("settings.text")}</span>
             </Checkbox>
             <LockIcon />
           </span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-caption text-secondary">工具调用</span>
+          <span className="text-caption text-secondary">{t("settings.toolCalling")}</span>
           <Checkbox checked={supportsTools} onChange={setSupportsTools}>
-            <span className="text-body text-primary">支持工具调用</span>
+            <span className="text-body text-primary">{t("settings.completeModel")}</span>
           </Checkbox>
         </div>
         {!canSave && (
-          <p className="text-caption text-hint">还需完善：{missing.join("、")}</p>
+          <p className="text-caption text-hint">{t("settings.modelIncomplete", { items: missing.join(t("common.listSeparator")) })}</p>
         )}
       </div>
     </Dialog>

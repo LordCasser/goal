@@ -130,12 +130,7 @@ pub fn apply_upsert_preview(
         } else if let Some(color) = existing.root_color_key {
             Some(color)
         } else {
-            crate::service::tasks::default_root_color(
-                &tx,
-                cycle_id,
-                cycle.cycle_type,
-                None,
-            )?
+            crate::service::tasks::default_root_color(&tx, cycle_id, cycle.cycle_type, None)?
         };
     }
     write_row(&tx, &task_id, &staged_input)?;
@@ -223,16 +218,23 @@ pub struct PreviewSummary {
 }
 
 pub fn pending_cycle_ids(db: &Db) -> AppResult<Vec<String>> {
-    let conn=db.pool().get()?;
-    let mut stmt=conn.prepare("SELECT DISTINCT cycle_id FROM tasks WHERE proposal IS NOT NULL ORDER BY cycle_id").map_err(|e|AppError::Db(e.to_string()))?;
-    let ids=stmt.query_map([],|r|r.get(0)).map_err(|e|AppError::Db(e.to_string()))?.collect::<Result<Vec<_>,_>>().map_err(|e|AppError::Db(e.to_string()))?;
+    let conn = db.pool().get()?;
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT cycle_id FROM tasks WHERE proposal IS NOT NULL ORDER BY cycle_id")
+        .map_err(|e| AppError::Db(e.to_string()))?;
+    let ids = stmt
+        .query_map([], |r| r.get(0))
+        .map_err(|e| AppError::Db(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     Ok(ids)
 }
 
-
 pub fn get_preview_summary(db: &Db, cycle_id: &str) -> AppResult<PreviewSummary> {
     let mut conn = db.pool().get()?;
-    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
     let tasks = tasks_repo::list_with_proposals_by_cycle(&tx, cycle_id)?
         .into_iter()
         .filter(|t| t.proposal.is_some())
@@ -247,8 +249,10 @@ pub fn get_preview_summary(db: &Db, cycle_id: &str) -> AppResult<PreviewSummary>
                 UNION SELECT t.id FROM tasks t JOIN descendants d ON t.parent_id = d.id
             ) SELECT title FROM tasks WHERE id IN (SELECT id FROM descendants) ORDER BY cycle_id, position")
                 .map_err(|e| AppError::Db(e.to_string()))?;
-            let titles = statement.query_map([&task.id], |row| row.get::<_, String>(0))
-                .map_err(|e| AppError::Db(e.to_string()))?.collect::<Result<Vec<_>, _>>()
+            let titles = statement
+                .query_map([&task.id], |row| row.get::<_, String>(0))
+                .map_err(|e| AppError::Db(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| AppError::Db(e.to_string()))?;
             deletion_impacts.insert(task.id.clone(), titles);
         }

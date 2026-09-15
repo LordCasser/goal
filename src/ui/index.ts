@@ -19,4 +19,7 @@ export type { EmptyStateProps } from "./EmptyState";
 export { ProgressDot } from "./ProgressDot";
 export type { ProgressDotProps, ProgressDotTone } from "./ProgressDot";
 
+export { Select, SelectGroup, SelectItem, SelectLabel } from "./Select";
+export type { SelectItemProps, SelectProps } from "./Select";
+
 export { cn } from "./cn";

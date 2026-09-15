@@ -9,9 +9,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Dialog } from "../../ui";
 import { createPlanningCycle, type Cycle } from "../../lib/ipc";
-import { formatShortDate, todayISO } from "./dates";
+import { todayISO } from "./dates";
 import { deriveTimeline, type TimelineMonths } from "./timeline";
 import { useActionError } from "./actions";
+import { useTranslation, formatDate } from "../../lib/i18n";
 
 const OPTIONS: ReadonlyArray<TimelineMonths> = [1, 3, 6];
 
@@ -24,6 +25,7 @@ export function DurationDialog({
   onClose: () => void;
   onCreated?: (cycle: Cycle) => void;
 }) {
+  const { t } = useTranslation("planning");
   // 每次打开回到默认 3 月；today 在打开时取一次，避免弹窗开着跨零点跳日期。
   const [months, setMonths] = useState<TimelineMonths>(3);
   const [today, setToday] = useState(() => todayISO());
@@ -55,21 +57,21 @@ export function DurationDialog({
         if (!creating) onClose();
       }}
       wide
-      title="Long-term cycle"
+      title={t("duration.longTerm")}
       footer={
         <>
           <Button onClick={onClose} disabled={creating}>
-            Cancel
+            {t("cycle.cancel")}
           </Button>
           <Button variant="primary" loading={creating} onClick={() => void onConfirm()}>
-            Create cycle
+            {t("duration.create")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-6 sm:flex-row">
         {/* 左侧：三个预设时长卡片。选中态用焦点色（4.1 导航选中），不用暖色。 */}
-        <div role="radiogroup" aria-label="Cycle length" className="flex flex-1 flex-col gap-2">
+        <div role="radiogroup" aria-label={t("duration.length")} className="flex flex-1 flex-col gap-2">
           {OPTIONS.map((option) => {
             const selected = months === option;
             // 每个选项自带真实结束日预览，不让用户从标签推算（9.2）。
@@ -88,10 +90,10 @@ export function DurationDialog({
                 ].join(" ")}
               >
                 <span className="text-body font-semibold text-primary">
-                  {option} {option === 1 ? "month" : "months"}
+                  {t("duration.month", { count: option })}
                 </span>
                 <span className="text-caption text-hint">
-                  {option * 4} weeks · ends {formatShortDate(endsOn)}
+                  {selected ? <><span>{t("duration.weeks", { count: option * 4 })}</span> · {t("duration.ends")} {formatDate(endsOn, { month: "short", day: "numeric" })}</> : `${option * 4} weeks · ends ${formatDate(endsOn, { month: "short", day: "numeric" })}`}
                 </span>
               </button>
             );
@@ -102,15 +104,15 @@ export function DurationDialog({
           <ol className="flex flex-col gap-4">
             {timeline.nodes.map((node) => (
               <li key={node.key} data-timeline-node={node.key}>
-                <p className="text-caption text-secondary">{node.label}</p>
+                <p className="text-caption text-secondary">{t(`timeline.${node.key}`)}</p>
                 <p className="text-body font-medium text-primary">
-                  {formatShortDate(node.date)} <span className="ml-1 font-normal text-hint">{node.date.slice(0, 4)}</span>
+                  {formatDate(node.date, { month: "short", day: "numeric" })} <span className="ml-1 font-normal text-hint">{node.date.slice(0, 4)}</span>
                 </p>
               </li>
             ))}
           </ol>
           <p className="mt-4 border-t border-light pt-3 text-caption font-medium text-secondary">
-            <span data-weeks-label>{timeline.weeks} weeks</span> in total
+            <span data-weeks-label>{t("duration.weeksTotal", { count: timeline.weeks })}</span>
           </p>
         </div>
       </div>

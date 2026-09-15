@@ -6,6 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
@@ -19,6 +20,7 @@ function renderDialog(onClose: (resolution: ExitPollResolution) => void, open = 
 }
 
 beforeEach(() => {
+  applyLocale("en");
   invokeMock.mockReset();
   invokeMock.mockResolvedValue(null);
 });

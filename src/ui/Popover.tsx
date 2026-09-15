@@ -17,6 +17,8 @@ export type PopoverProps = {
   anchorRef: RefObject<HTMLElement | null>;
   /** 菜单的可访问名称；锚点按钮自行携带 aria-haspopup/aria-expanded。 */
   label?: string;
+  /** Form editors are non-modal dialogs, not arrow-key menu navigation. */
+  role?: "menu" | "dialog";
   children?: ReactNode;
   className?: string;
 };
@@ -39,6 +41,7 @@ export function Popover({
   onClose,
   anchorRef,
   label,
+  role = "menu",
   className,
   children,
 }: PopoverProps) {
@@ -81,9 +84,9 @@ export function Popover({
   useEffect(() => {
     if (!open) return;
     const anchor = anchorRef.current;
-    const first = panelRef.current?.querySelector<HTMLElement>(
-      '[role="menuitem"]:not([disabled])',
-    );
+    const first = panelRef.current?.querySelector<HTMLElement>(role === "menu"
+      ? '[role="menuitem"]:not([disabled])'
+      : 'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
     (first ?? panelRef.current)?.focus();
 
     // 捕获阶段处理 Escape：先于外层 Dialog 的冒泡监听，内层菜单优先关闭。
@@ -107,11 +110,13 @@ export function Popover({
       document.removeEventListener("mousedown", onPointerDown, true);
       anchor?.focus({ preventScroll: true });
     };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, role]);
 
   if (!open) return null;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (role !== "menu" || e.nativeEvent.isComposing) return;
+    if (e.target instanceof Element && e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const items = Array.from(
@@ -138,13 +143,13 @@ export function Popover({
   return createPortal(
     <div
       ref={panelRef}
-      role="menu"
+      role={role}
       tabIndex={-1}
       aria-label={label}
       style={position}
       onKeyDown={onKeyDown}
       className={cn(
-        "fixed z-[100] min-w-[160px] overflow-hidden rounded-lg border border-light bg-content py-1",
+        "fixed z-[100] min-w-[160px] max-w-[calc(100vw-8px)] max-h-[calc(100dvh-8px)] overflow-x-hidden overflow-y-auto rounded-lg border border-light bg-content py-1",
         "shadow-[0_8px_24px_rgba(0,0,0,0.12)] animate-pop-in",
         className,
       )}

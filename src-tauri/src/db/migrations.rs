@@ -60,8 +60,16 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "session schedule",
         sql: M0008_SESSION_SCHEDULE,
     },
-    Migration { version: 9, description: "agent skill routing", sql: M0009_AGENT_SKILLS },
-    Migration { version: 10, description: "human-approved app actions", sql: M0010_AGENT_ACTIONS },
+    Migration {
+        version: 9,
+        description: "agent skill routing",
+        sql: M0009_AGENT_SKILLS,
+    },
+    Migration {
+        version: 10,
+        description: "human-approved app actions",
+        sql: M0010_AGENT_ACTIONS,
+    },
 ];
 
 const M0010_AGENT_ACTIONS: &str = r#"

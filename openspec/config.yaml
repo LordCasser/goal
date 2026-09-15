@@ -2,7 +2,7 @@ schema: spec-driven
 
 # Project context — shown to AI tools when creating artifacts.
 context: |
-  项目：planner —— 一个本地优先（local-first）的个人规划桌面应用。
+  项目：Goal —— 一个本地优先（local-first）的个人规划桌面应用。
   产品链路：Long-term cycle(1/3/6 月) → Week → Day → Session(专注块)，外加 Do Later 暂存容器。
 
   技术栈：Tauri 2 + Rust（后端）+ React 19 + TypeScript + Vite（前端）+ SQLite（rusqlite, bundled）+ Tailwind。

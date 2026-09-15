@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("../planner/dates", async (original) => ({ ...(await original<typeof import("../planner/dates")>()), todayISO: () => "2026-09-15" }));
 
 import CalendarView from "./CalendarView";
+import { applyLocale, formatDate, t } from "../../lib/i18n";
 import { TaskList } from "../planner/TaskList";
 import { calendarPlanCycleIds, calendarTasks, PREFERRED_VIEW_KEY, savePreferredView } from "./calendar-model";
 
@@ -28,6 +29,7 @@ function task(id: string, cycle_id: string, title: string, parent_id: string | n
 }
 let content: Record<string, EditorWorkspace>;
 beforeEach(() => {
+  applyLocale("en");
   vi.clearAllMocks(); localStorage.clear();
   content = {
     month: { cycle: month, work_mix: null, tasks: [{ ...task("goal", "month", "Launch the product"), root_color_key: "green" }] },
@@ -53,14 +55,17 @@ function mount() {
 }
 
 describe("calendar content uses the workspace tasks", () => {
-  it("keeps the block count separate from the day-move grip", async () => {
+  it.each(["en", "zh-CN"] as const)("shows one compact focus progress summary separate from the day-move grip (%s)", async (locale) => {
+    applyLocale(locale);
     backend.getCalendarRange.mockResolvedValue({ start: day.starts_on, end: day.starts_on, grid_start: day.starts_on, grid_end: day.starts_on,
       days: [{ date: day.starts_on, in_range: true, day_cycle: day, sessions: [{ session: { id: "focus", title: "Focus", duration: 1500000, finished: false }, schedule: null }] }] });
     mount();
-    const count = await screen.findByText("1 block");
+    const count = await screen.findByRole("img", { name: t("planning:calendar.blocksDone", { done: 0, total: 1, count: 1 }) });
+    expect(screen.queryByText("1 block")).toBeNull();
+    expect(count.textContent).toBe("0/1");
     expect(count.closest('[draggable="true"]')).toBeNull();
     expect(count.className).toContain("cursor-default");
-    const grip = screen.getByTitle("Move 2026-09-15");
+    const grip = screen.getByTitle(t("planning:calendar.moveDay", { date: formatDate("2026-09-15", { year: "numeric", month: "short", day: "numeric" }) }));
     expect(grip.draggable).toBe(true);
     expect(grip.textContent).not.toContain("block");
   });
@@ -71,7 +76,7 @@ describe("calendar content uses the workspace tasks", () => {
     fireEvent.click(complete);
     await waitFor(() => expect(complete.getAttribute("aria-checked")).toBe("true"));
     expect(backend.patchTask).toHaveBeenCalledWith("work", { completed: true });
-    const editor = within(screen.getByLabelText("Day plan 2026-09-15"));
+    const editor = within(screen.getByLabelText("Day plan Sep 15, 2026"));
     await waitFor(() => expect(editor.getByRole("checkbox", { name: "Mark “Review the layout” complete" }).getAttribute("aria-checked")).toBe("true"));
     fireEvent.click(screen.getByRole("button", { name: "View task Review the layout" }));
     await waitFor(() => expect(document.activeElement).toBe(editor.getByDisplayValue("Review the layout")));
@@ -79,11 +84,11 @@ describe("calendar content uses the workspace tasks", () => {
 
   it("failed completion keeps the original state and reports the error in the card", async () => {
     localStorage.setItem(PREFERRED_VIEW_KEY, "week");
-    backend.patchTask.mockRejectedValue({ code: "db_error", message: "Save failed" });
+    backend.patchTask.mockRejectedValue({ code: "db_error", message: "Could not access local data. Try again or check the diagnostic logs." });
     mount();
     const complete = await screen.findByRole("checkbox", { name: "Mark “Review the layout” complete in calendar" });
     fireEvent.click(complete);
-    expect(await screen.findByText("Save failed")).toBeTruthy();
+    expect(await screen.findByText("Could not access local data. Try again or check the diagnostic logs.")).toBeTruthy();
     expect(complete.getAttribute("aria-checked")).toBe("false");
   });
   it("week shows every task so busy days grow, while month keeps its summary", async () => {
@@ -109,7 +114,7 @@ describe("calendar content uses the workspace tasks", () => {
   it("completion and renaming in either editor refresh the calendar projection without event delivery", async () => {
     mount();
     const workspace = within(screen.getByRole("region", { name: "Workspace editor" }));
-    const calendar = within(await screen.findByLabelText("Day plan 2026-09-15"));
+    const calendar = within(await screen.findByLabelText("Day plan Sep 15, 2026"));
     fireEvent.click(await workspace.findByRole("checkbox", { name: "Mark “Review the layout” complete" }));
     await waitFor(() => expect(screen.getByText("1/1 tasks")).toBeTruthy());
     expect(calendar.getByRole("checkbox", { name: "Mark “Review the layout” complete" }).getAttribute("aria-checked")).toBe("true");
@@ -129,18 +134,18 @@ describe("calendar content uses the workspace tasks", () => {
   });
 
   it("rejects failed edits without claiming the other view changed", async () => {
-    backend.patchTask.mockRejectedValue({ code: "db_error", message: "Save failed" });
+    backend.patchTask.mockRejectedValue({ code: "db_error", message: "Could not access local data. Try again or check the diagnostic logs." });
     mount();
-    const calendar = within(await screen.findByLabelText("Day plan 2026-09-15"));
+    const calendar = within(await screen.findByLabelText("Day plan Sep 15, 2026"));
     const title = await calendar.findByDisplayValue("Review the layout");
     fireEvent.change(title, { target: { value: "Unsaved title" } }); fireEvent.blur(title);
-    expect(await calendar.findByText("Save failed")).toBeTruthy();
+    expect(await calendar.findByText("Could not access local data. Try again or check the diagnostic logs.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "View task Review the layout" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "View task Unsaved title" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
     fireEvent.click(screen.getByRole("tab", { name: "plan" }));
     expect(calendar.getByDisplayValue("Unsaved title")).toBeTruthy();
-    expect(calendar.getByText("Save failed")).toBeTruthy();
+    expect(calendar.getByText("Could not access local data. Try again or check the diagnostic logs.")).toBeTruthy();
   });
 
   it("a failed task query is not presented as zero work or missing goals", async () => {
@@ -176,8 +181,8 @@ it("shows the same pending task in Week and locks completion until confirmation"
   mount();
   const checkbox=await screen.findByRole("checkbox",{name:"Mark “Review the layout” complete in calendar"});
   expect(checkbox.hasAttribute("disabled")).toBe(true);
-  expect(screen.getByRole("button",{name:"View task Review the layout"}).textContent).toContain("预览");
-  expect(screen.getByText("0/0 tasks · 1 预览")).toBeTruthy();
+  expect(screen.getByRole("button",{name:"View task Review the layout"}).textContent).toContain("Preview");
+  expect(screen.getByText("0/0 tasks · 1 preview item")).toBeTruthy();
   fireEvent.click(checkbox);
   expect(backend.patchTask).not.toHaveBeenCalled();
 });

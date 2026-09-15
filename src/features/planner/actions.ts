@@ -7,15 +7,12 @@
  */
 import { useCallback, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { isAppError } from "../../lib/ipc";
+import { errorMessage as localizedErrorMessage } from "../../lib/i18n";
 import { qk } from "../../lib/events";
 
 /** 后端 message 已面向用户；非 AppError 尽量保底不抛裸异常文案。 */
 export function errorMessage(e: unknown): string {
-  if (isAppError(e)) return e.message;
-  if (typeof e === "string" && e.trim()) return e;
-  if (e instanceof Error && e.message) return e.message;
-  return "Something went wrong";
+  return localizedErrorMessage(e);
 }
 
 export function useActionError(): {

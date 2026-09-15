@@ -27,7 +27,7 @@ describe("Tauri JSON Merge Patch platform configs", () => {
     expect(config.identifier).toBe("dev.lordcasser.planner");
     expect(config.productName).toBe("Goal");
     expect(window.title).toBe("Goal");
-    expect(config.version).toBe("0.1.0");
+    expect(config.version).toBe("0.1.1");
   });
 
   it("keeps macOS-only window properties out of Windows and Linux", () => {
@@ -49,6 +49,14 @@ describe("Tauri JSON Merge Patch platform configs", () => {
     expect(loadMergedConfig("windows").bundle.targets).toEqual(["nsis"]);
     expect(loadMergedConfig("linux").bundle.targets).toEqual(["appimage", "deb"]);
     for (const file of Object.values(CONFIG_FILES)) expect(fs.existsSync(file)).toBe(true);
+  });
+
+  it("declares desktop engines that support the shared Tailwind v4 UI", () => {
+    expect(loadMergedConfig("macos").bundle.macOS.minimumSystemVersion).toBe("13.3");
+    expect(loadMergedConfig("windows").bundle.windows.minimumWebview2Version).toBe("111.0.0.0");
+    // Keep non-matching runtime declarations out of the other native bundles.
+    expect(loadMergedConfig("linux").bundle.macOS).toBeUndefined();
+    expect(loadMergedConfig("linux").bundle.windows).toBeUndefined();
   });
 
   it("keeps native window permissions scoped to the intended platform and window", () => {

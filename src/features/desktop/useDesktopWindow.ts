@@ -24,6 +24,7 @@ export function useDesktopWindow(header: RefObject<HTMLElement | null>,
     let measureAgain = false;
     let measureTimer: ReturnType<typeof setTimeout> | undefined;
     let refreshSequence = 0;
+    let pendingFallback = false;
     const unlisten: Array<() => void> = [];
     const bind = (listener: Promise<() => void>) => {
       void listener.then((stop) => { if (disposed) stop(); else unlisten.push(stop); })
@@ -31,9 +32,22 @@ export function useDesktopWindow(header: RefObject<HTMLElement | null>,
     };
     const apply = (next: DesktopShellState) => {
       if (disposed) return;
+      // A failed pending handshake relies on the native 3s backend fallback.
+      // Ignore a stale pending response that arrives before that fallback;
+      // otherwise the custom controls would briefly reappear.
+      if (pendingFallback && next.mode === "pending") return;
       mode = next.mode;
       revision = Math.max(revision, next.revision);
       setState((s) => ({ ...s, mode: next.mode, maximized: next.maximized, focused: next.focused }));
+    };
+    const handleShellError = (error: unknown) => {
+      if (disposed) return;
+      if (mode === "pending") {
+        pendingFallback = true;
+        mode = "native";
+        setState((s) => ({ ...s, mode: "native" }));
+      }
+      console.warn("Window caption layout unavailable", error);
     };
     const measure = async () => {
       if (disposed || mode === "native" || !header.current || !maximize.current || !drag.current) return;
@@ -48,7 +62,7 @@ export function useDesktopWindow(header: RefObject<HTMLElement | null>,
       if (regions.maximize.width === 0 || regions.drag.width === 0) return;
       running = true;
       try { apply(await (mode === "pending" ? readyDesktopShell(regions) : updateDesktopRegions(regions))); }
-      catch (error) { console.warn("Window caption layout unavailable", error); }
+      catch (error) { handleShellError(error); }
       finally {
         running = false;
         if (measureAgain) { measureAgain = false; scheduleMeasure(); }
@@ -73,7 +87,7 @@ export function useDesktopWindow(header: RefObject<HTMLElement | null>,
           const [fullscreen, focused] = await Promise.all([appWindow.isFullscreen(), appWindow.isFocused()]);
           if (!disposed && sequence === refreshSequence) setState((s) => ({ ...s, fullscreen, focused }));
         }
-      } catch (error) { console.warn("Window state unavailable", error); }
+      } catch (error) { handleShellError(error); }
     };
     refreshRef.current = () => { void refresh(); };
     bind(appWindow.onResized(() => {

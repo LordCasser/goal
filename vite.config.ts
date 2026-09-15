@@ -31,7 +31,8 @@ const config: ViteConfigWithTests = {
     watch: { ignored: ["**/src-tauri/**"] },
   },
   build: {
-    target: "safari16",
+    // Shared UI uses Tailwind v4's documented browser baseline.
+    target: ["safari16.4", "chrome111", "firefox128"],
     sourcemap: true,
     rollupOptions: {
       plugins: [
