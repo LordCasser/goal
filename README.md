@@ -33,7 +33,7 @@ Goal 是一个本地优先的个人规划应用，把长期目标、周计划、
 
 ### macOS 首次打开
 
-当前 macOS 包没有 Developer ID，也没有经过 Apple notarization。构建使用固定的自签名身份，以便同一签名的后续更新尽量保持钥匙串身份；从旧的 ad hoc 包换到固定签名包时，macOS 可能会再次询问钥匙串访问，之后同签名更新通常可以继续使用原身份。
+当前 macOS 包没有 Developer ID，也没有经过 Apple notarization。构建使用固定证书和 designated requirement 的自签名身份，以便同一签名的后续更新保持钥匙串身份；发布准备只使用临时钥匙串，不安装系统 trust anchor，也不改变用户的 trust 设置。从旧的 ad hoc 包换到固定签名包时，已有钥匙串项目可能需要一次授权；连续性检查已验证后续同签名更新不会因 CDHash 变化再次弹窗。
 
 Gatekeeper 可能阻止首次打开。确认包来源可靠并检查校验值后，按 Apple 的说明在“系统设置 → 隐私与安全性”中使用 **Open Anyway**：<https://support.apple.com/en-gb/102445>。不要通过全局关闭 Gatekeeper 来安装应用。
 
@@ -46,11 +46,13 @@ npm ci
 npm test
 
 # 启动 Tauri 桌面开发环境
-npm run tauri dev
+npm run tauri -- dev
 
 # Rust 单元测试与集成测试
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 ```
+
+Linux 凭据运行需要用户会话中的 Secret Service（例如 `gnome-keyring`）。服务不可用时凭据操作会明确失败，不会回退到明文存储；其他本地计划功能仍可使用。
 
 桌面目标、平台配置、打包前检查和签名边界见 [`docs/desktop-build.md`](docs/desktop-build.md)。用户操作说明见 [`docs/user-guide.md`](docs/user-guide.md)，数据边界见 [`docs/privacy.md`](docs/privacy.md)。
 

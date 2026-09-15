@@ -35,9 +35,6 @@ function stateFile() {
   return process.env.GOAL_SIGNING_STATE_FILE;
 }
 function readState() { return JSON.parse(fs.readFileSync(stateFile(), 'utf8')); }
-function trustCommand(state, args, options) {
-  return state.adminTrust ? run('sudo', ['-n', 'security', ...args], options) : run('security', args, options);
-}
 export function prepare() {
   const encoded = process.env.APPLE_CERTIFICATE;
   const password = process.env.APPLE_CERTIFICATE_PASSWORD;
@@ -51,10 +48,10 @@ export function prepare() {
   const keychainPassword = crypto.randomBytes(32).toString('base64url');
   secrets.add(keychainPassword);
   const originalKeychains = [...run('security', ['list-keychains', '-d', 'user']).stdout.matchAll(/"([^"]+)"/g)].map(match => match[1]);
-  const state = { directory, keychain, originalKeychains, adminTrust: process.env.GITHUB_ACTIONS === 'true' };
+  const state = { directory, keychain, originalKeychains };
   const statePath = path.join(directory, 'state.json');
   fs.writeFileSync(statePath, JSON.stringify(state), { mode: 0o600 });
-  // Persist cleanup location before the first keychain/trust mutation.
+  // Persist cleanup location before the first keychain mutation.
   process.env.GOAL_SIGNING_STATE_FILE = statePath;
   fs.appendFileSync(process.env.GITHUB_ENV, `GOAL_SIGNING_STATE_FILE=${statePath}\n`);
   try {
@@ -70,10 +67,9 @@ export function prepare() {
     run('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:', '-s', '-k', keychainPassword, keychain]);
     const identities = run('security', ['find-identity', '-p', 'codesigning', keychain]).stdout;
     if (!identities.includes(pinned.fingerprint)) throw new Error('P12 identity does not match the pinned public certificate');
-    trustCommand(state, ['add-trusted-cert', ...(state.adminTrust ? ['-d'] : []), '-r', 'trustRoot', '-p', 'codeSign', '-k', keychain, certificatePath]);
-    const valid = run('security', ['find-identity', '-v', '-p', 'codesigning', keychain]).stdout;
-    if (!valid.includes(pinned.fingerprint)) throw new Error('Signing identity is not valid for code signing');
-    fs.appendFileSync(process.env.GITHUB_ENV, `APPLE_SIGNING_IDENTITY=${pinned.fingerprint}\n`);
+    // Explicit codesign identity + pinned DR do not require installing a trust
+    // anchor. Keep user/admin trust settings untouched. Tauri's intermediate
+    // bundle is signed below before it can become a release artifact.
     console.log(`Prepared pinned Goal signing identity ${pinned.fingerprint}`);
   } catch (error) { cleanup(); throw error; }
 }
@@ -120,7 +116,6 @@ export function cleanup() {
   const file = process.env.GOAL_SIGNING_STATE_FILE;
   if (!file || !fs.existsSync(file)) return;
   const state = readState();
-  trustCommand(state, ['remove-trusted-cert', ...(state.adminTrust ? ['-d'] : []), certificatePath], { allowFailure: true });
   run('security', ['list-keychains', '-d', 'user', '-s', ...state.originalKeychains]);
   run('security', ['delete-keychain', state.keychain], { allowFailure: true });
   fs.rmSync(state.directory, { recursive: true, force: true });

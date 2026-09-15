@@ -105,6 +105,7 @@ jobs:
             libsecret-1-dev \
             gnome-keyring \
             dbus-x11 \
+            xdg-utils \
             pkg-config \
             patchelf
 
@@ -163,10 +164,10 @@ jobs:
 
       - name: Build macOS app bundle
         if: matrix.os == 'macos'
-        run: npm run tauri -- build --target ${{ matrix.target }} --bundles app
+        run: node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles app
       - name: Build native bundle
         if: matrix.os != 'macos'
-        run: npm run tauri -- build --target ${{ matrix.target }}
+        run: node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }}
       - name: Sign macOS app
         if: matrix.os == 'macos'
         shell: bash

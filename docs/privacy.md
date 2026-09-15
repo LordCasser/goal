@@ -25,6 +25,8 @@
 
 应用不会把 Key 写入 `providers.json`、SQLite 数据库或日志，也不会在普通设置页面回显完整 Key。删除供应商时会同时清理对应的凭据项。
 
+Linux 运行时需要用户会话中的 Secret Service（例如 `gnome-keyring`）来读写凭据。服务不可用时，凭据操作会明确失败；应用不会把 Key 回退写入文件、数据库或日志，其他本地计划功能仍可用。
+
 `providers.json` 中的额外请求头被当作非敏感配置保存。不要把 Token、密码或其他秘密放进额外请求头；需要认证时使用专门的 API Key 字段。
 
 ## 什么时候会联网
@@ -76,4 +78,4 @@ Coach 会话按计划周期隔离，并保存在本地数据库。默认没有�
 
 当前 macOS 包没有 Developer ID 和 Apple notarization。Gatekeeper 可能提示开发者无法验证；确认下载来源和校验值后，按 [Apple 的 Open Anyway 说明](https://support.apple.com/en-gb/102445) 在“系统设置 → 隐私与安全性”中允许这一份应用。不要通过全局关闭 Gatekeeper 来绕过系统保护。
 
-构建使用固定的自签名身份，但没有公证。旧 ad hoc 包升级到固定签名包时，系统可能再次询问钥匙串访问；之后同签名更新会继续使用同一应用身份。这个签名策略不等同于 Apple 对应用进行安全审查。
+构建使用固定证书和 designated requirement 的自签名身份，但没有公证。发布准备只在临时钥匙串中导入证书并临时调整当前用户的 search list，完成后恢复并删除临时钥匙串，不安装系统 trust anchor，也不改变用户的 trust 设置。旧 ad hoc 包升级到固定签名包时，已有旧代码身份的钥匙串项目可能需要一次授权；之后同签名更新会继续使用同一应用身份。这个签名策略不等同于 Apple 对应用进行安全审查。

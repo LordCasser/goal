@@ -11,10 +11,10 @@ npm test
 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 # 由 Tauri 注入目标环境；不要手工把 DESKTOP_PLATFORM 当原生目标来源
-npm run tauri -- build --target <rust-target>
+node node_modules/@tauri-apps/cli/tauri.js build --target <rust-target>
 ```
 
-Linux 的 secure store 测试需要真实的 Secret Service。CI 在独立的 `dbus-run-session` 中以一次性测试密码启动 `gnome-keyring-daemon --unlock --components=secrets`，再运行上述 `cargo test`；其他平台直接在本机 secure store 上测试。Linux 发布 runner 同时安装 `gnome-keyring` 和 `dbus-x11`。
+Linux 的凭据运行时需要可用的 Secret Service（例如 `gnome-keyring`）；没有它时凭据读写应明确失败，不能回退到明文。CI 在独立的 `dbus-run-session` 中以一次性测试密码启动 `gnome-keyring-daemon --unlock --components=secrets`，再运行上述 `cargo test`；其他平台直接在本机 secure store 上测试。Linux 发布 runner 同时安装 `gnome-keyring` 和 `dbus-x11`。
 
 构建 hook 会清除并重建当前目标的 `dist`，写入只含 `platform` 和产品 `version` 的 `dist/desktop-build.json`，打包前再次核对目标与版本。Tauri 的 JSON Merge Patch 按平台合并以下文件：
 
@@ -30,7 +30,7 @@ Linux 的 secure store 测试需要真实的 Secret Service。CI 在独立的 `d
 
 ## 发布矩阵
 
-`.github/workflows/release.yml` 是发布入口。它固定使用 Node 22.12.0、Rust 1.88.0，并以六个独立的原生 runner 构建；每个 job 都重新执行 `npm ci`、目标配置检查和 Tauri 构建。Linux runner 需要 WebKitGTK 4.1、GTK 3、GLib、librsvg、OpenSSL、DBus、libsecret、gnome-keyring、dbus-x11、pkg-config 和 patchelf；Windows runner 依赖 MSVC、WebView2 和 NSIS；macOS runner 依赖系统 SDK。
+`.github/workflows/release.yml` 是发布入口。它固定使用 Node 22.12.0、Rust 1.88.0，并以六个独立的原生 runner 构建；每个 job 都重新执行 `npm ci`、目标配置检查和 Tauri 构建。CI 直接以 Node 调用本地 `@tauri-apps/cli/tauri.js`，避免 Windows PowerShell 的 npm shim 吞掉 `--target` 参数。Linux runner 需要 WebKitGTK 4.1、GTK 3、GLib、librsvg、OpenSSL、DBus、libsecret、gnome-keyring、dbus-x11、pkg-config 和 patchelf；Windows runner 依赖 MSVC、WebView2 和 NSIS；macOS runner 依赖系统 SDK。
 
 | 发布 ID | runner | Rust target | 产物 |
 | --- | --- | --- | --- |
@@ -54,9 +54,9 @@ CI 只从 GitHub Secrets 读取以下敏感值，并且不应写入日志、仓�
 - `APPLE_CERTIFICATE`：base64 编码的 P12 证书
 - `APPLE_CERTIFICATE_PASSWORD`：P12 密码
 
-本地发布工具的固定证书私钥放在 `~/.goal/release-signing`，永远不提交仓库；固定公开证书提交在 `.github/signing/macos-release.cer`。`prepare` 从该证书读取指纹，校验 P12 身份后将派生出的 `APPLE_SIGNING_IDENTITY` 写入 `GITHUB_ENV`，调用方不需要另配这个 secret。随后 `sign` 签 `.app`，`verify` 检查签名，`package` 生成 DMG，`cleanup` 在 job 结束时清理临时钥匙串。临时钥匙串和 P12 文件不得进入 artifact。
+本地发布工具的固定证书私钥放在 `~/.goal/release-signing`，永远不提交仓库；固定公开证书提交在 `.github/signing/macos-release.cer`。`prepare` 从该证书读取指纹，校验 P12 身份，将临时钥匙串加入当前用户的 search list，并通过 `GITHUB_ENV` 输出 `GOAL_SIGNING_STATE_FILE`；它不安装系统 trust anchor，也不修改用户的 trust 设置。随后 `sign` 使用明确的证书指纹和固定 designated requirement 签 `.app`，`verify` 检查签名，`package` 生成 DMG，`cleanup` 恢复原 search list 并删除临时钥匙串。临时钥匙串和 P12 文件不得进入 artifact。
 
-从旧 adhoc 包迁移到固定自签名身份时，macOS 可能首次再次要求用户允许钥匙串或应用访问；之后使用同一固定签名身份的更新保持身份连续。自签名不等于 Gatekeeper 已信任，也不替代公证；分发时应按发布说明引导用户在系统设置中选择“仍要打开”，不应要求用户全局关闭 Gatekeeper。
+从旧 ad hoc 包迁移到固定自签名身份时，已有旧代码身份的钥匙串项目可能需要一次用户授权；之后使用同一固定证书和 designated requirement 的更新保持身份连续。连续性检查使用临时测试钥匙串验证了不同 CDHash 的允许与拒绝路径，过程不改变系统 trust 设置，也不需要系统弹窗。自签名不等于 Gatekeeper 已信任，也不替代公证；分发时应按发布说明引导用户在系统设置中选择“仍要打开”，不应要求用户全局关闭 Gatekeeper。
 
 ## 干净发布输入
 
