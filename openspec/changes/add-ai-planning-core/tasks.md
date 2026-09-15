@@ -32,13 +32,13 @@
 
 ## 5. 工具集
 
-- [ ] 5.1 `get_cycle_context` / `get_task_details`：只读工具，参数 `cycle_key` / `task_id`
-- [ ] 5.2 `start_planning` / `start_goal_setting` / `start_prioritization`：激活类工具，返回上下文与激活的技能
-- [ ] 5.3 写工具：`create_goal` / `delete_goal` / `update_goal` / `move_goal`——**全部经预览层**，带 `rationale`
-- [ ] 5.4 `create_goal` 的空行复用：列表尾部存在空任务行时复用之
-- [ ] 5.5 `move_goal` 的校验：源/目标可用性、周期已结束、任务不在源等，返回规范里的错误码
-- [ ] 5.6 工具参数严格反序列化：未知字段或类型不符时返回明确错误
-- [ ] 5.7 测试：每个工具一例；写工具调用后确认无正式数据变化、只有预览行；预览计数事件被发射
+- [x] 5.1 `get_cycle_context` / `get_task_details`：只读工具，参数 `cycle_key` / `task_id`
+- [x] 5.2 `start_planning` / `start_goal_setting` / `start_prioritization`：激活类工具，返回上下文与激活的技能
+- [x] 5.3 写工具：`create_goal` / `delete_goal` / `update_goal` / `move_goal`——**全部经预览层**，带 `rationale`
+- [x] 5.4 `create_goal` 的空行复用：列表尾部存在空任务行时复用之
+- [x] 5.5 `move_goal` 的校验：源/目标可用性、周期已结束、任务不在源等，返回规范里的错误码
+- [x] 5.6 工具参数严格反序列化：未知字段或类型不符时返回明确错误
+- [x] 5.7 测试：每个工具一例；写工具调用后确认无正式数据变化、只有预览行；预览计数事件被发射
 
 ## 6. GoalBreakdown 引擎
 
@@ -60,20 +60,20 @@
 
 ## 8. 计划审查（边写边审）
 
-- [ ] 8.1 触发：内容变更后去抖（默认 800 ms），内容哈希未变则用缓存
-- [ ] 8.2 问题识别：`too_many_goals` / `too_many_tasks` / `too_much_work` / `not_sure_what_to_do_next` / `missing_something` / `not_useful_for_needs`
-- [ ] 8.3 问题报告：按周期返回完整清单，支持周期级与任务级
-- [ ] 8.4 忽略的读写（复用 `planning_issue_dismissals`），忽略后不再出现在报告与就地提示中
-- [ ] 8.5 审查不可用（无供应商/额度用尽）时静默跳过，不阻断编辑、不弹错误
-- [ ] 8.6 测试：去抖行为；缓存命中；忽略后过滤；不可用时的降级；审查不阻塞编辑路径
+- [x] 8.1 触发：内容变更后去抖（默认 800 ms），内容哈希未变则用缓存
+- [x] 8.2 问题识别：`too_many_goals` / `too_many_tasks` / `too_much_work` / `not_sure_what_to_do_next` / `missing_something` / `not_useful_for_needs`
+- [x] 8.3 问题报告：按周期返回完整清单，支持周期级与任务级
+- [x] 8.4 忽略的读写（复用 `planning_issue_dismissals`），忽略后不再出现在报告与就地提示中
+- [x] 8.5 审查不可用（无供应商/额度用尽）时静默跳过，不阻断编辑、不弹错误
+- [x] 8.6 测试：去抖行为；缓存命中；忽略后过滤；不可用时的降级；审查不阻塞编辑路径
 
 ## 9. IPC 与事件
 
-- [ ] 9.1 命令：`start_agent_conversation` / `send_agent_message` / `get_agent_conversation` / `get_previous_agent_conversation` / `start_planning` / `start_goal_setting` / `start_prioritization`
-- [ ] 9.2 命令：`get_planning_issue_report` / `dismiss_planning_issue` / `get_planning_issue_dismissals`
-- [ ] 9.3 事件：`agent:conversation_updated`（携带会话 id 与 revision，只做失效通知）
-- [ ] 9.4 错误映射：`unsupported_cycle_type` / `empty_update` / `provider_required` / `task_not_found` 等 `code` 与规范场景对应
-- [ ] 9.5 测试：命令级主路径；错误 code；事件在回合结束后发射一次
+- [x] 9.1 命令：`start_agent_conversation` / `send_agent_message` / `get_agent_conversation` / `get_previous_agent_conversation` / `start_planning` / `start_goal_setting` / `start_prioritization`
+- [x] 9.2 命令：`get_planning_issue_report` / `dismiss_planning_issue` / `get_planning_issue_dismissals`
+- [x] 9.3 事件：`agent:conversation_updated`（携带会话 id 与 revision，只做失效通知）
+- [x] 9.4 错误映射：`unsupported_cycle_type` / `empty_update` / `provider_required` / `task_not_found` 等 `code` 与规范场景对应
+- [x] 9.5 测试：命令级主路径；错误 code；事件在回合结束后发射一次
 
 ## 10. 验收
 
