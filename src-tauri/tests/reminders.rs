@@ -117,6 +117,7 @@ fn start_session(
     let session = cycles::add_session(
         db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day_id.into(),
             title: "Deep work".into(),
             duration_ms: Some(duration_ms),
@@ -199,6 +200,7 @@ fn deleting_a_cycle_subtree_removes_all_attached_reminders() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "Deep work".into(),
             duration_ms: Some(900_000),
@@ -970,6 +972,7 @@ fn session_start_schedules_background_due_notice() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "background block".into(),
             duration_ms: Some(900_000),

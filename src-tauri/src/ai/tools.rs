@@ -971,6 +971,7 @@ mod tests {
         add_session(
             db,
             &AddSessionArgs {
+                task_id: None,
                 day_cycle_id: day,
                 title: "focus".into(),
                 ..Default::default()

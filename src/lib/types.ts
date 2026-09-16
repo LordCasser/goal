@@ -29,6 +29,8 @@ export interface Cycle {
   /** Serialized as `type` (`#[serde(rename = "type")]`). */
   type: CycleType;
   parent_id: string | null;
+  /** Linked daily task for a focus block; null when the block is unassociated. */
+  task_id: string | null;
   position: number;
   archived: boolean;
   started: boolean;
@@ -111,6 +113,8 @@ export interface TaskNode extends Task {
   children: TaskNode[];
   /** Subtasks rendered as Markdown for AI context and sessions. */
   subtasks_markdown: string;
+  /** Accumulated focus time from linked focus blocks, in milliseconds. */
+  focused_time: number;
 }
 
 /** `domain::repeat::Repeat`. */
@@ -155,6 +159,8 @@ export interface AddSessionArgs {
   title: string;
   /** Milliseconds; null leaves the focus block without a set duration. */
   duration_ms?: number | null;
+  /** Optional committed task from the same day. */
+  task_id?: string | null;
   position?: number | null;
 }
 
@@ -174,6 +180,10 @@ export interface CycleDeletionPreview {
 export interface TaskDeletionPreview {
   task_id: string;
   descendant_tasks: number;
+  /** Focus blocks linked to this task and all descendants. */
+  total_focus_blocks: number;
+  /** Linked focus blocks currently running. */
+  started_focus_count: number;
   confirmation_token: string;
 }
 
@@ -284,6 +294,12 @@ export type ApiFormat =
   | "openai_chat_completions"
   | "openai_responses";
 
+/** `providers::config::ProviderConnection` — routing for provider requests. */
+export type ProviderConnection =
+  | { mode: "auto" }
+  | { mode: "direct" }
+  | { mode: "proxy"; url: string };
+
 /** `providers::config::InputType`. `text` is mandatory for every model. */
 export type InputType = "text" | "image" | "video" | "pdf";
 
@@ -312,6 +328,8 @@ export interface ProviderConfig {
   /** Scheme included; may carry a path prefix (e.g. `https://host/v1`). */
   base_url: string;
   api_format: ApiFormat;
+  /** Defaults to `{ mode: "auto" }` when omitted by an older configuration. */
+  connection: ProviderConnection;
   /** Lowercase custom header names; values stay in the system credential store. */
   extra_headers: string[];
   models: ModelConfig[];

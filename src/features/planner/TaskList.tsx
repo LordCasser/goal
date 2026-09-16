@@ -1,3 +1,4 @@
+import { RemovalList } from "../../ui/RemovalList";
 /**
  * 单列任务列表（design.md §5 任务编辑与条目状态）。
  *
@@ -65,7 +66,12 @@ export function TaskList({
   relations,
   onReviewIssues,
   revealTask,
+  layout = "flow",
+  children,
 }: {
+  /** Panel mode keeps the summary outside the task scrollport. */
+  layout?: "flow" | "panel";
+  children?: ReactNode;
   /** Retained, hidden editors must not create input rows or take focus. */
   revealTask?: {taskId:string;requestId:number};
   active?: boolean;
@@ -326,7 +332,21 @@ export function TaskList({
 
   const allowColor = cycleType === "month";
 
-  return (
+  const summary = workspace.data?.work_mix && workspace.data.work_mix.total > 0 && (
+    <div className={layout === "panel" ? "shrink-0 border-t border-light px-6 py-4 text-caption text-hint" : "mx-5 mt-4 border-t border-light pt-3 text-caption text-hint"} aria-label={t("task.workMixLabel")}
+      title={t("task.workMixTitle")}>
+      <p className="mb-1 font-medium text-secondary">{t("task.workMix", { count: workspace.data.work_mix.total })}</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        <span>{t("task.withLongTerm", { count: workspace.data.work_mix.long_term })}</span>
+        <span>{t("task.independentWeekly", { count: workspace.data.work_mix.weekly_standalone })}</span>
+        {cycleType === "day" && <span>{t("task.independentDaily", { count: workspace.data.work_mix.daily_standalone })}</span>}
+        {workspace.data.work_mix.unresolved > 0 && <span>{t("task.unresolved", { count: workspace.data.work_mix.unresolved })}</span>}
+      </div>
+      <p className="mt-1">{t("task.withoutLinks", { percent: Math.round(100 * (workspace.data.work_mix.weekly_standalone + workspace.data.work_mix.daily_standalone) / workspace.data.work_mix.total) })}</p>
+    </div>
+  );
+
+  const content = (
     <div className="flex flex-col" data-task-list={cycleId} onDragLeave={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropHint(null);
     }}>
@@ -335,7 +355,7 @@ export function TaskList({
           {t("workspace.ended")}
         </p>
       )}
-      {rows.map((row) =>
+      <RemovalList>{rows.map((row) =>
         (
           <TaskRow
             key={row.node.id}
@@ -429,19 +449,8 @@ export function TaskList({
           />
         ),
       )}
-      {workspace.data?.work_mix && workspace.data.work_mix.total > 0 && (
-        <div className="mx-5 mt-4 border-t border-light pt-3 text-caption text-hint" aria-label={t("task.workMixLabel")}
-          title={t("task.workMixTitle")}>
-          <p className="mb-1 font-medium text-secondary">{t("task.workMix", { count: workspace.data.work_mix.total })}</p>
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            <span>{t("task.withLongTerm", { count: workspace.data.work_mix.long_term })}</span>
-            <span>{t("task.independentWeekly", { count: workspace.data.work_mix.weekly_standalone })}</span>
-            {cycleType === "day" && <span>{t("task.independentDaily", { count: workspace.data.work_mix.daily_standalone })}</span>}
-            {workspace.data.work_mix.unresolved > 0 && <span>{t("task.unresolved", { count: workspace.data.work_mix.unresolved })}</span>}
-          </div>
-          <p className="mt-1">{t("task.withoutLinks", { percent: Math.round(100 * (workspace.data.work_mix.weekly_standalone + workspace.data.work_mix.daily_standalone) / workspace.data.work_mix.total) })}</p>
-        </div>
-      )}
+      {layout === "flow" && summary && <div key="work-mix">{summary}</div>}
+      </RemovalList>
       {workspace.isError && (
         <p role="alert" className="px-2 py-1 text-caption text-danger">
           {errorMessage(workspace.error)}
@@ -458,6 +467,16 @@ export function TaskList({
       )}
     </div>
   );
+
+  return layout === "panel" ? (
+    <>
+      <div data-plan-scroll data-workspace-scroll-pane className="min-h-0 flex-auto overflow-y-auto px-4 py-5">
+        {content}
+        {children}
+      </div>
+      <RemovalList className="shrink-0">{summary}</RemovalList>
+    </>
+  ) : <>{content}{children}</>;
 }
 
 /* --- 行组件 -------------------------------------------------------------- */

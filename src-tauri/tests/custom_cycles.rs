@@ -248,18 +248,35 @@ fn database_rejects_malformed_or_out_of_range_progress_schedules() {
     let cycle = cycles::create_planning_cycle(
         &db.db,
         &custom_args("2028-02-28", "2028-03-09", None),
-        common::today(), NOW,
-    ).unwrap().value;
+        common::today(),
+        NOW,
+    )
+    .unwrap()
+    .value;
     let conn = db.conn();
     for invalid in [
-        "not json", "{}", "null",
+        "not json",
+        "{}",
+        "null",
         r#"{"kind":"repeat","every_days":0}"#,
         r#"{"kind":"repeat","every_days":1.5}"#,
         r#"{"kind":"once","date":"2028-02-30"}"#,
         r#"{"kind":"once","date":"2028-03-09"}"#,
         r#"{"kind":"once","date":"2028-02-29","every_days":2}"#,
     ] {
-        assert!(conn.execute("UPDATE cycles SET progress_check = ?1 WHERE id = ?2", rusqlite::params![invalid, cycle.id]).is_err(), "accepted {invalid}");
+        assert!(
+            conn.execute(
+                "UPDATE cycles SET progress_check = ?1 WHERE id = ?2",
+                rusqlite::params![invalid, cycle.id]
+            )
+            .is_err(),
+            "accepted {invalid}"
+        );
     }
-    assert_eq!(planner_lib::repository::cycles::require(&conn, &cycle.id).unwrap().progress_check, cycle.progress_check);
+    assert_eq!(
+        planner_lib::repository::cycles::require(&conn, &cycle.id)
+            .unwrap()
+            .progress_check,
+        cycle.progress_check
+    );
 }

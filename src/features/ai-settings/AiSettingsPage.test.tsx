@@ -62,6 +62,7 @@ const provider: ProviderSummary = {
   name: "Local runtime",
   base_url: "http://127.0.0.1:11434/v1",
   api_format: "openai_chat_completions",
+  connection: { mode: "auto" },
   extra_headers: [],
   models: [model],
   created_at: 1,
@@ -69,6 +70,11 @@ const provider: ProviderSummary = {
   connection_verified_at: 1,
   has_api_key: true,
   is_active: true,
+};
+
+const proxyProvider: ProviderSummary = {
+  ...provider,
+  connection: { mode: "proxy", url: "http://proxy.example.com:8080" },
 };
 
 const emptySummary: AiSettingsSummary = {
@@ -210,6 +216,7 @@ describe("AiSettingsPage", () => {
       name: "New provider",
       base_url: "https://api.example.com/v1",
       api_format: "openai_chat_completions",
+      connection: { mode: "auto" },
       extra_headers: [],
       models: [model],
       created_at: 9,
@@ -391,6 +398,103 @@ it("exposes saved-value placeholder and visibility controls", async () => {
   fireEvent.click(toggle);
   expect((screen.getByLabelText("Header 值 1") as HTMLInputElement).type).toBe("text");
   expect(screen.getByRole("button", { name: "隐藏 Header x-existing 的当前值" }).getAttribute("aria-pressed")).toBe("true");
+});
+
+it("collapses automatic connection settings and expands saved custom settings", async () => {
+  const firstView = renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "添加供应商" }));
+  const advanced = screen.getByRole("button", { name: "高级连接设置" });
+  expect(advanced.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByLabelText("连接方式")).toBeNull();
+  firstView.unmount();
+
+  mocks.getAiSettings.mockResolvedValue({ ...oneSummary, active_provider: proxyProvider, providers: [proxyProvider] });
+  renderPage();
+  const expanded = await screen.findByRole("button", { name: "高级连接设置" });
+  expect(expanded.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByLabelText("连接方式")).toBeTruthy();
+  expect((screen.getByLabelText("代理地址") as HTMLInputElement).value).toBe("http://proxy.example.com:8080");
+});
+
+it("shows proxy input only for proxy mode and validates explicit ports and credentials", async () => {
+  mocks.getAiSettings.mockResolvedValue(oneSummary);
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "高级连接设置" }));
+  const mode = screen.getByRole("combobox", { name: "连接方式" });
+  fireEvent.click(mode);
+  fireEvent.click(await screen.findByRole("option", { name: "指定代理" }));
+
+  const proxy = screen.getByLabelText("代理地址") as HTMLInputElement;
+  const save = screen.getByRole("button", { name: "测试并保存" }) as HTMLButtonElement;
+  expect(proxy).toBeTruthy();
+  expect(save.disabled).toBe(true);
+  expect(screen.queryByText(/请输入有效代理地址/)).toBeNull();
+
+  for (const value of [
+    "http://proxy.example.com",
+    "http://proxy.example.com:0",
+    "http://proxy.example.com:65536",
+    "http://user:pass@proxy.example.com:8080",
+    "http://proxy.example.com:8080/path",
+    "http://proxy.example.com:8080?x=1",
+    "http://proxy.example.com\\\\:8080",
+  ]) {
+    fireEvent.change(proxy, { target: { value } });
+    expect(save.disabled, value).toBe(true);
+  }
+
+  fireEvent.change(proxy, { target: { value: "http://proxy.example.com:80" } });
+  expect(save.disabled).toBe(false);
+  fireEvent.click(mode);
+  fireEvent.click(await screen.findByRole("option", { name: "直接连接" }));
+  expect(screen.queryByLabelText("代理地址")).toBeNull();
+  expect(save.disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "测试连接" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(mode);
+  fireEvent.click(await screen.findByRole("option", { name: "指定代理" }));
+  expect((screen.getByLabelText("代理地址") as HTMLInputElement).value).toBe("http://proxy.example.com:80");
+});
+
+it("saves the selected connection mode and drops an old proxy URL for direct mode", async () => {
+  mocks.getAiSettings.mockResolvedValue({ ...oneSummary, active_provider: provider, providers: [provider] });
+  const firstSaved = { ...provider, connection: { mode: "proxy", url: "https://proxy.example.com:443" } };
+  const secondSaved = { ...provider, connection: { mode: "direct" } };
+  mocks.saveProvider.mockResolvedValueOnce(firstSaved).mockResolvedValueOnce(secondSaved);
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "高级连接设置" }));
+  const mode = screen.getByRole("combobox", { name: "连接方式" });
+  fireEvent.click(mode);
+  fireEvent.click(await screen.findByRole("option", { name: "指定代理" }));
+  fireEvent.change(screen.getByLabelText("代理地址"), { target: { value: "https://proxy.example.com:443" } });
+  fireEvent.click(screen.getByRole("button", { name: "测试并保存" }));
+  await waitFor(() => expect(mocks.saveProvider).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({ connection: { mode: "proxy", url: "https://proxy.example.com:443" } }),
+    null,
+    {},
+  ));
+
+  fireEvent.click(mode);
+  fireEvent.click(await screen.findByRole("option", { name: "直接连接" }));
+  fireEvent.click(screen.getByRole("button", { name: "测试并保存" }));
+  await waitFor(() => expect(mocks.saveProvider).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ connection: { mode: "direct" } }),
+    null,
+    {},
+  ));
+});
+
+it("translates connection settings when the application language changes", async () => {
+  applyLocale("en");
+  mocks.getAiSettings.mockResolvedValue({ ...oneSummary, active_provider: proxyProvider, providers: [proxyProvider] });
+  renderPage();
+  expect(await screen.findByRole("button", { name: "Advanced connection settings" })).toBeTruthy();
+  expect(screen.getByLabelText("Proxy URL")).toBeTruthy();
+
+  applyLocale("zh-CN");
+  expect(await screen.findByRole("button", { name: "高级连接设置" })).toBeTruthy();
+  expect(screen.getByLabelText("代理地址")).toBeTruthy();
 });
 
 it("saves a configurable Coach expiry and rejects invalid minutes", async () => {

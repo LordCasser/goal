@@ -85,6 +85,7 @@ fn start_requires_duration() {
     let session = planner_lib::service::cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "Focus".into(),
             duration_ms: None,
@@ -316,6 +317,7 @@ fn deletion_guard_blocks_cycles_with_started_sessions() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "running".into(),
             duration_ms: Some(900_000),
@@ -392,6 +394,7 @@ fn finishing_a_session_accrues_focused_time_up_the_chain() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "deep work".into(),
             duration_ms: Some(3_600_000),
@@ -847,6 +850,7 @@ fn make_session(
     planner_lib::service::cycles::add_session(
         &db.db,
         &planner_lib::service::cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id,
             title: title.into(),
             duration_ms: Some(duration_ms),
@@ -901,6 +905,7 @@ fn opening_days_without_active_repeats_keeps_sessions_empty() {
     let source = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: today.id,
             title: "Stopped repeat source".into(),
             duration_ms: Some(1_500_000),

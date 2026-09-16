@@ -28,6 +28,7 @@ function cycleFixture(id: string, title: string): Cycle {
     title,
     type: "month",
     parent_id: null,
+    task_id: null,
     position: 0,
     archived: false,
     started: false,
@@ -63,6 +64,7 @@ function taskFixture(id: string, title: string, over: Partial<TaskNode> = {}): T
     children: [],
     subtasks_markdown: "",
     ...over,
+    focused_time: over.focused_time ?? 0,
   };
 }
 
@@ -81,7 +83,7 @@ function mockBackend(
       case commands.getPlannerState:
         return Promise.resolve(planner);
       case commands.getTaskDeletionPreview:
-        return Promise.resolve({ task_id: "t1", descendant_tasks: 0, confirmation_token: "impact-1" });
+        return Promise.resolve({ task_id: "t1", descendant_tasks: 0, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "impact-1" });
       case commands.getEditorWorkspace:
         return Promise.resolve<EditorWorkspace>({
           work_mix: null,

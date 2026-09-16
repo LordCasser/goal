@@ -228,11 +228,14 @@ pub async fn sample(
     // Layered deadlines (design D5): the short budget bounds the connect
     // phase and idle gaps between chunks, the long one the whole request
     // from connect until the body is fully read.
-    let client = reqwest::Client::builder()
+    let client_builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(timeouts.connect_idle)
         .read_timeout(timeouts.connect_idle)
-        .timeout(timeouts.total_generate)
+        .timeout(timeouts.total_generate);
+    let client_builder = request.connection.apply(client_builder, &prepared.url)
+        .map_err(|error| SamplingError::InvalidRequest { message: error.to_string() })?;
+    let client = client_builder
         .build()
         .map_err(|e| SamplingError::ProviderUnreachable {
             message: sanitize_message_with_secrets(&e.to_string(), &secrets),

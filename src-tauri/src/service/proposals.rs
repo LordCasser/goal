@@ -249,11 +249,15 @@ pub fn get_preview_summary(db: &Db, cycle_id: &str) -> AppResult<PreviewSummary>
                 UNION SELECT t.id FROM tasks t JOIN descendants d ON t.parent_id = d.id
             ) SELECT title FROM tasks WHERE id IN (SELECT id FROM descendants) ORDER BY cycle_id, position")
                 .map_err(|e| AppError::Db(e.to_string()))?;
-            let titles = statement
+            let mut titles = statement
                 .query_map([&task.id], |row| row.get::<_, String>(0))
                 .map_err(|e| AppError::Db(e.to_string()))?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| AppError::Db(e.to_string()))?;
+            let impact = crate::service::deletion::task_impact(&tx, &task.id)?;
+            for id in impact.cycle_ids {
+                titles.push(cycles_repo::require(&tx, &id)?.title);
+            }
             deletion_impacts.insert(task.id.clone(), titles);
         }
         if let Some(snapshot) = repo::get_snapshot(&tx, &task.id)? {
@@ -269,7 +273,11 @@ pub fn get_preview_summary(db: &Db, cycle_id: &str) -> AppResult<PreviewSummary>
     })
 }
 
-pub(crate) fn keep_one(conn: &Connection, task_id: &str) -> AppResult<Option<Task>> {
+pub(crate) fn keep_one(
+    conn: &Connection,
+    task_id: &str,
+    mutation: &mut Mutation<()>,
+) -> AppResult<Option<Task>> {
     let task = match tasks_repo::get(conn, task_id)? {
         Some(t) => t,
         None => return Ok(None),
@@ -281,6 +289,8 @@ pub(crate) fn keep_one(conn: &Connection, task_id: &str) -> AppResult<Option<Tas
         // A confirmed deletion physically removes the row — no tombstones
         // (spec: 已确认的删除).
         Some(ProposalKind::Delete) => {
+            let impact = crate::service::deletion::task_impact(conn, task_id)?;
+            mutation.merge(crate::service::deletion::prepare_deletion(conn, &impact)?);
             tasks_repo::delete(conn, task_id)?;
         }
         // A confirmed upsert becomes committed data; the snapshot is cleared.
@@ -301,12 +311,16 @@ pub fn keep_task_preview(db: &Db, task_id: &str) -> AppResult<Mutation<Task>> {
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
-    let task = keep_one(&tx, task_id)?.ok_or_else(|| AppError::not_found("task", task_id))?;
+    let mut affected = Mutation::new(());
+    let task = keep_one(&tx, task_id, &mut affected)?
+        .ok_or_else(|| AppError::not_found("task", task_id))?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let cycle_id = task.cycle_id.clone();
-    Ok(Mutation::new(task)
+    let mut mutation = Mutation::new(task)
         .touching_tasks(cycle_id.clone())
-        .touching_proposals(cycle_id))
+        .touching_proposals(cycle_id);
+    mutation.merge(affected);
+    Ok(mutation)
 }
 
 pub(crate) fn undo_one(conn: &Connection, task_id: &str) -> AppResult<Option<String>> {
@@ -358,16 +372,19 @@ pub fn keep_all_previews(db: &Db, cycle_id: &str) -> AppResult<Mutation<usize>> 
         .map_err(|e| AppError::Db(e.to_string()))?;
     let entries = repo::list_entries_by_cycle(&tx, cycle_id)?;
     let mut kept = 0;
+    let mut affected = Mutation::new(());
     for entry in entries {
         if entry.task.proposal.is_some() {
-            keep_one(&tx, &entry.task.id)?;
+            keep_one(&tx, &entry.task.id, &mut affected)?;
             kept += 1;
         }
     }
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
-    Ok(Mutation::new(kept)
+    let mut mutation = Mutation::new(kept)
         .touching_tasks(cycle_id)
-        .touching_proposals(cycle_id))
+        .touching_proposals(cycle_id);
+    mutation.merge(affected);
+    Ok(mutation)
 }
 
 pub fn undo_all_previews(db: &Db, cycle_id: &str) -> AppResult<Mutation<usize>> {

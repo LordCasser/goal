@@ -77,6 +77,7 @@ fn cycle_preview_counts_focus_blocks_and_cascades_cross_cycle_task_children() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: deleted_day.id.clone(),
             title: "Focus".into(),
             duration_ms: Some(900_000),
@@ -134,6 +135,7 @@ fn deleting_a_task_preserves_an_independent_focus_block() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "Independent focus".into(),
             duration_ms: Some(900_000),

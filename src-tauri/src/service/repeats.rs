@@ -213,6 +213,7 @@ pub(crate) fn generate_for_day_in_tx(
             ends_on: None,
             calendar_key: None,
             repeat_id: Some(template.id.clone()),
+            task_id: None,
             created_at: crate::service::now_ms(),
         };
         cycles_repo::insert(conn, &new)?;

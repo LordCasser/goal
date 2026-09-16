@@ -79,6 +79,8 @@ pub struct Cycle {
     /// Template this session was generated from; cleared when the template is
     /// removed (unlink, never cascade).
     pub repeat_id: Option<String>,
+    /// Optional task in the owning day; only focus blocks can have a task.
+    pub task_id: Option<String>,
     #[serde(default)]
     pub progress_check: Option<ProgressCheck>,
     pub created_at: i64,

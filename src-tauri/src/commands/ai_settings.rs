@@ -446,6 +446,7 @@ async fn probe_configuration(
     for model in &provider.models {
         let result = probe_provider(
             &provider.base_url,
+            provider.connection.clone(),
             sampling_api_format(provider.api_format),
             &model.model_id,
             api_key.clone(),
@@ -475,12 +476,14 @@ async fn probe_configuration(
 /// probe at a local fake provider instead of a real endpoint.
 async fn probe_provider(
     base_url: &str,
+    connection: crate::network::ConnectionSettings,
     api_format: ApiFormat,
     model: &str,
     api_key: Option<String>,
     extra_headers: Vec<(String, String)>,
 ) -> ConnectionTestResult {
     let request = SamplingRequest {
+        connection,
         base_url: base_url.to_string(),
         api_format,
         model: model.to_string(),
@@ -583,6 +586,7 @@ mod tests {
 
     fn sample_provider(name: &str, base_url: &str) -> ProviderConfig {
         ProviderConfig {
+            connection: Default::default(),
             id: String::new(),
             name: name.into(),
             base_url: base_url.into(),
@@ -704,6 +708,7 @@ mod tests {
             "base_url",
             "api_format",
             "extra_headers",
+            "connection",
             "models",
             "created_at",
             "archived",
@@ -1371,6 +1376,7 @@ mod tests {
         let api_key = std::env::var("PLANNER_TEST_API_KEY").ok();
         let result = probe_provider(
             &base,
+            Default::default(),
             sampling_api_format(ConfigApiFormat::OpenaiChatCompletions),
             &model,
             api_key,
@@ -1379,4 +1385,38 @@ mod tests {
         .await;
         assert!(result.ok, "real provider test failed: {result:?}");
     }
+    #[tokio::test]
+    async fn proxy_connection_is_used_by_draft_probe_and_saved_retest() {
+        use crate::network::ConnectionSettings;
+        let _logging = logging_quiet();
+        let (proxy, captured) = spawn(Scenario::Sse(CHAT_OK)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let settings = settings_in(dir.path());
+        let mut draft = sample_provider("Proxied model", "http://model.invalid");
+        draft.connection = ConnectionSettings::Proxy { url: proxy };
+        let saved = test_and_save_provider(&settings, draft, None, BTreeMap::new()).await.unwrap();
+        assert!(saved.connection_verified_at.is_some());
+        let reloaded = settings_in(dir.path());
+        assert_eq!(reloaded.store.get(&saved.id).unwrap().connection, saved.connection);
+        assert!(test_connection(&reloaded, &saved.id).await.unwrap().ok);
+        assert_eq!(captured.lock().unwrap().len(), 2);
+
+        let previous = reloaded.store.get(&saved.id).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let unavailable = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let mut changed = previous.clone();
+        changed.connection = ConnectionSettings::Proxy { url: unavailable };
+        assert!(test_and_save_provider(&reloaded, changed, None, BTreeMap::new()).await.is_err());
+        assert_eq!(reloaded.store.get(&saved.id).unwrap(), previous);
+        assert_eq!(captured.lock().unwrap().len(), 2);
+
+        let mut invalid = previous.clone();
+        invalid.connection = ConnectionSettings::Proxy { url: "http://user:secret@localhost:7890".into() };
+        let error = test_and_save_provider(&reloaded, invalid, None, BTreeMap::new()).await.unwrap_err();
+        assert!(matches!(&error, AppError::Validation { code, .. } if code == "invalid_proxy_url"));
+        assert!(!error.to_string().contains("secret"));
+        assert_eq!(reloaded.store.get(&saved.id).unwrap(), previous);
+    }
+
 }

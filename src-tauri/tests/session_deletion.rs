@@ -29,6 +29,7 @@ fn finished_focus_block_can_be_deleted_and_reverses_its_aggregate() {
     let session = cycles::add_session(
         &db.db,
         &AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "historical focus".into(),
             duration_ms: Some(3_600_000),
@@ -41,6 +42,7 @@ fn finished_focus_block_can_be_deleted_and_reverses_its_aggregate() {
     let other_session = cycles::add_session(
         &db.db,
         &AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "another historical focus".into(),
             duration_ms: Some(3_600_000),
@@ -127,6 +129,7 @@ fn running_focus_block_can_be_deleted_without_accruing_time() {
     let session = cycles::add_session(
         &db.db,
         &AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "running focus".into(),
             duration_ms: Some(900_000),
@@ -181,6 +184,7 @@ fn proposal_lock_rejects_container_delete_without_partial_session_changes() {
     let session = cycles::add_session(
         &db.db,
         &AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "protected focus".into(),
             duration_ms: Some(3_600_000),

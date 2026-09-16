@@ -78,6 +78,8 @@ pub struct TaskNode {
     pub children: Vec<TaskNode>,
     /// `subtasks` rendered as Markdown for AI context and sessions.
     pub subtasks_markdown: String,
+    /// Derived sum of this task's linked focus blocks, in milliseconds.
+    pub focused_time: i64,
 }
 
 /// Builds the forest for one cycle. Tasks whose `parent_id` is absent from the
@@ -108,6 +110,7 @@ pub fn build_tree(tasks: Vec<Task>) -> Vec<TaskNode> {
             task,
             children: Vec::new(),
             subtasks_markdown: markdown,
+            focused_time: 0,
         };
         visited.insert(idx);
         if let Some(kids) = children_of.get(sorted[idx].id.as_str()) {

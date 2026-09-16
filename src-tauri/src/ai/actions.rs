@@ -1135,6 +1135,7 @@ pub async fn apply(db: &Db, ai: &AiSettingsState, action: &Action) -> AppResult<
                 service::cycles::add_session(
                     db,
                     &service::cycles::AddSessionArgs {
+                        task_id: None,
                         day_cycle_id: day_cycle_id.clone(),
                         title: title.clone(),
                         duration_ms: Some(minutes(*duration_minutes)?),
@@ -1398,15 +1399,16 @@ pub fn resolve_task_preview(
         source_cycle_id,
         json!({"text":text,"result":{"summary_key":summary_key,"details":details,"decision":if approve {"applied"} else {"rejected"},"operation":"task_preview"},"target_kind":"task","target_id":task_id,"decision":if approve {"applied"} else {"rejected"}}),
     )?;
+    let mut mutation = service::Mutation::new(())
+        .touching_tasks(task.cycle_id.clone())
+        .touching_proposals(task.cycle_id);
     if approve {
-        service::proposals::keep_one(&tx, task_id)?;
+        service::proposals::keep_one(&tx, task_id, &mut mutation)?;
     } else {
         service::proposals::undo_one(&tx, task_id)?;
     }
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
-    Ok(service::Mutation::new(())
-        .touching_tasks(task.cycle_id.clone())
-        .touching_proposals(task.cycle_id))
+    Ok(mutation)
 }
 
 #[cfg(test)]
@@ -1460,17 +1462,48 @@ mod tests {
     #[test]
     fn deletion_approval_detects_changed_content_even_when_counts_match() {
         let (_dir, db, _ai, source_cycle) = setup();
-        let cycle = service::cycles::create_planning_cycle(&db, &service::cycles::CreateCycleArgs {
-            cycle_type: "month".into(),
-            duration_months: Some(1),
-            ..Default::default()
-        }, crate::domain::calendar::today_local(), 1).unwrap().value;
-        let task = service::tasks::add_task(&db, &service::tasks::AddTaskArgs {
-            cycle_id: cycle.id.clone(), title: "Original".into(), ..Default::default()
-        }, 1).unwrap().value;
-        let staged = stage(&db, &source_cycle, Action::Cycle(CycleAction::Delete { cycle_id: cycle.id }), "Delete the plan").unwrap();
-        db.pool().get().unwrap().execute("UPDATE tasks SET title='Revised' WHERE id=?1", [task.id]).unwrap();
-        let error = claim(&db, &source_cycle, staged["action_id"].as_str().unwrap(), true).unwrap_err();
+        let cycle = service::cycles::create_planning_cycle(
+            &db,
+            &service::cycles::CreateCycleArgs {
+                cycle_type: "month".into(),
+                duration_months: Some(1),
+                ..Default::default()
+            },
+            crate::domain::calendar::today_local(),
+            1,
+        )
+        .unwrap()
+        .value;
+        let task = service::tasks::add_task(
+            &db,
+            &service::tasks::AddTaskArgs {
+                cycle_id: cycle.id.clone(),
+                title: "Original".into(),
+                ..Default::default()
+            },
+            1,
+        )
+        .unwrap()
+        .value;
+        let staged = stage(
+            &db,
+            &source_cycle,
+            Action::Cycle(CycleAction::Delete { cycle_id: cycle.id }),
+            "Delete the plan",
+        )
+        .unwrap();
+        db.pool()
+            .get()
+            .unwrap()
+            .execute("UPDATE tasks SET title='Revised' WHERE id=?1", [task.id])
+            .unwrap();
+        let error = claim(
+            &db,
+            &source_cycle,
+            staged["action_id"].as_str().unwrap(),
+            true,
+        )
+        .unwrap_err();
         assert!(matches!(error, AppError::Conflict { code, .. } if code == "action_changed"));
     }
 

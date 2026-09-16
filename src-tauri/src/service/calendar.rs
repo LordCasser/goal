@@ -338,6 +338,25 @@ fn ensure_no_running_session(conn: &Connection, day: &Cycle) -> AppResult<()> {
     Ok(())
 }
 
+/// Focus follows whole-day content when its calendar ownership changes.
+fn adjust_focus_ancestors(
+    conn: &Connection,
+    mut parent_id: Option<String>,
+    delta: i64,
+) -> AppResult<Vec<String>> {
+    let mut touched = Vec::new();
+    while let Some(id) = parent_id {
+        parent_id = repo::require(conn, &id)?.parent_id;
+        if delta < 0 {
+            repo::subtract_focused_time(conn, &id, -delta)?;
+        } else if delta > 0 {
+            repo::add_focused_time(conn, &id, delta)?;
+        }
+        touched.push(id);
+    }
+    Ok(touched)
+}
+
 /// Fold `source` into `target_day` (merge strategy, and the second half of a
 /// move): tasks and focus blocks change owners, the source day is deleted.
 fn merge_days(
@@ -362,6 +381,13 @@ fn merge_days(
 
     repo::move_tasks_between_cycles(tx, &source.id, &target_day.id)?;
     repo::move_sessions_between_days(tx, &source.id, &target_day.id)?;
+    let mut focus_ancestors =
+        adjust_focus_ancestors(tx, source.parent_id.clone(), -source.focused_time)?;
+    focus_ancestors.extend(adjust_focus_ancestors(
+        tx,
+        Some(target_day.id.clone()),
+        source.focused_time,
+    )?);
     let mut order = target_order.clone();
     order.extend(source_order.iter().cloned());
     repo::reorder(tx, &order)?;
@@ -386,6 +412,10 @@ fn merge_days(
         mutation.cycles.push(id);
     }
     mutation.tasks.push(target_day.id.clone());
+    mutation.tasks.push(source.id.clone());
+    for id in focus_ancestors {
+        mutation.cycles.push(id);
+    }
     Ok(mutation)
 }
 
@@ -461,7 +491,18 @@ fn swap_days(
 
     let source_parent = source.parent_id.clone();
     let target_parent = target_day.parent_id.clone();
+    let mut focus_ancestors = Vec::new();
     if source_parent != target_parent {
+        focus_ancestors.extend(adjust_focus_ancestors(
+            tx,
+            source_parent.clone(),
+            target_day.focused_time - source.focused_time,
+        )?);
+        focus_ancestors.extend(adjust_focus_ancestors(
+            tx,
+            target_parent.clone(),
+            source.focused_time - target_day.focused_time,
+        )?);
         // Parent is optional; independent days can swap with grouped days.
         let source_position = cycles_service::next_cycle_position(tx, target_parent.as_deref())?;
         let target_position = cycles_service::next_cycle_position(tx, source_parent.as_deref())?;
@@ -482,6 +523,9 @@ fn swap_days(
     });
     mutation.cycles.push(source.id.clone());
     mutation.cycles.push(target_day.id.clone());
+    for id in focus_ancestors {
+        mutation.cycles.push(id);
+    }
     // Both (possibly new) parents so both planner columns refresh.
     for parent in [source_parent, target_parent] {
         if let Some(parent) = parent {
@@ -771,6 +815,7 @@ mod tests {
         cycles_service::add_session(
             db,
             &AddSessionArgs {
+                task_id: None,
                 day_cycle_id: day_id.into(),
                 title: title.into(),
                 duration_ms: Some(minutes * 60_000),
@@ -1440,6 +1485,7 @@ mod tests {
         let naked = cycles_service::add_session(
             &f.db,
             &AddSessionArgs {
+                task_id: None,
                 day_cycle_id: day.id.clone(),
                 title: "naked".into(),
                 duration_ms: None,

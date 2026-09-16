@@ -91,6 +91,8 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub api_format: ApiFormat,
     #[serde(default)]
+    pub connection: crate::network::ConnectionSettings,
+    #[serde(default)]
     /// Names only. Values live in the provider header credential.
     pub extra_headers: Vec<String>,
     pub models: Vec<ModelConfig>,
@@ -428,6 +430,7 @@ pub(crate) fn validate(provider: &ProviderConfig) -> AppResult<()> {
             ));
         }
     }
+    provider.connection.validate()?;
     super::headers::normalize_names(&provider.extra_headers)?;
     Ok(())
 }
@@ -494,6 +497,7 @@ mod tests {
 
     fn sample_provider() -> ProviderConfig {
         ProviderConfig {
+            connection: Default::default(),
             id: String::new(),
             name: "Local runtime".into(),
             base_url: "http://localhost:11434/v1".into(),
@@ -870,4 +874,26 @@ mod tests {
         .expect("deserialize");
         assert!(model.supports_tools);
     }
+    #[test]
+    fn connection_settings_default_and_persist_per_provider() {
+        use crate::network::ConnectionSettings;
+        let mut json = serde_json::to_value(sample_provider()).unwrap();
+        json.as_object_mut().unwrap().remove("connection");
+        let parsed: ProviderConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.connection, ConnectionSettings::Auto);
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProviderStore::load(dir.path()).unwrap();
+        for connection in [ConnectionSettings::Auto, ConnectionSettings::Direct,
+            ConnectionSettings::Proxy { url: "socks5h://localhost:1080".into() }] {
+            let mut provider = sample_provider();
+            provider.connection = connection.clone();
+            let saved = store.add(provider).unwrap();
+            assert_eq!(ProviderStore::load(dir.path()).unwrap().get(&saved.id).unwrap().connection, connection);
+        }
+        let mut invalid = sample_provider();
+        invalid.connection = ConnectionSettings::Proxy { url: "http://user:secret@localhost:7890".into() };
+        assert!(store.add(invalid).is_err());
+        assert!(!std::fs::read_to_string(dir.path().join("providers.json")).unwrap().contains("secret"));
+    }
+
 }

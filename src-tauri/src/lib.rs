@@ -14,6 +14,7 @@ pub mod error;
 pub mod events;
 pub mod i18n;
 pub mod logging;
+pub mod network;
 mod platform;
 pub mod providers;
 pub mod repository;

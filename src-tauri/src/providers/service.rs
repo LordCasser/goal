@@ -104,6 +104,7 @@ mod tests {
         assert!(state.store.list().is_empty());
 
         let provider = crate::providers::config::ProviderConfig {
+            connection: Default::default(),
             id: String::new(),
             name: "State test".into(),
             base_url: "http://127.0.0.1:1234".into(),

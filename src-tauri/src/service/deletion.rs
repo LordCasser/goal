@@ -17,8 +17,7 @@ use crate::repository::{cycles as cycles_repo, tasks as tasks_repo};
 
 #[derive(Debug, Clone)]
 pub struct DeletionImpact {
-    /// Cycles deleted by a cycle mutation.  Task-only mutations leave this
-    /// empty because they do not infer any cycle ownership.
+    /// Cycles deleted by either the cycle tree or a linked task cascade.
     pub cycle_ids: Vec<String>,
     /// The complete task FK cascade, including the root task.
     pub task_ids: Vec<String>,
@@ -42,6 +41,7 @@ struct TokenCycle {
     started_at: Option<i64>,
     finished_at: Option<i64>,
     focused_time: i64,
+    task_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,14 +68,23 @@ struct TokenPayload {
 pub fn task_impact(conn: &Connection, task_id: &str) -> AppResult<DeletionImpact> {
     let task_ids = descendant_task_ids(conn, task_id)?;
     let task_cycle_ids = task_cycle_ids(conn, &task_ids)?;
-    let cycles = cycle_records(conn, &task_cycle_ids)?;
+    let cycle_ids = linked_session_ids(conn, &task_ids)?;
+    let mut token_cycle_ids = task_cycle_ids.clone();
+    token_cycle_ids.extend(cycle_ids.iter().cloned());
+    token_cycle_ids.sort();
+    token_cycle_ids.dedup();
+    let cycles = cycle_records(conn, &token_cycle_ids)?;
+    let started_focus_count = cycles
+        .iter()
+        .filter(|c| c.cycle_type == "session" && c.started)
+        .count() as i64;
     let tasks = task_records(conn, &task_ids)?;
     let token = token("task", task_id, cycles, tasks);
     Ok(DeletionImpact {
-        cycle_ids: Vec::new(),
+        total_focus_blocks: cycle_ids.len() as i64,
+        cycle_ids,
         descendant_cycles: 0,
-        total_focus_blocks: 0,
-        started_focus_count: 0,
+        started_focus_count,
         task_cycle_ids,
         task_ids,
         token,
@@ -91,6 +100,11 @@ pub fn cycle_impact(conn: &Connection, cycle_id: &str) -> AppResult<DeletionImpa
     cycle_ids.dedup();
     let task_ids = task_ids_for_cycles(conn, &cycle_ids)?;
     let task_cycle_ids = task_cycle_ids(conn, &task_ids)?;
+
+    let descendant_cycles = cycle_ids.len().saturating_sub(1) as i64;
+    cycle_ids.extend(linked_session_ids(conn, &task_ids)?);
+    cycle_ids.sort();
+    cycle_ids.dedup();
 
     let mut token_cycle_ids = cycle_ids.clone();
     token_cycle_ids.extend(task_cycle_ids.iter().cloned());
@@ -109,7 +123,7 @@ pub fn cycle_impact(conn: &Connection, cycle_id: &str) -> AppResult<DeletionImpa
     let token = token("cycle", cycle_id, cycles, tasks);
 
     Ok(DeletionImpact {
-        descendant_cycles: cycle_ids.len().saturating_sub(1) as i64,
+        descendant_cycles,
         cycle_ids,
         task_ids,
         task_cycle_ids,
@@ -117,6 +131,63 @@ pub fn cycle_impact(conn: &Connection, cycle_id: &str) -> AppResult<DeletionImpa
         started_focus_count,
         token,
     })
+}
+
+/// Undo the removed records' contribution to surviving containers before FK
+/// cascades erase their ancestry. All deletion entry points share this path.
+pub(crate) fn prepare_deletion(
+    conn: &Connection,
+    impact: &DeletionImpact,
+) -> AppResult<crate::service::Mutation<()>> {
+    let deleted: BTreeSet<&str> = impact.cycle_ids.iter().map(String::as_str).collect();
+    let mut mutation = crate::service::Mutation::new(());
+    for id in &impact.cycle_ids {
+        let cycle = cycles_repo::require(conn, id)?;
+        mutation.cycles.push(id);
+        if cycle.cycle_type == crate::domain::cycle::CycleType::Session {
+            if cycle.task_id.is_some() {
+                if let Some(day) = &cycle.parent_id {
+                    mutation.tasks.push(day);
+                }
+            }
+            let mut parent = cycle.parent_id;
+            while let Some(id) = parent {
+                let ancestor = cycles_repo::require(conn, &id)?;
+                if !deleted.contains(id.as_str()) {
+                    if cycle.focused_time > 0 {
+                        cycles_repo::subtract_focused_time(conn, &id, cycle.focused_time)?;
+                    }
+                    mutation.cycles.push(&id);
+                }
+                parent = ancestor.parent_id;
+            }
+        } else if let Some(parent) = cycle.parent_id {
+            if !deleted.contains(parent.as_str()) {
+                mutation.cycles.push(parent);
+            }
+        }
+    }
+    for id in &impact.task_cycle_ids {
+        mutation.tasks.push(id);
+    }
+    crate::service::reminders::purge_for_cycle_impact(conn, &impact.cycle_ids, &impact.task_ids)?;
+    Ok(mutation)
+}
+
+fn linked_session_ids(conn: &Connection, task_ids: &[String]) -> AppResult<Vec<String>> {
+    let mut statement = conn
+        .prepare("SELECT id FROM cycles WHERE task_id = ?1 AND type = 'session' ORDER BY id")
+        .map_err(crate::error::from_rusqlite)?;
+    let mut ids = BTreeSet::new();
+    for task_id in task_ids {
+        let rows = statement
+            .query_map([task_id], |row| row.get::<_, String>(0))
+            .map_err(crate::error::from_rusqlite)?;
+        for row in rows {
+            ids.insert(row.map_err(crate::error::from_rusqlite)?);
+        }
+    }
+    Ok(ids.into_iter().collect())
 }
 
 /// Validate a GUI confirmation token.  Trusted internal callers use the
@@ -212,6 +283,7 @@ fn cycle_records(conn: &Connection, cycle_ids: &[String]) -> AppResult<Vec<Token
             started_at: cycle.started_at,
             finished_at: cycle.finished_at,
             focused_time: cycle.focused_time,
+            task_id: cycle.task_id,
         });
     }
     Ok(records)

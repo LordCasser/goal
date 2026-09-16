@@ -131,6 +131,7 @@ cycles(
   started_at INTEGER, finished_at INTEGER,
   duration INTEGER,              -- 毫秒；NULL = 未定时长（Do Later）
   focused_time INTEGER NOT NULL DEFAULT 0,  -- 毫秒
+  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE, -- 专注块可选关联同日日任务
   repeat_id TEXT REFERENCES repeats(id),    -- 由哪个重复模板生成；模板移除时置空而非级联删除
   starts_on TEXT, ends_on TEXT,  -- 'YYYY-MM-DD'
   progress_check TEXT,           -- 可空 JSON；长期周期的 once/repeat 检查安排
@@ -263,7 +264,9 @@ Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日�
 
 长期检查安排由迁移 11 在 `cycles.progress_check` 可空 JSON 列持久化，封闭枚举为 `{kind:"once",date}` 或 `{kind:"repeat",every_days}`。一次检查须位于 `[starts_on, ends_on)`；重复间隔为正整数天，从开始日期推进，仅派生结束前的检查日。前后端按整天计算，预览只生成有限日期和总数，不物化检查实例，不新增通知调度器。预设保存中点检查，旧记录空值仅在展示时推导中点。
 
-删除影响由 `service/deletion.rs` 统一计算：先遍历周期子树，再沿任务父链递归遍历跨周期后代。任务删除只沿任务树，不推断同日独立专注块关联。GUI 预览返回影响计数和 token，删除事务重新计算 token，变化时要求再次确认；同一事务清理后代提醒及预览快照，并使所有受影响周期的查询失效。Coach 保留已有单一确认入口。
+删除影响由 `service/deletion.rs` 统一计算：先遍历周期子树，再沿任务父链递归遍历跨周期后代。任务删除沿任务树并纳入显式 `task_id` 关联的专注块，不推断同日独立专注块关联。GUI 预览返回影响计数和 token，删除事务重新计算 token，变化时要求再次确认；同一事务清理后代提醒及预览快照，并使所有受影响周期的查询失效。Coach 保留已有单一确认入口。
+
+专注关联由迁移 12 的可空 `cycles.task_id` 表达，仅 session 可填写；创建服务验证任务真实、有标题、已确认并属于同一天。日历整体合并按事务共同移动任务与专注，故同日约束在业务事务边界验证。任务单独跨日移动会解除关联，原日专注历史保留；重复实例不继承关联。`TaskNode.focused_time` 在编辑态从关联专注的已累计时长派生，任务不保存第二份计数。结束专注沿周期父链只累计一次；递归删除先从幸存祖先扣除相关累计，再由外键删除记录，并统一清理提醒和失效查询。界面只在创建专注时提供可选关联，不增加常驻任务统计。
 
 ## IPC 契约
 
@@ -385,6 +388,8 @@ react-query 缓存 ←────────── 失效并重取 ←──�
 供应商元数据和当前激活的 `provider_id + model_id` 组合继续存于 providers.json，不新增模型选择实体。原子保存选中组合；解析器只取指定模型。配置测试、凭据更新和激活操作由同一异步互斥锁串行化；测试失败不覆盖旧配置。计划区的可用性检查只读配置，不因浏览页面访问钥匙串。
 
 供应商 `extra_headers` 只存名称数组，值通过 `save_provider` 的独立 `header_values` 参数单向提交，在系统凭据 `provider-headers:{id}` 中保存。留空保留同名值、删除名称移除值；统一 `providers::headers` 校验后逐模型测试，再提交配置和凭据，失败执行补偿。运行时解析和连接测试共用相同值；采样客户端统一按名称覆盖默认 Header 并脱敏错误，拒绝传输层保留名称和重定向转发。前端、普通配置和 Coach 上下文均不获得已存值。
+
+供应商 `connection` 与采样请求共用 `network::ConnectionSettings`（auto/direct/proxy）。`network.rs` 集中 URL 校验、回环识别与 reqwest 代理构建；protocol adapter 只处理请求与事件格式。最终目标为回环地址时始终禁用代理；非回环目标按供应商选择自动、直连或单一显式代理，失败不改路由。该层不写环境变量、注册表或系统代理；本次无代理认证与 PAC/WPAD。代理 URL 不能携带账号密码、路径、query 或 fragment，普通配置与 Debug 不暴露代理凭据。
 
 `ai/skills.rs` 管理内置文件、首次补齐和运行时读取；`ai/agent/prompt.rs` 只组合不可变契约、技能目录和当前工作流。模型调用 `load_skill` 选择技能，执行器在同一回合的下一轮更新系统指令与工具集合。长期、周、日规划分别读取文件；时段分析和问题诊断只有读取工具与技能切换工具，执行器验证调用是否属于当前集合。技能正文不可扩大代码层权限。
 

@@ -210,6 +210,7 @@ pub fn create_planning_cycle(
         ends_on: ends_on.map(format_date),
         calendar_key: key,
         repeat_id: None,
+        task_id: None,
         created_at: now,
     };
     repo::insert(&tx, &new)?;
@@ -295,6 +296,7 @@ pub(crate) fn get_or_create_day_in_tx(
                 ends_on: Some(format_date(end)),
                 calendar_key: Some(week_key(start)),
                 repeat_id: None,
+                task_id: None,
                 created_at: now,
             };
             repo::insert(conn, &new)?;
@@ -312,6 +314,7 @@ pub(crate) fn get_or_create_day_in_tx(
         ends_on: Some(format_date(calendar::add_days(date, 1))),
         calendar_key: Some(day_key(date)),
         repeat_id: None,
+        task_id: None,
         created_at: now,
     };
     repo::insert(conn, &new)?;
@@ -339,6 +342,7 @@ fn get_day_by_date(conn: &Connection, date: &str) -> AppResult<Option<Cycle>> {
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct AddSessionArgs {
+    pub task_id: Option<String>,
     pub day_cycle_id: String,
     pub title: String,
     /// Milliseconds; `None` leaves the focus block without a set duration.
@@ -359,6 +363,16 @@ pub fn add_session(db: &Db, args: &AddSessionArgs, now: i64) -> AppResult<Mutati
         ));
     }
     ensure_cycle_mutable(&day)?;
+    if let Some(task_id) = &args.task_id {
+        let task = tasks_repo::require(&tx, task_id)?;
+        if task.cycle_id != day.id || task.title.trim().is_empty() || task.proposal.is_some() {
+            return Err(AppError::validation(
+                "invalid_focus_task",
+                "Choose a committed task with a title in this day",
+            ));
+        }
+        crate::service::tasks::ensure_task_editable(&tx, task_id, false)?;
+    }
     let position = match args.position {
         Some(p) => p,
         None => repo::max_position(&tx, &day.id)? + 1,
@@ -374,6 +388,7 @@ pub fn add_session(db: &Db, args: &AddSessionArgs, now: i64) -> AppResult<Mutati
         ends_on: None,
         calendar_key: None,
         repeat_id: None,
+        task_id: args.task_id.clone(),
         created_at: now,
     };
     repo::insert(&tx, &new)?;
@@ -532,6 +547,11 @@ pub fn finish_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cyc
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
     let mut mutation = Mutation::new(updated);
+    if target.task_id.is_some() {
+        if let Some(day_id) = &target.parent_id {
+            mutation.tasks.push(day_id);
+        }
+    }
     for id in touched {
         mutation.cycles.push(id);
     }
@@ -647,38 +667,10 @@ fn delete_cycle_inner(
     for task_id in &impact.task_ids {
         crate::service::tasks::ensure_task_editable(&tx, task_id, true)?;
     }
-    let mut touched_parents = Vec::new();
-    if target.cycle_type == CycleType::Session {
-        let mut parent = target.parent_id.clone();
-        while let Some(parent_id) = parent {
-            if target.focused_time > 0 {
-                repo::subtract_focused_time(&tx, &parent_id, target.focused_time)?;
-            }
-            touched_parents.push(parent_id.clone());
-            parent = repo::get(&tx, &parent_id)?.and_then(|cycle| cycle.parent_id);
-        }
-    } else if let Some(parent_id) = target.parent_id.clone() {
-        touched_parents.push(parent_id);
-    }
-    // Reminders are polymorphic (no FK to the cycles subtree); clean every
-    // reminder attached to the deleted pages and their tasks BEFORE the
-    // delete — the FK cascade would remove the subtree rows and orphan the
-    // lookup (change: add-reminders-notifications §1.3).
-    crate::service::reminders::purge_for_cycle_impact(&tx, &impact.cycle_ids, &impact.task_ids)?;
+    let mutation = crate::service::deletion::prepare_deletion(&tx, &impact)?;
     repo::delete(&tx, cycle_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
-    let mut mutation = Mutation::new(());
-    mutation.cycles.push(cycle_id.to_string());
-    for parent in touched_parents {
-        mutation.cycles.push(parent);
-    }
-    for id in impact.cycle_ids {
-        mutation.cycles.push(id);
-    }
-    for cycle_id in impact.task_cycle_ids {
-        mutation.tasks.push(cycle_id);
-    }
     Ok(mutation)
 }
 

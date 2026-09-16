@@ -290,6 +290,7 @@ mod tests {
         let session = cycles::add_session(
             db,
             &AddSessionArgs {
+                task_id: None,
                 day_cycle_id: day.into(),
                 title: "deep work".into(),
                 duration_ms: Some(50 * 60 * 1000),
@@ -339,6 +340,7 @@ mod tests {
                 ends_on: None,
                 calendar_key: None,
                 repeat_id: None,
+                task_id: None,
                 created_at: NOW,
             },
         )

@@ -76,6 +76,7 @@ pub struct SamplingRequest {
     /// Includes scheme and path prefix, e.g. `https://api.example.com/v1`.
     pub base_url: String,
     pub api_format: ApiFormat,
+    pub connection: crate::network::ConnectionSettings,
     pub model: String,
     /// Local endpoints may have none; then no auth header is sent.
     pub api_key: Option<String>,
@@ -95,6 +96,7 @@ impl std::fmt::Debug for SamplingRequest {
         f.debug_struct("SamplingRequest")
             .field("base_url", &self.base_url)
             .field("api_format", &self.api_format)
+            .field("connection", &self.connection)
             .field("model", &self.model)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field(
@@ -316,6 +318,7 @@ mod tests {
     #[test]
     fn request_debug_redacts_api_key_and_header_values() {
         let request = SamplingRequest {
+            connection: Default::default(),
             base_url: "http://localhost".into(),
             api_format: ApiFormat::OpenaiResponses,
             model: "model".into(),

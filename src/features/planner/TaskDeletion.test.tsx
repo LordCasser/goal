@@ -13,7 +13,7 @@ function Fixture() {
 function mount() { render(<QueryClientProvider client={new QueryClient()}><Fixture /></QueryClientProvider>); }
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.getTaskDeletionPreview.mockResolvedValue({ task_id: target.id, descendant_tasks: 3, confirmation_token: "v1" });
+  mocks.getTaskDeletionPreview.mockResolvedValue({ task_id: target.id, descendant_tasks: 3, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "v1" });
   mocks.deleteTask.mockResolvedValue(undefined);
 });
 
@@ -34,16 +34,34 @@ it("sends the preview token only after confirmation", async () => {
 });
 
 it("deletes a leaf after preview without an extra dialog", async () => {
-  mocks.getTaskDeletionPreview.mockResolvedValue({ task_id: target.id, descendant_tasks: 0, confirmation_token: "leaf" });
+  mocks.getTaskDeletionPreview.mockResolvedValue({ task_id: target.id, descendant_tasks: 0, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "leaf" });
   mount(); fireEvent.click(screen.getByText("Delete"));
   await waitFor(() => expect(mocks.deleteTask).toHaveBeenCalledWith("goal", "leaf"));
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
+it("confirms linked focus blocks and describes started impact including finished blocks", async () => {
+  mocks.getTaskDeletionPreview.mockResolvedValue({
+    task_id: target.id,
+    descendant_tasks: 0,
+    total_focus_blocks: 2,
+    // The backend includes completed blocks in its started count.
+    started_focus_count: 1,
+    confirmation_token: "focus-leaf",
+  });
+  mount(); fireEvent.click(screen.getByText("Delete"));
+  await screen.findByRole("dialog");
+  expect(screen.getByText("2 linked focus blocks will also be deleted")).toBeTruthy();
+  expect(screen.getByText("1 linked focus block has already started")).toBeTruthy();
+  expect(screen.queryByText(/currently running/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Delete task and descendants" }));
+  await waitFor(() => expect(mocks.deleteTask).toHaveBeenCalledWith("goal", "focus-leaf"));
+});
+
 it("refreshes changed impact and requires a second explicit confirmation", async () => {
   mocks.deleteTask.mockRejectedValueOnce({ code: "deletion_impact_changed" });
-  mocks.getTaskDeletionPreview.mockResolvedValueOnce({ task_id: target.id, descendant_tasks: 3, confirmation_token: "v1" })
-    .mockResolvedValue({ task_id: target.id, descendant_tasks: 4, confirmation_token: "v2" });
+  mocks.getTaskDeletionPreview.mockResolvedValueOnce({ task_id: target.id, descendant_tasks: 3, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "v1" })
+    .mockResolvedValue({ task_id: target.id, descendant_tasks: 4, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "v2" });
   mount(); fireEvent.click(screen.getByText("Delete"));
   fireEvent.click(await screen.findByRole("button", { name: "Delete task and descendants" }));
   await screen.findByText("This task and 4 linked descendants");

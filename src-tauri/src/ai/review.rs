@@ -928,6 +928,7 @@ mod tests {
             ends_on: None,
             calendar_key: None,
             repeat_id: None,
+            task_id: None,
             progress_check: None,
             created_at: 0,
         }
@@ -963,6 +964,7 @@ mod tests {
     fn resolved_stub() -> ResolvedProvider {
         ResolvedProvider {
             config: ProviderConfig {
+                connection: Default::default(),
                 id: "p1".into(),
                 name: "Test".into(),
                 base_url: "http://127.0.0.1:9/v1".into(),

@@ -195,6 +195,7 @@ mod tests {
     #[test]
     fn selected_toolless_model_degrades_to_conversation() {
         let provider = ProviderConfig {
+            connection: Default::default(),
             id: "p1".into(),
             name: "Local".into(),
             base_url: "http://127.0.0.1:9/v1".into(),
@@ -213,6 +214,7 @@ mod tests {
     #[test]
     fn selection_does_not_substitute_tool_capable_model() {
         let provider = ProviderConfig {
+            connection: Default::default(),
             id: "p1".into(),
             name: "Local".into(),
             base_url: "http://127.0.0.1:9/v1".into(),
@@ -232,6 +234,7 @@ mod tests {
     #[test]
     fn selection_rejects_a_model_less_provider_defensively() {
         let provider = ProviderConfig {
+            connection: Default::default(),
             id: "p1".into(),
             name: "Empty".into(),
             base_url: "http://127.0.0.1:9/v1".into(),

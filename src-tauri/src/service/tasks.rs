@@ -248,6 +248,8 @@ pub fn update_task(
 pub struct TaskDeletionPreview {
     pub task_id: String,
     pub descendant_tasks: i64,
+    pub total_focus_blocks: i64,
+    pub started_focus_count: i64,
     pub confirmation_token: String,
 }
 
@@ -258,6 +260,8 @@ pub fn get_task_deletion_preview(db: &Db, task_id: &str) -> AppResult<TaskDeleti
     Ok(TaskDeletionPreview {
         task_id: task_id.to_string(),
         descendant_tasks: impact.task_ids.len().saturating_sub(1) as i64,
+        total_focus_blocks: impact.total_focus_blocks,
+        started_focus_count: impact.started_focus_count,
         confirmation_token: impact.token,
     })
 }
@@ -290,23 +294,17 @@ fn delete_task_inner(
     let existing = repo::require(&tx, task_id)?;
     ensure_task_editable(&tx, task_id, true)?;
     let impact = crate::service::deletion::task_impact(&tx, task_id)?;
-    let has_descendants = impact.task_ids.len() > 1;
+    let has_dependents = impact.task_ids.len() > 1 || !impact.cycle_ids.is_empty();
     crate::service::deletion::require_confirmation(
         confirmation_token,
         &impact.token,
-        gui_confirmation && has_descendants,
+        gui_confirmation && has_dependents,
     )?;
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
-    // Children rows and preview snapshots go with the row (FK cascades).
+    let mut mutation = crate::service::deletion::prepare_deletion(&tx, &impact)?;
+    // Task descendants and linked focus blocks follow through FK cascades.
     repo::delete(&tx, task_id)?;
-    // Reminders have no FK to follow (polymorphic target); clean them in the
-    // same transaction (change: add-reminders-notifications §1.3).
-    crate::service::reminders::purge_for_task_impact(&tx, &impact.task_ids)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
-    let mut mutation = Mutation::new(());
-    for cycle_id in impact.task_cycle_ids {
-        mutation.tasks.push(cycle_id);
-    }
     // Keep the target cycle in the invalidation set even if a future schema
     // permits a malformed task row without an owning cycle.
     mutation.tasks.push(cycle.id);
@@ -352,7 +350,11 @@ pub fn move_task(
     // The move carries same-cycle descendant rows along so a goal keeps its
     // breakdown; cross-cycle links stay untouched.
     let subtree = task_subtree_ids(&tx, task_id)?;
+    let mut unlinked_sessions = Vec::new();
     for id in &subtree {
+        if existing.cycle_id != target_cycle_id {
+            unlinked_sessions.extend(cycles_repo::unlink_task(&tx, id)?);
+        }
         let mut update = repo::TaskUpdate::empty();
         update.cycle_id = Some(target_cycle_id.to_string());
         repo::update(&tx, id, &update)?;
@@ -365,6 +367,12 @@ pub fn move_task(
     let task = repo::require(&tx, task_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let mut mutation = Mutation::new(task).touching_tasks(target_cycle_id);
+    if !unlinked_sessions.is_empty() {
+        mutation.cycles.push(&existing.cycle_id);
+        for id in unlinked_sessions {
+            mutation.cycles.push(id);
+        }
+    }
     mutation.tasks.push(existing.cycle_id);
     Ok(mutation)
 }

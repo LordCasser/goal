@@ -1,8 +1,8 @@
 /** One selected plan per horizon. Time navigation stays separate from task hierarchy. */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState } from "../../ui";
-import { createPlanningCycle, ensureDay, getEditorWorkspacesByCycleIds, getPlannerState, LATER_CYCLE_ID, type Cycle } from "../../lib/ipc";
+import { createPlanningCycle, ensureDay, getEditorWorkspace, getEditorWorkspacesByCycleIds, getPlannerState, getSettings, listSessions, LATER_CYCLE_ID, type Cycle } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import { isoWeekNumber, todayISO, weekdayName } from "./dates";
 import { invalidateCycles, useActionError } from "./actions";
@@ -12,6 +12,9 @@ import { directRelations, highlightedTasks, indexTasks, type RelationView } from
 import { RelationLayer } from "./RelationLayer";
 import { TaskDragProvider } from "./TaskDragContext";
 import { ScrollModeHint } from "./ScrollModeHint";
+import { WeekNavigation, weekStartForDate } from "./WeekNavigation";
+import { DayNavigation, weekContainingDate } from "./DayNavigation";
+import { PlanTransition } from "./PlanTransition";
 import { useTranslation, formatDate } from "../../lib/i18n";
 
 function currentCycle(cycles: Cycle[], selected: string | null, today: string): Cycle | null {
@@ -121,10 +124,14 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
   const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const { data: state, isLoading, isError } = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
+  const { data: settings } = useQuery({ queryKey: qk.settings(), queryFn: getSettings });
+  const weekStartDay = settings?.week_start_day ?? 1;
   const [durationOpen, setDurationOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-  const [selectedWeek, setSelectedWeek] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [selectedWeekDate, setSelectedWeekDate] = useState<string | null>(null);
+  const navigationIntent = useRef<"week" | "day" | null>(null);
+  const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null);
+  const handledReveal = useRef<number | undefined>(undefined);
   const [creating, setCreating] = useState(false);
   const { error, run, dismiss } = useActionError();
   const today = todayISO();
@@ -132,9 +139,29 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
   const months = cycles.filter((c) => c.type === "month" && c.id !== LATER_CYCLE_ID);
   const month = currentCycle(months, selectedMonth, today);
   const weeks = cycles.filter((c) => c.type === "week");
-  const week = currentCycle(weeks, selectedWeek, today);
-  const days = cycles.filter((c) => c.type === "day" && (!week || (c.starts_on !== null && week.starts_on !== null && week.ends_on !== null && week.starts_on <= c.starts_on && c.starts_on < week.ends_on)));
-  const day = currentCycle(days, selectedDay, today);
+  const week = selectedWeekDate ? (weeks.find((cycle) => cycle.starts_on === selectedWeekDate) ?? null) : currentCycle(weeks, null, today);
+  const visibleWeekDate = selectedWeekDate ?? week?.starts_on ?? weekStartForDate(today, weekStartDay);
+  const allDays = cycles.filter((c) => c.type === "day");
+  const days = allDays.filter((c) => !week || (c.starts_on !== null && week.starts_on !== null && week.ends_on !== null && week.starts_on <= c.starts_on && c.starts_on < week.ends_on));
+  const day = selectedDayDate ? (allDays.find((c) => c.starts_on === selectedDayDate) ?? null)
+    : (days.find((c) => c.starts_on === today) ?? days[0] ?? null);
+  const visibleDate = selectedDayDate ?? day?.starts_on ?? week?.starts_on ?? today;
+  // Load into the same caches used by TaskList/FocusArea before replacing the
+  // old panels. A fresh date must not first render as an empty task/focus list.
+  const targetWorkspaces = useQueries({ queries: [week, day].filter((cycle): cycle is Cycle => cycle !== null).map((cycle) => ({
+    queryKey: qk.editorWorkspace(cycle.id), queryFn: () => getEditorWorkspace(cycle.id),
+  })) });
+  // Prime the same per-cycle workspace cache used by the month task list. Its
+  // readiness is intentionally independent from the week/day panels, so a
+  // slow long-term plan cannot delay an unrelated date navigation.
+  const monthWorkspace = useQuery({
+    queryKey: qk.editorWorkspace(month?.id ?? ""),
+    queryFn: () => getEditorWorkspace(month!.id),
+    enabled: month !== null,
+  });
+  const monthReady = month === null || !monthWorkspace.isPending;
+  const targetSessions = useQuery({ queryKey: qk.sessions(day?.id ?? ""), queryFn: () => listSessions(day!.id), enabled: day !== null });
+  const panelsReady = targetWorkspaces.every((query) => !query.isPending) && (!day || !targetSessions.isPending);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const horizontalScrollRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -170,38 +197,57 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
     row?.scrollIntoView({ block: "nearest", inline: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
     setSelectedTask(id);
   };
-  const selectMonth = (id: string) => { setSelectedMonth(id); onActiveCycleChange?.(id); };
-  const selectWeek = (id: string) => { setSelectedWeek(id); setSelectedDay(null); onActiveCycleChange?.(id); };
-  const selectDay = (id: string) => { setSelectedDay(id); onActiveCycleChange?.(id); };
+  const selectMonth = (id: string) => { navigationIntent.current = null; setSelectedMonth(id); onActiveCycleChange?.(id); };
+  const selectWeek = (date: string) => {
+    setSelectedWeekDate(date);
+    setSelectedDayDate(date);
+    const target = weeks.find((cycle) => cycle.starts_on === date);
+    if (target) onActiveCycleChange?.(target.id);
+  };
+  const selectDate = (date: string) => {
+    const owner = weekContainingDate(weeks, date, week?.id);
+    setSelectedWeekDate(owner?.starts_on ?? weekStartForDate(date, weekStartDay));
+    setSelectedDayDate(date);
+    const target = allDays.find((cycle) => cycle.starts_on === date);
+    if (target || owner) onActiveCycleChange?.(target?.id ?? owner!.id);
+  };
 
   // A diagnostic points to the real task in its own planning horizon.
   useEffect(() => {
-    if (!revealTask) return;
+    if (!revealTask || handledReveal.current === revealTask.requestId) return;
     const target = (state?.cycles ?? []).find(c => c.id === revealTask.cycleId);
+    if (!target) return;
+    handledReveal.current = revealTask.requestId;
+    navigationIntent.current = null;
     if (target?.type === "month") setSelectedMonth(target.id);
-    if (target?.type === "week") setSelectedWeek(target.id);
+    if (target?.type === "week") {
+      setSelectedWeekDate(target.starts_on); setSelectedDayDate(target.starts_on);
+    }
     if (target?.type === "day") {
       const parentWeek = (state?.cycles ?? []).find(c => c.type === "week" && c.starts_on && c.ends_on && target.starts_on && c.starts_on <= target.starts_on && target.starts_on < c.ends_on);
-      setSelectedWeek(parentWeek?.id ?? null); setSelectedDay(target.id);
+      setSelectedWeekDate(parentWeek?.starts_on ?? weekStartForDate(target.starts_on ?? today, weekStartDay)); setSelectedDayDate(target.starts_on);
     }
-  }, [revealTask, state]);
+  }, [revealTask, state, today, weekStartDay]);
 
   const createWeek = async () => {
+    navigationIntent.current = null;
     if (creating) return;
-    const existing = weeks.find((c) => c.starts_on !== null && c.ends_on !== null && c.starts_on <= today && today < c.ends_on);
-    if (existing) { selectWeek(existing.id); return; }
+    const existing = weeks.find((cycle) => cycle.starts_on === visibleWeekDate);
+    if (existing?.starts_on) { selectWeek(existing.starts_on); return; }
     setCreating(true);
-    const created = await run(() => createPlanningCycle({ cycle_type: "week" }));
-    if (created) { selectWeek(created.id); invalidateCycles(qc); }
+    const created = await run(() => createPlanningCycle({ cycle_type: "week", date: visibleWeekDate }));
+    if (created) { selectWeek(created.starts_on ?? visibleWeekDate); invalidateCycles(qc); }
     setCreating(false);
   };
-  const createToday = async () => {
+  const createDay = async (date: string) => {
+    navigationIntent.current = null;
     if (creating) return;
     setCreating(true);
-    const created = await run(() => ensureDay(null));
+    const created = await run(() => ensureDay(date));
     if (created) {
-      setSelectedWeek(created.parent_id);
-      selectDay(created.id);
+      setSelectedWeekDate(weekContainingDate(weeks, date)?.starts_on ?? weekStartForDate(date, weekStartDay));
+      setSelectedDayDate(created.starts_on);
+      onActiveCycleChange?.(created.id);
       invalidateCycles(qc);
     }
     setCreating(false);
@@ -214,27 +260,37 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
   const dayHint = t("workspace.dayHint");
 
   return <TaskDragProvider>
-    <div ref={workspaceRef} className="flex h-full min-h-0 flex-col">
+    <div ref={workspaceRef} className="flex h-full min-h-0 flex-col" onPointerDownCapture={(event) => {
+      if (!(event.target instanceof Element) || !event.target.closest("[data-date-drum]")) navigationIntent.current = null;
+    }}>
     <div ref={viewportRef} className="relative min-h-0 flex-1">
       <div ref={horizontalScrollRef} className="planner-horizontal-scroll h-full min-w-0 overflow-x-auto" aria-label={t("workspace.planning")}>
       <div className="flex h-full w-max items-start gap-8 px-6 pb-6 pt-8">
         <Horizon label={t("workspace.cycles")} cycles={months} selected={month?.id} onSelect={selectMonth}
           action={<button className="cycle-nav-add" onClick={() => setDurationOpen(true)}>+ {t("workspace.addCycle")}</button>} t={t}>
+          <PlanTransition identity={month?.id ?? "month-empty"} ready={monthReady}>
           {month ? <CycleColumn revealTask={revealTask} active={active} key={month.id} cycle={month} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(month.id)} /> :
             <EmptyState title={t("workspace.emptyTitle")} description={t("workspace.emptyDescription")}
-              action={<Button variant="primary" onClick={() => setDurationOpen(true)}>{t("workspace.setGoals")}</Button>} className="min-h-[360px] w-plan self-start" />}
+              action={<Button variant="primary" onClick={() => setDurationOpen(true)}>{t("workspace.setGoals")}</Button>} className="plan-card w-plan self-start overflow-hidden" />}
+          </PlanTransition>
         </Horizon>
         <Horizon label={t("workspace.weeks")} cycles={weeks} selected={week?.id} onSelect={selectWeek}
-          action={<button className="cycle-nav-add" disabled={creating} onClick={() => void createWeek()}>{t("workspace.thisWeek")}</button>} t={t}>
+          navigation={<WeekNavigation cycles={weeks} selectedDate={visibleWeekDate} today={today} weekStartDay={weekStartDay} active={active}
+            onIntent={() => { navigationIntent.current = "week"; }} canCommit={() => navigationIntent.current === "week"} onSelect={selectWeek} />} t={t}>
+          <PlanTransition identity={week?.id ?? visibleWeekDate} ready={panelsReady}>
           {week ? <CycleColumn revealTask={revealTask} active={active} key={week.id} cycle={week} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(week.id)} /> :
-            <EmptyState title={t("workspace.thisWeek")} description={weekHint}
-              action={<Button disabled={creating} onClick={() => void createWeek()}>{t("workspace.createWeek")}</Button>} className="min-h-[360px] w-plan self-start" />}
+            <EmptyState title={formatDate(visibleWeekDate, { year: "numeric", month: "short", day: "numeric" })} description={weekHint}
+              action={<Button disabled={creating} onClick={() => void createWeek()}>{t("workspace.createWeek")}</Button>} className="plan-card w-plan self-start overflow-hidden" />}
+          </PlanTransition>
         </Horizon>
-        <Horizon label={t("workspace.days")} cycles={days} selected={day?.id} onSelect={selectDay}
-          action={<button className="cycle-nav-add" disabled={creating} onClick={() => void createToday()}>+ {t("workspace.today")}</button>} t={t}>
+        <Horizon label={t("workspace.days")} cycles={days} selected={day?.id} onSelect={(id) => { const date = allDays.find((cycle) => cycle.id === id)?.starts_on; if (date) selectDate(date); }}
+          navigation={<DayNavigation selectedDate={visibleDate} today={today} active={active}
+            onIntent={() => { navigationIntent.current = "day"; }} canCommit={() => navigationIntent.current === "day"} onSelect={selectDate} />} t={t}>
+          <PlanTransition identity={day?.id ?? visibleDate} ready={panelsReady}>
           {day ? <CycleColumn revealTask={revealTask} active={active} key={day.id} cycle={day} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(day.id)} /> :
-            <EmptyState title={t("workspace.today")} description={dayHint}
-              action={<Button disabled={creating} onClick={() => void createToday()}>{t("workspace.addToday")}</Button>} className="min-h-[360px] w-plan self-start" />}
+            <EmptyState title={formatDate(visibleDate, { month: "short", day: "numeric", weekday: "long" })} description={dayHint}
+              action={<Button disabled={creating} onClick={() => void createDay(visibleDate)}>{t("workspace.createDay")}</Button>} className="plan-card plan-enter w-[calc(var(--spacing-plan)+var(--spacing-panel))] self-start overflow-hidden" />}
+          </PlanTransition>
         </Horizon>
       </div>
     </div>
@@ -256,11 +312,11 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
   </TaskDragProvider>;
 }
 
-function Horizon({ label, cycles, selected, onSelect, action, children, t }: {
-  label: string; cycles: Cycle[]; selected?: string; onSelect: (id: string) => void; action: ReactNode; children: ReactNode; t: (key: string, options?: Record<string, unknown>) => string;
+function Horizon({ label, cycles, selected, onSelect, action, navigation, children, t }: {
+  label: string; cycles: Cycle[]; selected?: string; onSelect: (id: string) => void; action?: ReactNode; navigation?: ReactNode; children: ReactNode; t: (key: string, options?: Record<string, unknown>) => string;
 }) {
-  return <div className="flex h-full shrink-0 gap-4">
-    <nav aria-label={label} className="flex w-[88px] shrink-0 flex-col gap-1 pt-1">
+  return <div className="flex h-full shrink-0 items-start gap-4">
+    {navigation ?? <nav aria-label={label} className="flex max-h-full min-h-0 w-[88px] shrink-0 flex-col gap-1 pt-1">
       <h2 className="workspace-scroll-heading mb-2 flex items-center justify-between gap-1 px-2 text-caption font-medium text-secondary">{label}<ScrollModeHint /></h2>
       <div data-workspace-scroll-pane className="min-h-0 overflow-y-auto">
         {cycles.map((cycle) => <button key={cycle.id} type="button" aria-current={selected === cycle.id ? "date" : undefined}
@@ -271,7 +327,7 @@ function Horizon({ label, cycles, selected, onSelect, action, children, t }: {
         </button>)}
       </div>
       {action}
-    </nav>
+    </nav>}
     {children}
   </div>;
 }

@@ -28,6 +28,7 @@ import type {
   ApiFormat,
   ConnectionTestResult,
   ModelConfig,
+  ProviderConnection,
   ProviderConfig,
   ProviderSummary,
 } from "../../lib/ipc";
@@ -111,6 +112,46 @@ function isHttpBaseUrl(url: string): boolean {
   return (scheme === "http" || scheme === "https") && rest !== "";
 }
 
+const PROXY_SCHEMES = new Set(["http", "https", "socks5", "socks5h"]);
+const PROXY_CONTROL_OR_SPACE_RE = /[\s\\\u0000-\u001f\u007f]/;
+
+/**
+ * Mirrors the backend proxy URL boundary.  In particular, the authority is
+ * inspected directly so URL.port does not hide an explicitly written 80/443.
+ */
+function isProxyUrl(value: string): boolean {
+  if (value === "" || PROXY_CONTROL_OR_SPACE_RE.test(value)) return false;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+
+  const scheme = parsed.protocol.slice(0, -1).toLowerCase();
+  if (!PROXY_SCHEMES.has(scheme) || !parsed.hostname) return false;
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) return false;
+  if (parsed.pathname !== "" && parsed.pathname !== "/") return false;
+
+  const schemeSeparator = value.indexOf("://");
+  if (schemeSeparator < 0) return false;
+  const authorityAndPath = value.slice(schemeSeparator + 3);
+  if (authorityAndPath.includes("?") || authorityAndPath.includes("#")) return false;
+  const authority = authorityAndPath.split("/", 1)[0] ?? "";
+  if (authority.includes("@")) return false;
+  const explicitPort = authority.match(/^(?:\[[^\]]+\]|[^:]+):(\d+)$/)?.[1];
+  if (!explicitPort) return false;
+  const port = Number(explicitPort);
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
+function normalizeConnection(connection: ProviderConnection | undefined): ProviderConnection {
+  if (!connection || connection.mode === "auto") return { mode: "auto" };
+  if (connection.mode === "direct") return { mode: "direct" };
+  return connection;
+}
+
 /** 连接测试失败文案：按 design D3 的 error_code 映射（task 5.4）。 */
 function connectionFailureText(result: ConnectionTestResult): string {
   switch (result.error_code) {
@@ -143,10 +184,14 @@ export function ProviderForm({
   const urlInputId = useId();
   const keyInputId = useId();
   const formatInputId = useId();
+  const connectionSectionId = useId();
+  const connectionInputId = useId();
+  const proxyUrlInputId = useId();
   const headerSectionId = useId();
   const headerId = useRef(0);
 
   const providerId = provider?.id ?? null;
+  const initialConnection = normalizeConnection(provider?.connection);
 
   const [name, setName] = useState(provider?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(provider?.base_url ?? "");
@@ -155,6 +200,10 @@ export function ProviderForm({
   );
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<ModelConfig[]>(provider?.models ?? []);
+  const [connectionMode, setConnectionMode] = useState<ProviderConnection["mode"]>(initialConnection.mode);
+  const [proxyUrl, setProxyUrl] = useState(initialConnection.mode === "proxy" ? initialConnection.url : "");
+  const [proxyTouched, setProxyTouched] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(provider !== null && initialConnection.mode !== "auto");
   const [headers, setHeaders] = useState<HeaderDraft[]>(() => initialHeaders(provider));
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(() => new Set());
   const [touchedHeaders, setTouchedHeaders] = useState<Set<string>>(() => new Set());
@@ -163,12 +212,19 @@ export function ProviderForm({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
-  // 前端预校验（task 5.3）：名称非空、http(s) URL、至少一个模型。
+  const proxyUrlValid = connectionMode !== "proxy" || isProxyUrl(proxyUrl);
+
+  // 前端预校验（task 5.3）：名称非空、http(s) URL、连接设置、至少一个模型。
   const missing: string[] = [];
   if (name.trim() === "") missing.push(translate("settings.name"));
   if (!isHttpBaseUrl(baseUrl.trim())) missing.push(translate("settings.baseUrl"));
+  if (!proxyUrlValid) missing.push(translate("settings.proxyUrl"));
   if (models.length === 0) missing.push(translate("settings.models"));
   const canSave = missing.length === 0;
+
+  const connection: ProviderConnection = connectionMode === "proxy"
+    ? { mode: "proxy", url: proxyUrl }
+    : { mode: connectionMode };
 
   const requireProviderId = (): string => {
     if (!providerId) throw new Error("provider is not saved yet");
@@ -236,6 +292,7 @@ export function ProviderForm({
         name: name.trim(),
         base_url: baseUrl.trim(),
         api_format: apiFormat,
+        connection,
         extra_headers: normalizedHeaderNames,
         models,
         created_at: provider?.created_at ?? 0,
@@ -299,7 +356,9 @@ export function ProviderForm({
   const dirty = name !== (provider?.name ?? "") || baseUrl !== (provider?.base_url ?? "") || apiFormat !== provider?.api_format
     || apiKey !== "" || JSON.stringify(models) !== JSON.stringify(provider?.models ?? [])
     || JSON.stringify(normalizedHeaderNames) !== JSON.stringify((provider?.extra_headers ?? []).map(headerName))
-    || headers.some((header) => header.value !== "");
+    || headers.some((header) => header.value !== "")
+    || connectionMode !== initialConnection.mode
+    || (connectionMode === "proxy" && proxyUrl !== (initialConnection.mode === "proxy" ? initialConnection.url : ""));
   const hasHeaderIssues = headerIssues.size > 0;
   const canSaveWithHeaders = canSave && !hasHeaderIssues;
 
@@ -447,6 +506,85 @@ export function ProviderForm({
             ))}
           </Select>
         </div>
+
+        <section className="flex min-w-0 flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              className="inline-flex min-w-0 items-center gap-1 text-left text-caption font-medium text-secondary transition-colors duration-150 hover:text-primary"
+              aria-expanded={advancedOpen}
+              aria-controls={connectionSectionId}
+              onClick={() => setAdvancedOpen((open) => !open)}
+            >
+              <span>{translate("settings.connectionAdvanced")}</span>
+              <svg
+                viewBox="0 0 16 16"
+                className={cn("h-3.5 w-3.5 transition-transform duration-150", advancedOpen && "rotate-180")}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m4 6 4 4 4-4" />
+              </svg>
+            </button>
+            <span className="shrink-0 text-caption text-secondary">
+              {translate(`settings.connectionMode.${connectionMode}`)}
+            </span>
+          </div>
+          {advancedOpen && (
+            <div id={connectionSectionId} className="flex min-w-0 flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label htmlFor={connectionInputId} className="text-caption text-secondary">
+                  {translate("settings.connectionMode")}
+                </label>
+                <Select
+                  id={connectionInputId}
+                  aria-label={translate("settings.connectionMode")}
+                  value={connectionMode}
+                  onValueChange={(value) => setConnectionMode(value as ProviderConnection["mode"])}
+                  triggerClassName="w-full"
+                >
+                  <SelectItem value="auto">{translate("settings.connectionMode.auto")}</SelectItem>
+                  <SelectItem value="direct">{translate("settings.connectionMode.direct")}</SelectItem>
+                  <SelectItem value="proxy">{translate("settings.connectionMode.proxy")}</SelectItem>
+                </Select>
+                <p className="text-caption text-hint">
+                  {translate(`settings.connectionModeHelp.${connectionMode}`)}
+                </p>
+              </div>
+              {connectionMode === "proxy" && (
+                <div className="flex flex-col gap-1">
+                  <label htmlFor={proxyUrlInputId} className="text-caption text-secondary">
+                    {translate("settings.proxyUrl")}
+                  </label>
+                  <Input
+                    id={proxyUrlInputId}
+                    value={proxyUrl}
+                    onChange={(event) => {
+                      setProxyTouched(true);
+                      setProxyUrl(event.currentTarget.value);
+                    }}
+                    onBlur={() => setProxyTouched(true)}
+                    placeholder={translate("settings.proxyUrlPlaceholder")}
+                    aria-invalid={proxyTouched && !proxyUrlValid}
+                    aria-describedby={`${proxyUrlInputId}-help${proxyTouched && !proxyUrlValid ? ` ${proxyUrlInputId}-error` : ""}`}
+                  />
+                  <p id={`${proxyUrlInputId}-help`} className="text-caption text-hint">
+                    {translate("settings.proxyUrlHelp")}
+                  </p>
+                  {proxyTouched && !proxyUrlValid && (
+                    <p id={`${proxyUrlInputId}-error`} role="alert" className="text-caption text-danger">
+                      {translate("settings.invalidProxyUrl")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
 
         <section id={headerSectionId} className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">

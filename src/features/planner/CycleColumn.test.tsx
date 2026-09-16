@@ -21,6 +21,7 @@ function makeCycle(progress_check?: Cycle["progress_check"]): Cycle {
     title: "Long-term goals",
     type: "month",
     parent_id: null,
+    task_id: null,
     position: 0,
     archived: false,
     started: false,

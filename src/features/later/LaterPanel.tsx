@@ -1,3 +1,4 @@
+import { RemovalList } from "../../ui/RemovalList";
 /**
  * Do Later 侧栏（rebuild-baseline 7.6）：先记录、后安排的暂存区。
  *
@@ -146,13 +147,12 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
       )}
       {/* 列表区在面板内纵向滚动（design.md 3.3 适配规则）。 */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {rows.length === 0 ? (
-          // 空状态只留一行轻提示：Later 面板窄，不用大 EmptyState（9.1）。
+        <RemovalList empty={
           <p className="pt-2 text-body text-hint">
             {t("later.empty")}
           </p>
-        ) : (
-          rows.map(({ task, depth }) => (
+        }>
+          {rows.map(({ task, depth }) => (
             <LaterTaskRow
               key={task.id}
               task={task}
@@ -161,8 +161,8 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
               autoFocusTitle={task.id === focusTaskId}
               onRowCreated={setFocusTaskId}
             />
-          ))
-        )}
+          ))}
+        </RemovalList>
       </div>
     </aside>
   );

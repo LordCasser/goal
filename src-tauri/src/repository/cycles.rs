@@ -25,6 +25,7 @@ pub fn row_to_cycle(row: &rusqlite::Row<'_>) -> rusqlite::Result<Cycle> {
         ends_on: row.get("ends_on")?,
         calendar_key: row.get("calendar_key")?,
         repeat_id: row.get("repeat_id")?,
+        task_id: row.get("task_id")?,
         progress_check: row
             .get::<_, Option<String>>("progress_check")?
             .map(|json| {
@@ -43,7 +44,7 @@ pub fn row_to_cycle(row: &rusqlite::Row<'_>) -> rusqlite::Result<Cycle> {
 
 const CYCLE_COLUMNS: &str = "id, title, type, parent_id, position, archived, started, finished, \
      started_at, finished_at, duration, focused_time, starts_on, ends_on, calendar_key, \
-     repeat_id, progress_check, created_at";
+     repeat_id, task_id, progress_check, created_at";
 
 pub struct NewCycle {
     pub id: String,
@@ -57,14 +58,15 @@ pub struct NewCycle {
     pub calendar_key: Option<String>,
     /// Set on sessions generated from a repeat template.
     pub repeat_id: Option<String>,
+    pub task_id: Option<String>,
     pub created_at: i64,
 }
 
 pub fn insert(conn: &Connection, new: &NewCycle) -> AppResult<()> {
     conn.execute(
         "INSERT INTO cycles (id, title, type, parent_id, position, duration, starts_on, \
-         ends_on, calendar_key, repeat_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         ends_on, calendar_key, repeat_id, task_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             new.id,
             new.title,
@@ -76,6 +78,7 @@ pub fn insert(conn: &Connection, new: &NewCycle) -> AppResult<()> {
             new.ends_on,
             new.calendar_key,
             new.repeat_id,
+            new.task_id,
             new.created_at,
         ],
     )
@@ -157,6 +160,38 @@ pub fn list_sessions_by_day(conn: &Connection, day_cycle_id: &str) -> AppResult<
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(from_rusqlite)?;
     Ok(rows)
+}
+
+/// Task time is a projection of focus records, never another mutable counter.
+pub fn focused_time_by_task(
+    conn: &Connection,
+    day_id: &str,
+) -> AppResult<std::collections::HashMap<String, i64>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT task_id, SUM(focused_time) FROM cycles
+         WHERE type = 'session' AND parent_id = ?1 AND task_id IS NOT NULL GROUP BY task_id",
+        )
+        .map_err(from_rusqlite)?;
+    let rows = statement
+        .query_map([day_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
+/// Moving an individual task retains focus history in its original day.
+pub fn unlink_task(conn: &Connection, task_id: &str) -> AppResult<Vec<String>> {
+    let mut statement = conn
+        .prepare("UPDATE cycles SET task_id = NULL WHERE task_id = ?1 RETURNING id")
+        .map_err(from_rusqlite)?;
+    let ids = statement
+        .query_map([task_id], |row| row.get(0))
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(from_rusqlite)?;
+    Ok(ids)
 }
 
 /// Ids of the cycle and all its descendants (the subtree a delete removes).

@@ -286,6 +286,7 @@ mod tests {
 
     fn request() -> SamplingRequest {
         SamplingRequest {
+            connection: Default::default(),
             base_url: "https://provider.test/v1".into(),
             api_format: crate::sampling::types::ApiFormat::AnthropicMessages,
             model: "claude-3".into(),

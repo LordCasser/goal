@@ -86,6 +86,7 @@ function makeCycle(overrides: Partial<Cycle> & Pick<Cycle, "id">): Cycle {
     repeat_id: null,
     created_at: 0,
     ...overrides,
+    task_id: overrides.task_id ?? null,
   };
 }
 

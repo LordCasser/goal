@@ -36,6 +36,7 @@ function cycle(type: Cycle["type"], overrides: Partial<Cycle> = {}): Cycle {
     repeat_id: null,
     created_at: 1_000,
     ...overrides,
+    task_id: overrides.task_id ?? null,
   };
 }
 

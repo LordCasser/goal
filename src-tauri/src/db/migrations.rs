@@ -75,7 +75,18 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "long-term progress check schedule",
         sql: M0011_PROGRESS_CHECK,
     },
+    Migration {
+        version: 12,
+        description: "optional focus task association",
+        sql: M0012_FOCUS_TASK_ASSOCIATION,
+    },
 ];
+
+const M0012_FOCUS_TASK_ASSOCIATION: &str = r#"
+ALTER TABLE cycles ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE
+    CHECK (task_id IS NULL OR type = 'session');
+CREATE INDEX ix_cycles_task ON cycles(task_id) WHERE task_id IS NOT NULL;
+"#;
 
 const M0011_PROGRESS_CHECK: &str = r#"
 ALTER TABLE cycles ADD COLUMN progress_check TEXT CHECK (

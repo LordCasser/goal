@@ -123,10 +123,20 @@ fn workspace_for(conn: &rusqlite::Connection, cycle_id: &str) -> AppResult<Edito
             task.proposal = Some(crate::domain::proposal::ProposalKind::Delete);
         }
     }
+    let focused_time = cycles_repo::focused_time_by_task(conn, cycle_id)?;
+    let work_mix = work_mix(conn, &cycle, &tasks)?;
+    let mut nodes = build_tree(tasks);
+    fn apply_focus(nodes: &mut [TaskNode], totals: &std::collections::HashMap<String, i64>) {
+        for node in nodes {
+            node.focused_time = totals.get(&node.task.id).copied().unwrap_or(0);
+            apply_focus(&mut node.children, totals);
+        }
+    }
+    apply_focus(&mut nodes, &focused_time);
     Ok(EditorWorkspace {
-        work_mix: work_mix(conn, &cycle, &tasks)?,
+        work_mix,
         cycle: Some(cycle),
-        tasks: build_tree(tasks),
+        tasks: nodes,
     })
 }
 

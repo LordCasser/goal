@@ -666,6 +666,7 @@ mod tests {
             extra_headers: vec![],
             tools_supported: true,
             config: crate::providers::config::ProviderConfig {
+                connection: Default::default(),
                 id: "p1".into(),
                 name: "fake".into(),
                 base_url: "http://127.0.0.1:1".into(),

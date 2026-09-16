@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Cycle } from "../../lib/ipc";
-const mocks = vi.hoisted(() => ({ getPlannerState: vi.fn(), getEditorWorkspacesByCycleIds: vi.fn(), createPlanningCycle: vi.fn(), ensureDay: vi.fn() }));
+import { qk } from "../../lib/events";
+const mocks = vi.hoisted(() => ({ getEditorWorkspace: vi.fn(), listSessions: vi.fn(), getPlannerState: vi.fn(), getEditorWorkspacesByCycleIds: vi.fn(), createPlanningCycle: vi.fn(), ensureDay: vi.fn(), getSettings: vi.fn() }));
 vi.mock("../../lib/ipc", async (original) => ({ ...(await original<typeof import("../../lib/ipc")>()), ...mocks }));
 vi.mock("./CycleColumn", () => ({
   CycleColumn: ({ cycle }: { cycle: Cycle }) => (
@@ -16,15 +17,20 @@ vi.mock("./CycleColumn", () => ({
 }));
 vi.mock("./dates", async (original) => ({ ...(await original<typeof import("./dates")>()), todayISO: () => "2026-09-15" }));
 import { PlannerWorkspace } from "./PlannerWorkspace";
+import { PLAN_TRANSITION_LEAVE_MS } from "./PlanTransition";
 function cycle(id: string, type: Cycle["type"], parent_id: string | null, starts_on: string, ends_on: string): Cycle {
   return { id, type, parent_id, starts_on, ends_on, position: 0, title: id, finished: false } as Cycle;
 }
 const cycles = [cycle("m1", "month", null, "2026-09-01", "2026-12-01"), cycle("m2", "month", null, "2026-12-01", "2027-03-01"), cycle("w1", "week", "m1", "2026-09-14", "2026-09-21"), cycle("w2", "week", "m1", "2026-09-21", "2026-09-28"), cycle("d1", "day", "w1", "2026-09-15", "2026-09-16"), cycle("d2", "day", "w2", "2026-09-22", "2026-09-23")];
-beforeEach(() => { mocks.getPlannerState.mockResolvedValue({ cycles }); mocks.getEditorWorkspacesByCycleIds.mockResolvedValue({}); });
-function workspaceElement(props: Partial<import("react").ComponentProps<typeof PlannerWorkspace>> = {}) {
-  return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><PlannerWorkspace {...props} /></QueryClientProvider>;
+afterEach(() => vi.useRealTimers());
+beforeEach(() => { mocks.getEditorWorkspace.mockResolvedValue({ tasks: [], work_mix: null }); mocks.listSessions.mockResolvedValue([]); mocks.getSettings.mockResolvedValue({ week_start_day: 1, locale: "en", theme: "white" }); mocks.getPlannerState.mockResolvedValue({ cycles }); mocks.getEditorWorkspacesByCycleIds.mockResolvedValue({}); });
+function workspaceElement(props: Partial<import("react").ComponentProps<typeof PlannerWorkspace>> = {}, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+  return <QueryClientProvider client={client}><PlannerWorkspace {...props} /></QueryClientProvider>;
 }
-function mount(props: Partial<import("react").ComponentProps<typeof PlannerWorkspace>> = {}) { return render(workspaceElement(props)); }
+function mount(props: Partial<import("react").ComponentProps<typeof PlannerWorkspace>> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return { ...render(workspaceElement(props, client)), client };
+}
 function defineScrollMetrics(element: HTMLElement, metrics: { scrollWidth?: number; clientWidth?: number; scrollHeight?: number; clientHeight?: number }) {
   for (const [key, value] of Object.entries(metrics)) Object.defineProperty(element, key, { configurable: true, value });
 }
@@ -42,29 +48,212 @@ function dispatchMouseDown(target: HTMLElement, init: Partial<MouseEventInit> = 
   return event;
 }
 describe("time navigation", () => {
-  it("independent weekly and daily tasks remain visible without any long-term cycle", async () => {
+  const weekList = () => screen.getByRole("listbox", { name: "Weeks" });
+  const dayList = () => screen.getByRole("listbox", { name: "Days" });
+  const articles = () => screen.getAllByRole("article").map((node) => node.textContent);
+  const settle = async () => {
+    for (let frame = 0; frame < 60; frame++) await act(() => vi.advanceTimersByTimeAsync(20));
+  };
+  it("keeps both old panels until the target tasks and focus blocks are ready, then swaps together", async () => {
+    let tasksReady!: (value: unknown) => void;
+    let sessionsReady!: (value: unknown[]) => void;
+    const tasks = new Promise((resolve) => { tasksReady = resolve; });
+    const sessions = new Promise<unknown[]>((resolve) => { sessionsReady = resolve; });
+    mocks.getEditorWorkspace.mockImplementation((id: string) => id === "w2" || id === "d2" ? tasks : Promise.resolve({ tasks: [], work_mix: null }));
+    mocks.listSessions.mockImplementation((id: string) => id === "d2" ? sessions : Promise.resolve([]));
+    mount();
+    await screen.findByText("d1");
+    vi.useFakeTimers();
+    fireEvent.keyDown(dayList(), { key: "PageDown" });
+    fireEvent.keyDown(dayList(), { key: "ArrowDown" });
+    fireEvent.keyDown(dayList(), { key: "ArrowDown" });
+    await settle();
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+    expect(screen.getByText("w1").closest(".plan-transition")?.hasAttribute("inert")).toBe(true);
+    expect(screen.getByText("d1").closest(".plan-transition")?.hasAttribute("inert")).toBe(true);
+    await act(async () => { tasksReady({ tasks: [], work_mix: null }); });
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+    await act(async () => { sessionsReady([]); });
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+    await act(() => vi.advanceTimersByTimeAsync(PLAN_TRANSITION_LEAVE_MS));
+    expect(articles()).toEqual(["m1", "w2", "d2"]);
+    expect([...document.querySelectorAll(".plan-transition")].map((node) => node.getAttribute("data-phase"))).toEqual(["idle", "entering", "entering"]);
+  });
+  it("does not show a stale target when its data arrives after another navigation", async () => {
+    let resolveOld!: (value: unknown) => void;
+    const oldData = new Promise((resolve) => { resolveOld = resolve; });
+    mocks.getEditorWorkspace.mockImplementation((id: string) => id === "w2" ? oldData : Promise.resolve({ tasks: [], work_mix: null }));
+    mount();
+    await screen.findByText("d1");
+    vi.useFakeTimers();
+    fireEvent.click(within(weekList()).getByRole("option", { name: /W39/ }));
+    await settle();
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+    fireEvent.click(within(weekList()).getByRole("option", { name: /This week/ }));
+    await settle();
+    expect(articles()).toEqual(["m1", "w1"]);
+    await act(async () => { resolveOld({ tasks: [], work_mix: null }); });
+    await settle();
+    expect(articles()).toEqual(["m1", "w1"]);
+    expect(screen.getByRole("button", { name: "Create daily plan" })).toBeTruthy();
+  });
+  it("keeps weekly and daily tasks visible without a long-term cycle", async () => {
     mocks.getPlannerState.mockResolvedValue({ cycles: [{ ...cycles[2], parent_id: null }, { ...cycles[4], parent_id: null }] });
     mount();
     await screen.findByText("w1");
-    expect(screen.getAllByRole("article").map((n) => n.textContent)).toEqual(["w1", "d1"]);
-    expect((screen.getByRole("button", { name: "This week" }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole("button", { name: "+ Today" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(articles()).toEqual(["w1", "d1"]);
+    expect(within(weekList()).getAllByRole("option").filter((row) => row.hasAttribute("aria-current"))).toHaveLength(1);
   });
-  it("shows one plan per horizon and keeps future/history cycles in navigation", async () => {
+  it("clicking a week opens its first date, without creating an empty day", async () => {
     mount();
     await screen.findByText("m1");
-    expect(screen.getAllByRole("article").map((n) => n.textContent)).toEqual(["m1", "w1", "d1"]);
-    expect(within(screen.getByRole("navigation", { name: "Weeks" })).getAllByRole("button")).toHaveLength(3);
+    fireEvent.click(within(weekList()).getByRole("option", { name: /W39/ }));
+    await screen.findByText("w2");
+    expect(articles()).toEqual(["m1", "w2"]);
+    expect(screen.getByRole("button", { name: "Create daily plan" })).toBeTruthy();
+    expect(mocks.ensureDay).not.toHaveBeenCalled();
   });
-  it("switching week also selects a day from that week", async () => {
-    mount();
-    fireEvent.click(await screen.findByRole("button", { name: "W39" }));
-    expect(screen.getAllByRole("article").map((n) => n.textContent)).toEqual(["m1", "w2", "d2"]);
-  });
-  it("switching long-term goals preserves the current week and day", async () => {
+  it("switching long-term goals preserves week and day", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Dec 1" }));
-    expect(screen.getAllByRole("article").map((n) => n.textContent)).toEqual(["m2", "w1", "d1"]);
+    await screen.findByTestId("header-m2");
+    expect(articles()).toEqual(["m2", "w1", "d1"]);
+  });
+  it("smoothly falls back to the remaining long-term cycle after deletion", async () => {
+    const mounted = mount();
+    await screen.findByTestId("header-m1");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useFakeTimers();
+
+    await act(async () => {
+      mounted.client.setQueryData(qk.plannerState(), { cycles: cycles.filter((cycle) => cycle.id !== "m1") });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+
+    await act(() => vi.advanceTimersByTimeAsync(PLAN_TRANSITION_LEAVE_MS));
+    await act(() => vi.advanceTimersByTimeAsync(PLAN_TRANSITION_LEAVE_MS));
+    expect(articles()).toEqual(["m2", "w1", "d1"]);
+  });
+  it("smoothly replaces the long-term cycle with its empty state after the last one is deleted", async () => {
+    const mounted = mount();
+    await screen.findByTestId("header-m1");
+    vi.useFakeTimers();
+
+    act(() => mounted.client.setQueryData(qk.plannerState(), { cycles: cycles.filter((cycle) => cycle.type !== "month") }));
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+
+    await act(() => vi.advanceTimersByTimeAsync(PLAN_TRANSITION_LEAVE_MS));
+    await act(() => vi.advanceTimersByTimeAsync(PLAN_TRANSITION_LEAVE_MS));
+    expect(screen.getByRole("button", { name: "Set long-term goals" })).toBeTruthy();
+    expect(articles()).toEqual(["w1", "d1"]);
+  });
+  it("browses dates with no saved week or day without writing data", async () => {
+    mount();
+    await screen.findByText("d1");
+    vi.useFakeTimers();
+    fireEvent.keyDown(dayList(), { key: "PageDown" });
+    fireEvent.keyDown(dayList(), { key: "PageDown" });
+    fireEvent.keyDown(dayList(), { key: "PageDown" });
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+    await settle();
+    expect(articles()).toEqual(["m1"]);
+    expect(mocks.ensureDay).not.toHaveBeenCalled();
+    expect(mocks.createPlanningCycle).not.toHaveBeenCalled();
+  });
+  it("waits for the final wheel position before switching both day and week", async () => {
+    mount();
+    await screen.findByText("d1");
+    vi.useFakeTimers();
+    fireEvent.wheel(dayList(), { deltaY: 144 });
+    act(() => vi.advanceTimersByTime(300));
+    fireEvent.wheel(dayList(), { deltaY: 144 });
+    act(() => vi.advanceTimersByTime(300));
+    fireEvent.wheel(dayList(), { deltaY: 48 });
+    act(() => vi.advanceTimersByTime(499));
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+    await settle();
+    expect(articles()).toEqual(["m1", "w2", "d2"]);
+    await settle();
+    const selected = within(weekList()).getAllByRole("option").find((row) => row.getAttribute("aria-selected") === "true");
+    expect(selected?.textContent).toContain("W39");
+    expect(mocks.ensureDay).not.toHaveBeenCalled();
+  });
+  it("gives the latest drum gesture priority over an older pending gesture", async () => {
+    mount();
+    await screen.findByText("d1");
+    vi.useFakeTimers();
+    fireEvent.wheel(dayList(), { deltaY: 144 });
+    act(() => vi.advanceTimersByTime(200));
+    fireEvent.wheel(weekList(), { deltaY: 48 });
+    await settle();
+    expect(articles()).toEqual(["m1", "w2"]);
+    await settle();
+    expect(within(dayList()).getAllByRole("option").find((row) => row.getAttribute("aria-selected") === "true")?.textContent).toContain("Sep 21");
+  });
+  it("cancels a pending day gesture when a month or task pane is clicked", async () => {
+    mount();
+    await screen.findByText("d1");
+    vi.useFakeTimers();
+
+    fireEvent.wheel(dayList(), { deltaY: 48 });
+    const month = screen.getByRole("button", { name: "Dec 1" });
+    fireEvent.pointerDown(month, { button: 0 });
+    fireEvent.click(month);
+    await settle();
+    await settle();
+
+    let selectedDay = within(dayList()).getAllByRole("option").find((row) => row.getAttribute("aria-selected") === "true");
+    expect(selectedDay?.textContent).toContain("Sep 15");
+    expect(articles()).toEqual(["m2", "w1", "d1"]);
+
+    fireEvent.wheel(dayList(), { deltaY: 48 });
+    fireEvent.pointerDown(screen.getByTestId("pane-m2"), { button: 0 });
+    await settle();
+    await settle();
+
+    selectedDay = within(dayList()).getAllByRole("option").find((row) => row.getAttribute("aria-selected") === "true");
+    expect(selectedDay?.textContent).toContain("Sep 15");
+  });
+  it("keeps a sub-half-row week gesture uncommitted and returns the day drum to its prop date", async () => {
+    mount();
+    await screen.findByText("d1");
+    vi.useFakeTimers();
+
+    fireEvent.wheel(dayList(), { deltaY: 48 });
+    fireEvent.wheel(weekList(), { deltaY: 23 });
+    await settle();
+    await settle();
+
+    const selectedWeek = within(weekList()).getAllByRole("option").find((row) => row.getAttribute("aria-selected") === "true");
+    const selectedDay = within(dayList()).getAllByRole("option").find((row) => row.getAttribute("aria-selected") === "true");
+    expect(selectedWeek?.textContent).toContain("W38");
+    expect(selectedDay?.textContent).toContain("Sep 15");
+    expect(articles()).toEqual(["m1", "w1", "d1"]);
+  });
+  it("uses Sunday for virtual weeks when configured", async () => {
+    mocks.getSettings.mockResolvedValue({ week_start_day: 7, locale: "en", theme: "white" });
+    mocks.getPlannerState.mockResolvedValue({ cycles: [cycles[0]] });
+    mount();
+    await screen.findByText("m1");
+    expect(within(weekList()).getAllByRole("option").find((row) => row.getAttribute("aria-selected") === "true")?.textContent).toContain("Sep 13");
+  });
+  it("hovering a drum owns both wheel axes; outside wheel still pans horizontally", async () => {
+    mount();
+    const horizontal = await screen.findByLabelText("Planning workspace");
+    defineScrollMetrics(horizontal, { scrollWidth: 2400, clientWidth: 1000 });
+    const wheel = dispatchWheel(dayList(), { deltaY: 48, deltaX: 3 });
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(horizontal.scrollLeft).toBe(0);
+    dispatchWheel(horizontal, { deltaY: 80 });
+    expect(horizontal.scrollLeft).toBe(80);
   });
 });
 

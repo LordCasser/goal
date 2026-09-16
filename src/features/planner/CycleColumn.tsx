@@ -73,7 +73,7 @@ export function CycleColumn({
       aria-label={`${badge} ${title}`}
       onPointerDown={onSelect}
       onFocusCapture={onSelect}
-      className={`plan-enter flex h-full shrink-0 overflow-hidden rounded-lg border border-frame bg-content ${isDay ? "w-[calc(var(--spacing-plan)+var(--spacing-panel))]" : "w-plan"}`}
+      className={`plan-card plan-enter flex shrink-0 overflow-hidden rounded-lg border border-frame bg-content ${isDay ? "w-[calc(var(--spacing-plan)+var(--spacing-panel))]" : "w-plan"}`}
     >
       <div className="plan-ai-scope flex min-h-0 w-plan shrink-0 flex-col">
       <header className="workspace-scroll-heading shrink-0 border-b border-light px-6 pb-5 pt-5">
@@ -93,12 +93,11 @@ export function CycleColumn({
           {cycle.type === "month" && <ProgressCheckDisclosure cycle={cycle} t={t} />}
         </div>
       </header>
-      <div data-plan-scroll data-workspace-scroll-pane className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-        <TaskList revealTask={revealTask?.cycleId === cycle.id ? revealTask : undefined} active={active} cycleId={cycle.id} cycleType={cycle.type} locked={cycle.finished} relations={relations} onReviewIssues={() => onReviewIssues?.(cycle.id)} />
+      <TaskList layout="panel" revealTask={revealTask?.cycleId === cycle.id ? revealTask : undefined} active={active} cycleId={cycle.id} cycleType={cycle.type} locked={cycle.finished} relations={relations} onReviewIssues={() => onReviewIssues?.(cycle.id)}>
         {onPlanWithAI && <PlanWithAI active={active} cycle={cycle} onPlan={onPlanWithAI} />}
+      </TaskList>
       </div>
-      </div>
-      {isDay && <div className="min-h-0 w-panel shrink-0 border-l border-light bg-subtle/40">
+      {isDay && <div className="flex min-h-0 w-panel shrink-0 flex-col border-l border-light bg-subtle/40">
         <FocusArea day={cycle} sessions={sessions} runningSessionId={runningSessionId} />
       </div>}
     </section>
