@@ -14,6 +14,7 @@
 //! its error: only configuration problems — unknown provider, an unusable
 //! provider record or keychain — surface as `Err`.
 
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use futures_util::StreamExt;
@@ -22,6 +23,7 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 use crate::providers::config::ProviderConfig;
+use crate::providers::headers::{normalize_names, resolve_headers};
 use crate::providers::service::{sampling_api_format, AiSettingsState};
 use crate::sampling::{
     sample, ApiFormat, MessageRole, SamplingError, SamplingMessage, SamplingRequest, Timeouts,
@@ -100,9 +102,10 @@ pub async fn save_provider(
     state: State<'_, AiSettingsState>,
     provider: ProviderConfig,
     api_key: Option<String>,
+    header_values: Option<BTreeMap<String, String>>,
 ) -> AppResult<ProviderConfig> {
     let _guard = state.mutations.lock().await;
-    test_and_save_provider(&state, provider, api_key).await
+    test_and_save_provider(&state, provider, api_key, header_values.unwrap_or_default()).await
 }
 
 #[tauri::command]
@@ -141,7 +144,7 @@ pub async fn save_provider_api_key(
         .store
         .get(&provider_id)
         .ok_or_else(|| AppError::not_found("provider", &provider_id))?;
-    test_and_save_provider(&state, provider, Some(api_key))
+    test_and_save_provider(&state, provider, Some(api_key), BTreeMap::new())
         .await
         .map(|_| ())
 }
@@ -226,7 +229,9 @@ async fn test_and_save_provider(
     settings: &AiSettingsState,
     mut provider: ProviderConfig,
     api_key: Option<String>,
+    header_values: BTreeMap<String, String>,
 ) -> AppResult<ProviderConfig> {
+    provider.extra_headers = normalize_names(&provider.extra_headers)?;
     crate::providers::config::validate(&provider)?;
     let previous = if provider.id.trim().is_empty() {
         None
@@ -242,9 +247,20 @@ async fn test_and_save_provider(
         Some(saved) => settings.credentials.load(&saved.id)?,
         None => None,
     };
+    let previous_headers = match &previous {
+        Some(saved) if !saved.extra_headers.is_empty() => {
+            settings.credentials.load_headers(&saved.id)?
+        }
+        _ => BTreeMap::new(),
+    };
+    let next_headers = resolve_headers(&provider.extra_headers, &previous_headers, &header_values)?;
     let next_key = api_key.filter(|key| !key.trim().is_empty());
-    let result =
-        probe_configuration(&provider, next_key.clone().or_else(|| previous_key.clone())).await;
+    let result = probe_configuration(
+        &provider,
+        next_key.clone().or_else(|| previous_key.clone()),
+        &next_headers,
+    )
+    .await;
     if !result.ok {
         return Err(AppError::validation(
             result
@@ -258,22 +274,65 @@ async fn test_and_save_provider(
     provider.connection_verified_at = Some(crate::service::now_ms());
     let previous_selection = settings.store.resolve_active_model();
     let saved = save_provider_config(settings, provider)?;
-    if let Some(key) = next_key {
-        if let Err(error) = settings.credentials.save(&saved.id, &key) {
-            // No credential has been committed on failure. Restore metadata
-            // instead of leaving a newly verified but unusable configuration.
-            let rollback = match previous {
-                Some(old) => settings.store.update(old).map(|_| ()),
-                None => settings.store.delete(&saved.id),
-            };
-            rollback?;
-            if let Some((old_provider, old_model)) = previous_selection {
-                settings
-                    .store
-                    .set_active_model(&old_provider.id, &old_model.model_id)?;
-            }
-            return Err(error);
+    let headers_changed = previous_headers != next_headers;
+    let commit = (|| -> AppResult<()> {
+        if headers_changed {
+            settings
+                .credentials
+                .save_headers(&saved.id, &next_headers)?;
         }
+        if let Some(key) = &next_key {
+            settings.credentials.save(&saved.id, key)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = commit {
+        // Compensate every part that may have changed. Run all cleanup even
+        // if one platform credential operation fails, and never certify it.
+        let header_rollback = if headers_changed {
+            settings
+                .credentials
+                .save_headers(&saved.id, &previous_headers)
+        } else {
+            Ok(())
+        };
+        let key_rollback = if next_key.is_some() {
+            match &previous_key {
+                Some(key) => settings.credentials.save(&saved.id, key),
+                None => settings.credentials.delete(&saved.id),
+            }
+        } else {
+            Ok(())
+        };
+        let rollback_failed = header_rollback.is_err() || key_rollback.is_err();
+        let config_rollback = match previous {
+            Some(mut old) => {
+                if rollback_failed {
+                    old.connection_verified_at = None;
+                }
+                settings.store.update(old).map(|_| ())
+            }
+            None => settings.store.delete(&saved.id),
+        };
+        if config_rollback.is_err() {
+            // The persisted file could be unwritable; report the failure
+            // rather than presenting a successful save.
+            return Err(AppError::Internal(
+                "provider save failed and configuration rollback failed".into(),
+            ));
+        }
+        if let Some((old_provider, old_model)) = previous_selection {
+            settings
+                .store
+                .set_active_model(&old_provider.id, &old_model.model_id)?;
+        }
+        if rollback_failed {
+            return Err(AppError::Internal(
+                "provider save failed and credential rollback failed; reconfigure credentials"
+                    .into(),
+            ));
+        }
+        return Err(error);
     }
     Ok(saved)
 }
@@ -290,7 +349,9 @@ fn delete_provider_entry(settings: &AiSettingsState, provider_id: &str) -> AppRe
         Ok(()) | Err(AppError::NotFound { .. }) => {}
         Err(error) => return Err(error),
     }
-    settings.credentials.delete(provider_id)
+    let key_result = settings.credentials.delete(provider_id);
+    let headers_result = settings.credentials.delete_headers(provider_id);
+    key_result.and(headers_result)
 }
 
 /// `save_provider_api_key`: an empty key is rejected — "no credential" is
@@ -350,15 +411,36 @@ async fn test_connection(
             return Err(error);
         }
     };
-    let result = probe_configuration(&provider, api_key).await;
+    let headers = match load_provider_headers(settings, &provider) {
+        Ok(headers) => headers,
+        Err(error) => {
+            provider.connection_verified_at = None;
+            settings.store.update(provider)?;
+            return Err(error);
+        }
+    };
+    let result = probe_configuration(&provider, api_key, &headers).await;
     provider.connection_verified_at = result.ok.then(crate::service::now_ms);
     settings.store.update(provider)?;
     Ok(result)
 }
 
+fn load_provider_headers(
+    settings: &AiSettingsState,
+    provider: &ProviderConfig,
+) -> AppResult<BTreeMap<String, String>> {
+    let saved = if provider.extra_headers.is_empty() {
+        BTreeMap::new()
+    } else {
+        settings.credentials.load_headers(&provider.id)?
+    };
+    resolve_headers(&provider.extra_headers, &saved, &BTreeMap::new())
+}
+
 async fn probe_configuration(
     provider: &ProviderConfig,
     api_key: Option<String>,
+    headers: &BTreeMap<String, String>,
 ) -> ConnectionTestResult {
     let started = Instant::now();
     for model in &provider.models {
@@ -367,6 +449,10 @@ async fn probe_configuration(
             sampling_api_format(provider.api_format),
             &model.model_id,
             api_key.clone(),
+            headers
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
         )
         .await;
         if !result.ok {
@@ -392,12 +478,14 @@ async fn probe_provider(
     api_format: ApiFormat,
     model: &str,
     api_key: Option<String>,
+    extra_headers: Vec<(String, String)>,
 ) -> ConnectionTestResult {
     let request = SamplingRequest {
         base_url: base_url.to_string(),
         api_format,
         model: model.to_string(),
         api_key,
+        extra_headers,
         messages: vec![SamplingMessage {
             role: MessageRole::User,
             content: TEST_PROMPT.to_string(),
@@ -477,7 +565,7 @@ mod tests {
 
     use super::*;
     use crate::providers::config::{
-        ApiFormat as ConfigApiFormat, ExtraHeader, InputType, ModelConfig, OutputType,
+        ApiFormat as ConfigApiFormat, InputType, ModelConfig, OutputType,
     };
 
     // -- fixtures -----------------------------------------------------------
@@ -603,10 +691,7 @@ mod tests {
     #[test]
     fn provider_summary_flattens_every_config_field() {
         let mut provider = sample_provider("Full", "https://api.example.com/v1");
-        provider.extra_headers = vec![ExtraHeader {
-            name: "X-Source".into(),
-            value: "planner".into(),
-        }];
+        provider.extra_headers = vec!["x-source".into()];
         let summary = ProviderSummary {
             provider,
             has_api_key: true,
@@ -881,6 +966,7 @@ mod tests {
     enum Scenario {
         /// Reply 200 with a fixed SSE payload.
         Sse(&'static str),
+        RequireHeader,
         /// Reply with this HTTP status and JSON error body.
         Error(StatusCode, String),
     }
@@ -891,12 +977,33 @@ mod tests {
         captured: Captured,
     }
 
-    async fn handle(State(ctx): State<Ctx>, body: axum::body::Bytes) -> Response {
+    async fn handle(
+        State(ctx): State<Ctx>,
+        headers: axum::http::HeaderMap,
+        body: axum::body::Bytes,
+    ) -> Response {
         ctx.captured
             .lock()
             .unwrap()
             .push(serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null));
         match ctx.scenario {
+            Scenario::RequireHeader => {
+                if headers
+                    .get("x-probe-token")
+                    .and_then(|value| value.to_str().ok())
+                    != Some("probe-header-secret")
+                {
+                    return Response::builder()
+                        .status(StatusCode::FORBIDDEN)
+                        .body(Body::empty())
+                        .unwrap();
+                }
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(CHAT_OK))
+                    .unwrap()
+            }
             Scenario::Sse(payload) => Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/event-stream")
@@ -951,7 +1058,7 @@ mod tests {
         let mut second = sample_model();
         second.model_id = "second-model".into();
         draft.models.push(second);
-        let saved = test_and_save_provider(&settings, draft, None)
+        let saved = test_and_save_provider(&settings, draft, None, BTreeMap::new())
             .await
             .unwrap();
         assert!(saved.connection_verified_at.is_some());
@@ -961,6 +1068,152 @@ mod tests {
         assert!(summarize_settings(&reloaded).unwrap().ai_available);
         drop_api_key(&reloaded, &saved.id).unwrap();
         assert!(!summarize_settings(&reloaded).unwrap().ai_available);
+    }
+
+    #[tokio::test]
+    async fn probes_use_headers_for_each_model_and_on_saved_retest() {
+        let _logging = logging_quiet();
+        let (base, captured) = spawn(Scenario::RequireHeader).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = settings_in(dir.path());
+        settings.credentials = crate::providers::credentials::Credentials::with_test_headers();
+        let mut draft = sample_provider("Header required", &base);
+        let mut second = sample_model();
+        second.model_id = "second-model".into();
+        draft.models.push(second);
+        draft.extra_headers = vec!["X-Probe-Token".into()];
+        let values = BTreeMap::from([("x-probe-token".into(), "probe-header-secret".into())]);
+        let saved = test_and_save_provider(&settings, draft, None, values)
+            .await
+            .unwrap();
+        assert_eq!(captured.lock().unwrap().len(), 2);
+        assert!(test_connection(&settings, &saved.id).await.unwrap().ok);
+        assert_eq!(captured.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn header_save_retains_replaces_removes_and_never_serializes_values() {
+        let _logging = logging_quiet();
+        let (good, _) = spawn(Scenario::Sse(CHAT_OK)).await;
+        let (bad, _) = spawn(Scenario::Error(StatusCode::UNAUTHORIZED, "denied".into())).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = settings_in(dir.path());
+        settings.credentials = crate::providers::credentials::Credentials::with_test_headers();
+        let mut draft = sample_provider("Headers", &good);
+        draft.extra_headers = vec!["X-Route".into()];
+        let values = BTreeMap::from([("x-route".into(), "header-secret-first".into())]);
+        let saved = test_and_save_provider(&settings, draft, None, values.clone())
+            .await
+            .unwrap();
+        assert_eq!(saved.extra_headers, ["x-route"]);
+        assert_eq!(
+            settings.credentials.load_headers(&saved.id).unwrap(),
+            values
+        );
+        let json = std::fs::read_to_string(dir.path().join("providers.json")).unwrap();
+        assert!(!json.contains("header-secret-first"));
+        assert!(
+            !serde_json::to_string(&summarize_settings(&settings).unwrap())
+                .unwrap()
+                .contains("header-secret-first")
+        );
+        let reloaded = crate::providers::config::ProviderStore::load(dir.path()).unwrap();
+        assert_eq!(reloaded.get(&saved.id).unwrap().extra_headers, ["x-route"]);
+        test_and_save_provider(&settings, saved.clone(), None, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            settings.credentials.load_headers(&saved.id).unwrap(),
+            values
+        );
+        let mut broken = saved.clone();
+        broken.base_url = bad;
+        let replacement = BTreeMap::from([("x-route".into(), "header-secret-next".into())]);
+        assert!(
+            test_and_save_provider(&settings, broken, None, replacement.clone())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            settings.credentials.load_headers(&saved.id).unwrap(),
+            values
+        );
+        assert_eq!(settings.store.get(&saved.id).unwrap().base_url, good);
+        let old_config = settings.store.get(&saved.id).unwrap();
+        settings.store.set_active(&saved.id).unwrap();
+        settings.credentials.fail_next_header_write();
+        assert!(
+            test_and_save_provider(&settings, saved.clone(), None, replacement.clone())
+                .await
+                .is_err()
+        );
+        assert_eq!(settings.store.get(&saved.id).unwrap(), old_config);
+        assert_eq!(
+            settings.store.active_provider_id().as_deref(),
+            Some(saved.id.as_str())
+        );
+        assert_eq!(
+            settings.credentials.load_headers(&saved.id).unwrap(),
+            values
+        );
+        test_and_save_provider(&settings, saved.clone(), None, replacement.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            settings.credentials.load_headers(&saved.id).unwrap(),
+            replacement
+        );
+        // The selected model resolver consumes exactly the saved header values.
+        settings.store.set_active(&saved.id).unwrap();
+        let resolved = crate::ai::llm::resolve(&settings).unwrap();
+        assert_eq!(
+            resolved.extra_headers,
+            vec![("x-route".into(), "header-secret-next".into())]
+        );
+        let mut empty = saved.clone();
+        empty.extra_headers.clear();
+        test_and_save_provider(&settings, empty, None, BTreeMap::new())
+            .await
+            .unwrap();
+        assert!(settings
+            .credentials
+            .load_headers(&saved.id)
+            .unwrap()
+            .is_empty());
+        test_and_save_provider(&settings, saved.clone(), None, replacement)
+            .await
+            .unwrap();
+        delete_provider_entry(&settings, &saved.id).unwrap();
+        assert!(settings
+            .credentials
+            .load_headers(&saved.id)
+            .unwrap()
+            .is_empty());
+        assert!(settings.store.get(&saved.id).is_none());
+    }
+
+    #[tokio::test]
+    async fn missing_saved_header_revokes_verification_without_sending() {
+        let _logging = logging_quiet();
+        let (base, captured) = spawn(Scenario::Sse(CHAT_OK)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = settings_in(dir.path());
+        settings.credentials = crate::providers::credentials::Credentials::with_test_headers();
+        let mut draft = sample_provider("Missing", &base);
+        draft.extra_headers = vec!["x-route".into()];
+        draft.connection_verified_at = Some(1);
+        let saved = save_provider_config(&settings, draft).unwrap();
+        assert_validation(
+            test_connection(&settings, &saved.id).await,
+            "missing_header_value",
+        );
+        assert!(settings
+            .store
+            .get(&saved.id)
+            .unwrap()
+            .connection_verified_at
+            .is_none());
+        assert!(captured.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -974,21 +1227,31 @@ mod tests {
         .await;
         let dir = tempfile::tempdir().unwrap();
         let settings = settings_in(dir.path());
-        assert!(
-            test_and_save_provider(&settings, sample_provider("Invalid draft", &bad), None)
-                .await
-                .is_err()
-        );
+        assert!(test_and_save_provider(
+            &settings,
+            sample_provider("Invalid draft", &bad),
+            None,
+            BTreeMap::new()
+        )
+        .await
+        .is_err());
         assert!(settings.store.list().is_empty());
-        let saved = test_and_save_provider(&settings, sample_provider("Working", &good), None)
-            .await
-            .unwrap();
+        let saved = test_and_save_provider(
+            &settings,
+            sample_provider("Working", &good),
+            None,
+            BTreeMap::new(),
+        )
+        .await
+        .unwrap();
         let before = std::fs::read(dir.path().join("providers.json")).unwrap();
         let mut edited = saved.clone();
         edited.base_url = bad;
-        assert!(test_and_save_provider(&settings, edited.clone(), None)
-            .await
-            .is_err());
+        assert!(
+            test_and_save_provider(&settings, edited.clone(), None, BTreeMap::new())
+                .await
+                .is_err()
+        );
         assert_eq!(settings.store.get(&saved.id).unwrap(), saved);
         assert_eq!(
             std::fs::read(dir.path().join("providers.json")).unwrap(),
@@ -1111,6 +1374,7 @@ mod tests {
             sampling_api_format(ConfigApiFormat::OpenaiChatCompletions),
             &model,
             api_key,
+            Vec::new(),
         )
         .await;
         assert!(result.ok, "real provider test failed: {result:?}");

@@ -5,7 +5,7 @@
  * = 2027-06-06（6 个产品月 = 168 天，不是日历上的半年）。
  */
 import { describe, expect, it } from "vitest";
-import { deriveTimeline } from "./timeline";
+import { deriveCustomTimeline, deriveTimeline } from "./timeline";
 
 describe("deriveTimeline weeks", () => {
   it("maps product months to 4 / 12 / 24 weeks", () => {
@@ -87,5 +87,33 @@ describe("deriveTimeline input defense", () => {
     // 类型上不可传入，运行时仍防御（弹窗状态不会出现 2）。
     expect(() => deriveTimeline("2026-09-14", 2 as never)).toThrow();
     expect(() => deriveTimeline("2026-09-14", 0 as never)).toThrow();
+  });
+});
+
+describe("deriveCustomTimeline", () => {
+  it("uses date-only differences for non-week custom ranges", () => {
+    expect(deriveCustomTimeline("2026-09-15", "2026-09-25", { kind: "repeat", every_days: 3 })).toMatchObject({
+      days: 10,
+      totalChecks: 3,
+      checkDates: ["2026-09-18", "2026-09-21", "2026-09-24"],
+      error: null,
+    });
+  });
+
+  it("keeps a bounded preview while reporting all repeat checks", () => {
+    const preview = deriveCustomTimeline("2026-01-01", "2026-12-31", { kind: "repeat", every_days: 1 });
+    expect(preview.totalChecks).toBe(363);
+    expect(preview.checkDates).toHaveLength(4);
+    expect(preview.checkDates[0]).toBe("2026-01-02");
+  });
+
+  it("accepts a once check on the start date but excludes the end date", () => {
+    expect(deriveCustomTimeline("2026-09-15", "2026-09-25", { kind: "once", date: "2026-09-15" }).error).toBeNull();
+    expect(deriveCustomTimeline("2026-09-15", "2026-09-25", { kind: "once", date: "2026-09-25" }).error).toBe("invalid_progress_check");
+  });
+
+  it("classifies invalid ranges and intervals for localized UI errors", () => {
+    expect(deriveCustomTimeline("2026-09-25", "2026-09-15", { kind: "repeat", every_days: 7 }).error).toBe("invalid_cycle_range");
+    expect(deriveCustomTimeline("2026-09-15", "2026-09-25", { kind: "repeat", every_days: 0 }).error).toBe("invalid_progress_check");
   });
 });

@@ -928,6 +928,7 @@ mod tests {
             ends_on: None,
             calendar_key: None,
             repeat_id: None,
+            progress_check: None,
             created_at: 0,
         }
     }
@@ -988,6 +989,7 @@ mod tests {
                 supports_tools: true,
             },
             api_key: None,
+            extra_headers: vec![],
             tools_supported: true,
         }
     }

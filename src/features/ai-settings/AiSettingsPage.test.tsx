@@ -1,11 +1,11 @@
 /**
  * AiSettingsPage 行为契约（tasks §5.8）：
- * - 空态：无供应商时左栏给出空提示与添加入口；
+ * - 空态：不显示空侧栏，保留添加入口；
  * - 校验禁用：必填项缺失时「测试并保存」禁用并行列出缺什么；
  * - Key 不回显：编辑已配置 Key 的供应商时密码框为空、只显示「已配置」；
  * - 删除确认：文案包含供应商名与钥匙串一并清除的说明；
  * - 连接测试：成功显示延迟，失败按 error_code（design D3）映射文案；
- * - 保存链路：saveProvider → saveProviderApiKey，之后清空 Key 草稿。
+ * - 保存链路：saveProvider 同时接收 API Key 与 Header 值草稿，之后清空敏感草稿。
  *
  * ../../lib/ipc 全部 mock（保留 isAppError 等纯函数）；react-query 用真实
  * 实现，走真实的失效重取路径。
@@ -140,17 +140,18 @@ describe("AiSettingsPage", () => {
     expect(asInput(screen.getByLabelText("API 密钥")).value).toBe("unsaved-secret");
     expect(mocks.saveProviderApiKey).not.toHaveBeenCalled();
   });
-  it("empty state: left column shows the empty hint and the add entry", async () => {
+  it("empty state: omits the empty navigation and keeps the add entry", async () => {
     renderPage();
-    expect(await screen.findByText("还没有连接供应商")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "+ 添加供应商" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "添加供应商" }).hasAttribute("disabled")).toBe(false));
+    expect(screen.queryByRole("navigation", { name: "供应商" })).toBeNull();
+    expect(screen.getByRole("button", { name: "添加供应商" })).toBeTruthy();
     // ai_available=false：说明行引导先添加并激活供应商。
     expect(screen.getByText("请选择已测通的模型")).toBeTruthy();
   });
 
   it("keeps the save button disabled and lists what is missing", async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "+ 添加供应商" }));
+    fireEvent.click(await screen.findByRole("button", { name: "添加供应商" }));
     const save = await screen.findByRole("button", { name: "测试并保存" });
     expect(asButton(save).disabled).toBe(true);
     expect(screen.getByText(/还需完善：名称/)).toBeTruthy();
@@ -233,7 +234,7 @@ describe("AiSettingsPage", () => {
     mocks.saveProvider.mockResolvedValue(savedConfig);
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "+ 添加供应商" }));
+    fireEvent.click(await screen.findByRole("button", { name: "添加供应商" }));
     fireEvent.change(await screen.findByLabelText("名称"), {
       target: { value: "New provider" },
     });
@@ -264,7 +265,7 @@ describe("AiSettingsPage", () => {
 
     await waitFor(() => expect(mocks.saveProvider).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(mocks.saveProvider).toHaveBeenCalledWith(expect.objectContaining({ name: "New provider", connection_verified_at: null }), "sk-secret"),
+      expect(mocks.saveProvider).toHaveBeenCalledWith(expect.objectContaining({ name: "New provider", connection_verified_at: null }), "sk-secret", {}),
     );
     // 保存成功后 Key 草稿清空、徽标随失效重取出现（不回显明文）。
     await waitFor(() =>
@@ -286,6 +287,110 @@ it("switches an exact saved provider/model pair independently of editing", async
   await waitFor(() => expect(mocks.setActiveProvider).toHaveBeenCalledWith("p2", "other"));
   expect(mocks.saveProvider).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "设为激活" })).toBeNull();
+});
+
+it("adds, replaces, retains, and deletes request headers without exposing saved values", async () => {
+  const configured = { ...provider, extra_headers: ["x-existing", "x-retain"] };
+  const summary = { ...oneSummary, active_provider: configured, providers: [configured] };
+  const saved = { ...configured, extra_headers: ["x-existing", "x-retain", "x-new"] };
+  mocks.getAiSettings.mockResolvedValue(summary);
+  mocks.saveProvider.mockResolvedValue(saved);
+  renderPage();
+
+  const values = await screen.findAllByLabelText(/Header 值/);
+  expect((values[0] as HTMLInputElement).value).toBe("");
+  expect((values[0] as HTMLInputElement).type).toBe("password");
+  fireEvent.change(values[0]!, { target: { value: "replacement" } });
+  fireEvent.click(screen.getByRole("button", { name: "添加请求 Header" }));
+  const names = screen.getAllByLabelText(/Header 名称/);
+  fireEvent.change(names.at(-1)!, { target: { value: " X-New " } });
+  const latestValue = screen.getByLabelText("Header 值 3");
+  fireEvent.change(latestValue, { target: { value: " exact value " } });
+
+  const save = screen.getByRole("button", { name: "测试并保存" }) as HTMLButtonElement;
+  expect(save.disabled).toBe(false);
+  fireEvent.click(save);
+  await waitFor(() => expect(mocks.saveProvider).toHaveBeenCalledTimes(1));
+  expect(mocks.saveProvider).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({ extra_headers: ["x-existing", "x-retain", "x-new"] }),
+    null,
+    { "x-existing": "replacement", "x-new": " exact value " },
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "移除 Header x-new" }));
+  fireEvent.click(screen.getByRole("button", { name: "测试并保存" }));
+  await waitFor(() => expect(mocks.saveProvider).toHaveBeenCalledTimes(2));
+  expect(mocks.saveProvider).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ extra_headers: ["x-existing", "x-retain"] }),
+    null,
+    {},
+  );
+});
+
+it("keeps a header draft after a failed save and blocks testing dirty saved configuration", async () => {
+  const configured = { ...provider, extra_headers: ["x-existing"] };
+  mocks.getAiSettings.mockResolvedValue({ ...oneSummary, active_provider: configured, providers: [configured] });
+  mocks.saveProvider.mockRejectedValue({ code: "auth_failed", message: "Authentication failed" });
+  renderPage();
+  const value = await screen.findByLabelText("Header 值 1");
+  const test = screen.getByRole("button", { name: "测试连接" }) as HTMLButtonElement;
+  expect(test.disabled).toBe(false);
+  fireEvent.change(value, { target: { value: "draft-secret" } });
+  expect(test.disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "测试并保存" }));
+  expect(await screen.findByText(/认证失败/)).toBeTruthy();
+  expect((screen.getByLabelText("Header 值 1") as HTMLInputElement).value).toBe("draft-secret");
+});
+
+it("keeps a new blank header quiet until it is edited or blurred", async () => {
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "添加供应商" }));
+  fireEvent.click(screen.getByRole("button", { name: "添加请求 Header" }));
+  expect(screen.queryByText("Header 名称必须符合 HTTP token 规范。")).toBeNull();
+  fireEvent.blur(screen.getByLabelText("Header 名称 1"));
+  expect(screen.getByText("Header 名称必须符合 HTTP token 规范。")).toBeTruthy();
+});
+
+it("keeps keyboard focus in the header editor when deleting rows", async () => {
+  const configured = { ...provider, extra_headers: ["x-first", "x-middle", "x-last"] };
+  mocks.getAiSettings.mockResolvedValue({ ...oneSummary, active_provider: configured, providers: [configured] });
+  renderPage();
+
+  const removeMiddle = await screen.findByRole("button", { name: "移除 Header x-middle" });
+  const lastName = screen.getByDisplayValue("x-last");
+  const firstName = screen.getByDisplayValue("x-first");
+  removeMiddle.focus();
+  fireEvent.click(removeMiddle);
+  expect(document.activeElement).toBe(lastName);
+
+  const removeLast = screen.getByRole("button", { name: "移除 Header x-last" });
+  removeLast.focus();
+  fireEvent.click(removeLast);
+  expect(document.activeElement).toBe(firstName);
+
+  const removeFirst = screen.getByRole("button", { name: "移除 Header x-first" });
+  removeFirst.focus();
+  fireEvent.click(removeFirst);
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "添加请求 Header" }));
+  expect(mocks.saveProvider).not.toHaveBeenCalled();
+});
+
+it("exposes saved-value placeholder and visibility controls", async () => {
+  const configured = { ...provider, extra_headers: ["x-existing"] };
+  mocks.getAiSettings.mockResolvedValue({ ...oneSummary, active_provider: configured, providers: [configured] });
+  renderPage();
+  const value = await screen.findByLabelText("Header 值 1");
+  expect(value.getAttribute("placeholder")).toBe("已保存，留空保留");
+  const toggle = screen.getByRole("button", { name: "显示 Header x-existing 的当前值" });
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect((toggle as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(value, { target: { value: "new-draft-value" } });
+  expect((toggle as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(toggle);
+  expect((screen.getByLabelText("Header 值 1") as HTMLInputElement).type).toBe("text");
+  expect(screen.getByRole("button", { name: "隐藏 Header x-existing 的当前值" }).getAttribute("aria-pressed")).toBe("true");
 });
 
 it("saves a configurable Coach expiry and rejects invalid minutes", async () => {

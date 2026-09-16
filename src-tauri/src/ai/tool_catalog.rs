@@ -20,6 +20,16 @@ fn text() -> Value {
 fn optional_text() -> Value {
     json!({"type":["string","null"],"minLength":1})
 }
+fn optional_date() -> Value {
+    json!({"oneOf":[{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"},{"type":"null"}]})
+}
+fn progress_check() -> Value {
+    json!({"oneOf":[
+        {"type":"null"},
+        {"type":"object","properties":{"kind":{"const":"once"},"date":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"}},"required":["kind","date"],"additionalProperties":false},
+        {"type":"object","properties":{"kind":{"const":"repeat"},"every_days":{"type":"integer","minimum":1}},"required":["kind","every_days"],"additionalProperties":false}
+    ]})
+}
 fn choice(options: &[&str]) -> Value {
     json!({"type":"string","enum":options})
 }
@@ -73,8 +83,8 @@ pub fn definitions(skill: AgentSkill) -> Vec<ToolDef> {
     defs.extend([
         ToolDef::new("list_reminders","List reminders, optionally scoped to a cycle subtree. Returns at most 100; narrow the cycle if truncated.",object(json!({"cycle_id":optional_text(),"status":choice(&["pending","fired","all"])}),&["status"])),
         ToolDef::new("list_repeats","List active daily focus-block templates and IDs. Templates affect future instances.",object(json!({}),&[])),
-        proposal("propose_cycle","Create a planning container, start/finish/delete a cycle or focus block, or carry unfinished tasks forward. A weekly container holds multiple weekly tasks. Plan durations are fixed after creation. Deletion includes descendants; inspect the impact shown in the approval card.",vec![
-            operation("create",json!({"cycle_type":choice(&["month","week","day"]),"date":optional_text(),"title":optional_text(),"duration_months":{"enum":[1,3,6,null]},"parent_id":optional_text()}),&["cycle_type"]),
+        proposal("propose_cycle","Create a planning container, start/finish/delete a cycle or focus block, or carry unfinished tasks forward. A weekly container holds multiple weekly tasks. Long-term cycles support 1/3/6 product months or explicit starts_on/ends_on bounds, plus an optional once or repeat progress_check. Plan durations are fixed after creation. Deletion includes descendants; inspect the impact shown in the approval card.",vec![
+            operation("create",json!({"cycle_type":choice(&["month","week","day"]),"date":optional_text(),"title":optional_text(),"duration_months":{"enum":[1,3,6,null]},"parent_id":optional_text(),"starts_on":optional_date(),"ends_on":optional_date(),"progress_check":progress_check()}),&["cycle_type"]),
             operation("start",json!({"cycle_id":text()}),&["cycle_id"]),
             operation("finish",json!({"cycle_id":text()}),&["cycle_id"]),
             operation("delete",json!({"cycle_id":text()}),&["cycle_id"]),

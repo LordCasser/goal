@@ -68,6 +68,8 @@
   "invalid_capacity": "daily_capacity_minutes must be between 1 and 1440",
   "long_term_duration_required": "A long-term cycle needs a duration of 1, 3 or 6 months",
   "unsupported_long_term_duration": "Long-term cycles last 1, 3 or 6 months (28 days per month)",
+  "invalid_cycle_range": "The end date must be later than the start date.",
+  "invalid_progress_check": "Choose a positive interval or a check date within the cycle, before its end.",
   "parent_cycle_ended": "Cannot create a planning cycle under an ended parent",
   "cycle_ended": "This planner page has ended and can only be reviewed",
   "cycle_immutable": "Planning cycle titles and durations cannot be changed; end the cycle and start a new one",
@@ -105,10 +107,17 @@
   "invalid_input_types": "Input types must include text.",
   "invalid_output_types": "Output types can only include text.",
   "invalid_header_name": "Extra header names must be valid HTTP header names.",
+  "duplicate_header_name": "Header names must be unique, ignoring case.",
+  "reserved_header_name": "This header is managed by the connection and cannot be overridden.",
+  "invalid_header_value": "Header values may contain printable ASCII characters and tabs only.",
+  "missing_header_value": "Enter a value for a new or renamed header.",
+  "unknown_header_value": "The saved value for this header is unavailable; enter it again.",
   "invalid_status_filter": "Choose pending, fired, or all reminders.",
   "persona_unavailable": "The Coach persona file could not be read.",
   "plan_changed_during_review": "The plan changed during review. Check the current plan again.",
   "skill_unavailable": "The selected Coach skill could not be loaded.",
   "unknown_issue_type": "This planning issue type is not recognized.",
-  "unknown_tool": "This Coach tool is not recognized."
+  "unknown_tool": "This Coach tool is not recognized.",
+  "deletion_impact_changed": "The linked content changed. Review the updated impact and confirm again.",
+  "deletion_confirmation_required": "Review the linked content before confirming deletion."
 }

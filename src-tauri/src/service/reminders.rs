@@ -358,12 +358,31 @@ pub fn purge_for_task(conn: &Connection, task_id: &str) -> AppResult<usize> {
     repo::purge_for_target(conn, repo::TargetKind::Task, task_id)
 }
 
+/// Removes reminders for the complete task FK cascade, including descendants
+/// stored in other cycles.
+pub fn purge_for_task_impact(conn: &Connection, task_ids: &[String]) -> AppResult<usize> {
+    if task_ids.is_empty() {
+        return Ok(0);
+    }
+    repo::purge_for_cycle_impact(conn, &[], task_ids)
+}
+
 /// Removes every reminder attached to a deleted cycle subtree: cycle targets
 /// in the subtree (sessions, days, cycles) plus tasks living in those cycles.
 /// Called from `service::cycles::delete_cycle` inside the same transaction.
 pub fn purge_for_cycle(conn: &Connection, cycle_id: &str) -> AppResult<usize> {
     let subtree = cycles_repo::subtree_ids(conn, cycle_id)?;
     repo::purge_for_cycle_subtree(conn, &subtree)
+}
+
+/// Removes reminders for a cycle subtree and all task rows the database will
+/// cascade when that subtree is deleted.
+pub fn purge_for_cycle_impact(
+    conn: &Connection,
+    cycle_ids: &[String],
+    task_ids: &[String],
+) -> AppResult<usize> {
+    repo::purge_for_cycle_impact(conn, cycle_ids, task_ids)
 }
 
 // ---------------------------------------------------------------------------

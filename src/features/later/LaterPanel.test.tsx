@@ -80,6 +80,8 @@ function mockBackend(
         return Promise.resolve(over.hintFlag ?? null);
       case commands.getPlannerState:
         return Promise.resolve(planner);
+      case commands.getTaskDeletionPreview:
+        return Promise.resolve({ task_id: "t1", descendant_tasks: 0, confirmation_token: "impact-1" });
       case commands.getEditorWorkspace:
         return Promise.resolve<EditorWorkspace>({
           work_mix: null,
@@ -267,7 +269,7 @@ describe("LaterPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete parked goal" }));
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith(commands.deleteTask, { taskId: "t1" }),
+      expect(invokeMock).toHaveBeenCalledWith(commands.deleteTask, { taskId: "t1", confirmationToken: "impact-1" }),
     );
   });
 });

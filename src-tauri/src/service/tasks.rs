@@ -244,21 +244,73 @@ pub fn update_task(
     patch_task(db, task_id, &full)
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TaskDeletionPreview {
+    pub task_id: String,
+    pub descendant_tasks: i64,
+    pub confirmation_token: String,
+}
+
+pub fn get_task_deletion_preview(db: &Db, task_id: &str) -> AppResult<TaskDeletionPreview> {
+    let conn = db.pool().get()?;
+    repo::require(&conn, task_id)?;
+    let impact = crate::service::deletion::task_impact(&conn, task_id)?;
+    Ok(TaskDeletionPreview {
+        task_id: task_id.to_string(),
+        descendant_tasks: impact.task_ids.len().saturating_sub(1) as i64,
+        confirmation_token: impact.token,
+    })
+}
+
 pub fn delete_task(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
+    delete_task_inner(db, task_id, None, false)
+}
+
+/// GUI deletion entry point.  A leaf can be removed directly; a task with
+/// descendants must carry the token from its preview.  The impact is
+/// recomputed inside the delete transaction.
+pub fn delete_task_confirmed(
+    db: &Db,
+    task_id: &str,
+    confirmation_token: Option<&str>,
+) -> AppResult<Mutation<()>> {
+    delete_task_inner(db, task_id, confirmation_token, true)
+}
+
+fn delete_task_inner(
+    db: &Db,
+    task_id: &str,
+    confirmation_token: Option<&str>,
+    gui_confirmation: bool,
+) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
     let existing = repo::require(&tx, task_id)?;
     ensure_task_editable(&tx, task_id, true)?;
+    let impact = crate::service::deletion::task_impact(&tx, task_id)?;
+    let has_descendants = impact.task_ids.len() > 1;
+    crate::service::deletion::require_confirmation(
+        confirmation_token,
+        &impact.token,
+        gui_confirmation && has_descendants,
+    )?;
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
     // Children rows and preview snapshots go with the row (FK cascades).
     repo::delete(&tx, task_id)?;
     // Reminders have no FK to follow (polymorphic target); clean them in the
     // same transaction (change: add-reminders-notifications §1.3).
-    crate::service::reminders::purge_for_task(&tx, task_id)?;
+    crate::service::reminders::purge_for_task_impact(&tx, &impact.task_ids)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
-    Ok(Mutation::new(()).touching_tasks(cycle.id))
+    let mut mutation = Mutation::new(());
+    for cycle_id in impact.task_cycle_ids {
+        mutation.tasks.push(cycle_id);
+    }
+    // Keep the target cycle in the invalidation set even if a future schema
+    // permits a malformed task row without an owning cycle.
+    mutation.tasks.push(cycle.id);
+    Ok(mutation)
 }
 
 pub fn move_task(

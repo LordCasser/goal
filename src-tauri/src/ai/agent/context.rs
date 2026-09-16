@@ -11,8 +11,7 @@ use chrono::Local;
 use rusqlite::Connection;
 
 use crate::domain::calendar;
-use crate::domain::cycle::Cycle;
-use crate::domain::cycle::CycleType;
+use crate::domain::cycle::{Cycle, CycleType, ProgressCheck};
 use crate::domain::task::Task;
 use crate::error::AppResult;
 use crate::repository::cycles as cycles_repo;
@@ -224,14 +223,33 @@ fn cycle_block(cycle: &Cycle, parent: Option<&Cycle>) -> String {
         None => "null".to_string(),
     };
     format!(
-        "<cycle>\n    <cycle_key>{}</cycle_key>\n    <parent_cycle_key>{}</parent_cycle_key>\n    <cycle_type>{}</cycle_type>\n    <cycle_length>{}</cycle_length>\n    <starts_on>{}</starts_on>\n    <ends_on>{}</ends_on>\n  </cycle>",
+        "<cycle>\n    <cycle_key>{}</cycle_key>\n    <parent_cycle_key>{}</parent_cycle_key>\n    <cycle_type>{}</cycle_type>\n    <cycle_length>{}</cycle_length>\n    <starts_on>{}</starts_on>\n    <ends_on>{}</ends_on>\n    {}\n  </cycle>",
         escape_xml(&cycle_key(cycle)),
         parent_key,
         product_type_name(cycle.cycle_type),
         escape_xml(&cycle_length_label(cycle)),
         cycle.starts_on.as_deref().unwrap_or("null"),
         cycle.ends_on.as_deref().unwrap_or("null"),
+        progress_check_xml(cycle.progress_check.as_ref()),
     )
+}
+
+fn progress_check_xml(check: Option<&ProgressCheck>) -> String {
+    match check {
+        Some(ProgressCheck::Once { date }) => {
+            format!(
+                r#"<progress_check kind="once" date="{}"/>"#,
+                escape_xml(date)
+            )
+        }
+        Some(ProgressCheck::Repeat { every_days }) => {
+            format!(
+                r#"<progress_check kind="repeat" every_days="{}"/>"#,
+                every_days
+            )
+        }
+        None => "<progress_check kind=\"none\"/>".into(),
+    }
 }
 
 fn time_block() -> String {
@@ -342,7 +360,18 @@ mod tests {
         assert!(xml.contains("<cycle_type>long_term</cycle_type>"));
         assert!(xml.contains("<cycle_length>3 months</cycle_length>"));
         assert!(xml.contains("<parent_cycle_key>null</parent_cycle_key>"));
+        assert!(xml.contains("<progress_check kind=\"none\"/>"));
         assert!(xml.contains("<current_date_and_time>"));
+    }
+
+    #[test]
+    fn renders_saved_progress_check_in_cycle_metadata() {
+        let mut cycle = cycle_of(CycleType::Month);
+        cycle.progress_check = Some(crate::domain::cycle::ProgressCheck::Once {
+            date: "2026-10-01".into(),
+        });
+        let xml = render(&empty_ctx(cycle), None);
+        assert!(xml.contains("<progress_check kind=\"once\" date=\"2026-10-01\"/>"));
     }
 
     #[test]

@@ -21,6 +21,7 @@ import type {
   CreateCycleArgs,
   Cycle,
   CycleDeletionPreview,
+  TaskDeletionPreview,
   Dismissal,
   EditorWorkspace,
   LogLevel,
@@ -73,6 +74,7 @@ export const commands = {
   updateTask: "update_task",
   patchTask: "patch_task",
   deleteTask: "delete_task",
+  getTaskDeletionPreview: "get_task_deletion_preview",
   moveTask: "move_task",
   reorderTasks: "reorder_tasks",
   setTaskParentLink: "set_task_parent_link",
@@ -172,8 +174,8 @@ export function getCycleDeletionPreview(cycle_id: string): Promise<CycleDeletion
   return invoke<CycleDeletionPreview>(commands.getCycleDeletionPreview, { cycleId: cycle_id });
 }
 
-export function deletePlanningCycle(cycle_id: string): Promise<void> {
-  return invoke<void>(commands.deletePlanningCycle, { cycleId: cycle_id });
+export function deletePlanningCycle(cycle_id: string, confirmationToken?: string): Promise<void> {
+  return invoke<void>(commands.deletePlanningCycle, { cycleId: cycle_id, confirmationToken: confirmationToken ?? null });
 }
 
 export function startCycle(cycle_id: string): Promise<Cycle> {
@@ -224,8 +226,12 @@ export function patchTask(task_id: string, patch: TaskPatch): Promise<Task> {
   return invoke<Task>(commands.patchTask, { taskId: task_id, patch });
 }
 
-export function deleteTask(task_id: string): Promise<void> {
-  return invoke<void>(commands.deleteTask, { taskId: task_id });
+export function getTaskDeletionPreview(task_id: string): Promise<TaskDeletionPreview> {
+  return invoke<TaskDeletionPreview>(commands.getTaskDeletionPreview, { taskId: task_id });
+}
+
+export function deleteTask(task_id: string, confirmationToken?: string): Promise<void> {
+  return invoke<void>(commands.deleteTask, { taskId: task_id, confirmationToken: confirmationToken ?? null });
 }
 
 /** `position` omitted/null = append at the end of the target sibling group. */
@@ -385,9 +391,9 @@ export function getDebugLogDir(): Promise<string> {
 //
 // Shapes mirror src-tauri/src/commands/ai_settings.rs 1:1 (snake_case keys).
 // `provider` is a whole-struct parameter, so it travels nested under its own
-// name like `args`/`patch`. Summaries never contain key material; the key
-// crosses IPC only as the input of saveProviderApiKey. No AI settings event
-// exists, so every mutator's caller invalidates the settings page query
+// name like `args`/`patch`. Summaries never contain key material; API keys and
+// one-shot header replacements cross IPC only as save inputs. No AI settings
+// event exists, so every mutator's caller invalidates the settings page query
 // itself (features/ai-settings/AiSettingsPage.tsx).
 
 /** Snapshot for the AI settings page; never contains key material. */
@@ -401,8 +407,16 @@ export function getAiAvailability(): Promise<boolean> {
 }
 
 /** Empty id adds (the store assigns id/created_at); non-empty id updates. */
-export function saveProvider(provider: ProviderConfig, apiKey?: string | null): Promise<ProviderConfig> {
-  return invoke<ProviderConfig>(commands.saveProvider, { provider, apiKey: apiKey ?? null });
+export function saveProvider(
+  provider: ProviderConfig,
+  apiKey?: string | null,
+  headerValues: Record<string, string> = {},
+): Promise<ProviderConfig> {
+  return invoke<ProviderConfig>(commands.saveProvider, {
+    provider,
+    apiKey: apiKey ?? null,
+    headerValues,
+  });
 }
 
 /** Also cascades the keychain entry away; deleting the active provider clears activation. */
@@ -414,7 +428,7 @@ export function setActiveProvider(provider_id: string, model_id: string): Promis
   return invoke<void>(commands.setActiveProvider, { providerId: provider_id, modelId: model_id });
 }
 
-/** The only path key material takes into the backend; it is never read back. */
+/** Legacy API-key replacement path; key material is never read back. */
 export function saveProviderApiKey(provider_id: string, api_key: string): Promise<void> {
   return invoke<void>(commands.saveProviderApiKey, { providerId: provider_id, apiKey: api_key });
 }

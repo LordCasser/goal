@@ -151,19 +151,16 @@ export function AiSettingsPage(): JSX.Element {
         {saveTimeout.isError && <p role="alert" className="mt-2 text-caption text-danger">{errorMessage(saveTimeout.error)}</p>}
       </section>
 
-      <h4 className="text-block-title font-semibold">{t("settings.manage")}</h4>
-      {/* 两栏：外层 bg-subtle 画布 + 两块 bg-content 面板（design D6 映射）。 */}
-      <div className="flex items-stretch gap-4">
-        <aside className="flex w-[148px] shrink-0 flex-col overflow-hidden rounded-lg border border-light bg-subtle">
-          <div className="border-b border-light px-3 py-2 text-block-title font-semibold text-primary">
-            {t("settings.providers")}
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            {settingsQuery.isPending ? (
-              <p className="px-3 py-6 text-center text-caption text-hint">{t("common.loading")}</p>
-            ) : summary.providers.length === 0 ? (
-              <p className="px-3 py-6 text-center text-caption text-hint">{t("settings.noProviders")}</p>
-            ) : (
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-block-title font-semibold">{t("settings.manage")}</h4>
+        <Button variant="ghost" className="cursor-pointer duration-150" onClick={() => setSelection({ kind: "new" })}>
+          <span aria-hidden="true" className="mr-1">+</span>{t("settings.addProvider")}
+        </Button>
+      </div>
+      <div className="flex flex-col items-start gap-4 md:flex-row">
+        {summary.providers.length > 0 && <nav aria-label={t("settings.providers")}
+          className="flex w-full shrink-0 gap-1 overflow-x-auto md:max-h-[360px] md:w-[176px] md:flex-col md:overflow-y-auto">
+            {
               summary.providers.map((item) => {
                 const isSelected =
                   selection?.kind === "provider" && selection.id === item.id;
@@ -174,8 +171,8 @@ export function AiSettingsPage(): JSX.Element {
                     onClick={() => select(item.id)}
                     aria-current={isSelected ? "true" : undefined}
                     className={cn(
-                      "flex w-full items-start gap-2 border-b border-light px-3 py-2 text-left",
-                      "transition-colors duration-100 hover:bg-hover",
+                      "flex min-w-[144px] shrink-0 items-start gap-2 rounded-md px-3 py-2.5 text-left md:w-full md:min-w-0",
+                      "cursor-pointer transition-colors duration-150 hover:bg-hover",
                       isSelected && "bg-focus-surface",
                     )}
                   >
@@ -195,22 +192,10 @@ export function AiSettingsPage(): JSX.Element {
                   </button>
                 );
               })
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => setSelection({ kind: "new" })}
-            className={cn(
-              "flex w-full items-center gap-2 border-t border-light px-3 py-2 text-left",
-              "text-menu text-primary transition-colors duration-100 hover:bg-hover",
-              selection?.kind === "new" && "bg-focus-surface",
-            )}
-          >
-            + {t("settings.addProvider")}
-          </button>
-        </aside>
+            }
+        </nav>}
 
-        <section className="min-w-0 flex-1 overflow-hidden rounded-lg border border-light bg-content">
+        <section className="w-full min-w-0 flex-1 overflow-hidden rounded-lg border border-light bg-content">
           {settingsQuery.isPending ? (
             <p className="px-4 py-6 text-caption text-hint">{t("common.loading")}</p>
           ) : selection?.kind === "new" ? (

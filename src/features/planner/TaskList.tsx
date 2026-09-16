@@ -20,7 +20,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Checkbox, Popover, PopoverItem } from "../../ui";
 import {
   addTask,
-  deleteTask,
   getEditorWorkspace,
   LATER_CYCLE_ID,
   moveTask,
@@ -41,6 +40,7 @@ import { canAssignParent, ROOT_PALETTE, taskColor, type RelationView } from "./r
 import { ParentGoalPicker } from "./ParentGoalPicker";
 import { TASK_DRAG_TYPE, useTaskDrag } from "./TaskDragContext";
 import { useTranslation } from "../../lib/i18n";
+import { useTaskDeletion } from "./TaskDeletion";
 
 /** 列表尾空行的判定（对齐 domain::task::is_empty_input_row 的可见部分）。 */
 function isEmptyRow(task: { title: string; completed: boolean; children: TaskNode[] }): boolean {
@@ -85,6 +85,7 @@ export function TaskList({
 
 
   const { error, run, fail, dismiss } = useActionError();
+  const deletion = useTaskDeletion();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const inputRefs = useRef(new Map<string, HTMLTextAreaElement>());
@@ -236,10 +237,6 @@ export function TaskList({
     if (await run(() => patchTask(node.id, { completed }))) invalidateTasks(qc, cycleId);
   };
 
-  const removeTask = async (node: TaskNode) => {
-    if (await run(() => deleteTask(node.id))) invalidateTasks(qc, cycleId);
-  };
-
   const sendToLater = async (node: TaskNode) => {
     if (await run(() => moveTask(node.id, LATER_CYCLE_ID, null))) invalidateTasks(qc, cycleId);
   };
@@ -385,7 +382,7 @@ export function TaskList({
               void commitTitle(row.node);
             }}
             onToggle={(checked) => void toggleCompleted(row.node, checked)}
-            onDelete={() => void removeTask(row.node)}
+            onDelete={() => void deletion.requestDelete(row.node)}
             onSendToLater={() => void sendToLater(row.node)}
             onPickColor={(key) => void pickColor(row.node.id, key)}
             onDragStart={(e) => {
@@ -450,10 +447,11 @@ export function TaskList({
           {errorMessage(workspace.error)}
         </p>
       )}
-      {error && (
+      {deletion.dialog}
+      {(error || deletion.error) && (
         <p role="alert" className="flex items-center gap-2 px-2 py-1 text-caption text-danger">
-          {error}
-          <button type="button" className="underline" onClick={dismiss}>
+          {error || deletion.error}
+          <button type="button" className="underline" onClick={() => { dismiss(); deletion.dismiss(); }}>
             {t("task.dismiss")}
           </button>
         </p>

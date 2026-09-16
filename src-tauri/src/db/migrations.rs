@@ -70,7 +70,35 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "human-approved app actions",
         sql: M0010_AGENT_ACTIONS,
     },
+    Migration {
+        version: 11,
+        description: "long-term progress check schedule",
+        sql: M0011_PROGRESS_CHECK,
+    },
 ];
+
+const M0011_PROGRESS_CHECK: &str = r#"
+ALTER TABLE cycles ADD COLUMN progress_check TEXT CHECK (
+    progress_check IS NULL OR COALESCE((
+        type = 'month' AND starts_on IS NOT NULL AND ends_on > starts_on
+        AND json_valid(progress_check)
+        AND (
+            (json_extract(progress_check, '$.kind') = 'once'
+             AND json_type(progress_check, '$.date') = 'text'
+             AND length(json_extract(progress_check, '$.date')) = 10
+             AND date(json_extract(progress_check, '$.date'), '+0 days') = json_extract(progress_check, '$.date')
+             AND json_extract(progress_check, '$.date') >= starts_on
+             AND json_extract(progress_check, '$.date') < ends_on
+             AND json_type(progress_check, '$.every_days') IS NULL)
+            OR
+            (json_extract(progress_check, '$.kind') = 'repeat'
+             AND json_type(progress_check, '$.every_days') = 'integer'
+             AND json_extract(progress_check, '$.every_days') > 0
+             AND json_type(progress_check, '$.date') IS NULL)
+        )
+    ), 0)
+);
+"#;
 
 const M0010_AGENT_ACTIONS: &str = r#"
 CREATE TABLE agent_actions (

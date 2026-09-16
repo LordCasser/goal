@@ -8,6 +8,8 @@
 //! from the keychain is a normal state — local runtimes and keyless gateways
 //! never store a credential (spec: 供应商切换与解析, 凭据安全存储).
 
+use std::collections::BTreeMap;
+
 use crate::providers::config::{ModelConfig, ProviderConfig};
 use crate::providers::service::AiSettingsState;
 
@@ -17,12 +19,34 @@ use super::AgentError;
 /// needs. `tools_supported` reflects the chosen model's user-declared
 /// capability; the agent layer degrades to conversation mode when it is
 /// `false` (design D1, task §1.3).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ResolvedProvider {
     pub config: ProviderConfig,
     pub model: ModelConfig,
     pub api_key: Option<String>,
+    /// Resolved provider header values. This is runtime-only credential data;
+    /// the custom Debug implementation below never prints the values.
+    pub extra_headers: Vec<(String, String)>,
     pub tools_supported: bool,
+}
+
+impl std::fmt::Debug for ResolvedProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedProvider")
+            .field("config", &self.config)
+            .field("model", &self.model)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "extra_headers",
+                &self
+                    .extra_headers
+                    .iter()
+                    .map(|(name, _)| (name, "[REDACTED]"))
+                    .collect::<Vec<_>>(),
+            )
+            .field("tools_supported", &self.tools_supported)
+            .finish()
+    }
 }
 
 /// Resolves the active provider from the managed AI settings state.
@@ -40,9 +64,24 @@ pub fn resolve(ai: &AiSettingsState) -> Result<ResolvedProvider, AgentError> {
         .credentials
         .load(&provider.id)
         .map_err(|e| AgentError::Internal(format!("cannot read provider credentials: {e}")))?;
+    let extra_headers = if provider.extra_headers.is_empty() {
+        Vec::new()
+    } else {
+        let saved = ai
+            .credentials
+            .load_headers(&provider.id)
+            .map_err(|e| AgentError::Internal(format!("cannot read provider headers: {e}")))?;
+        let resolved = crate::providers::headers::resolve_headers(
+            &provider.extra_headers,
+            &saved,
+            &BTreeMap::new(),
+        )
+        .map_err(|e| AgentError::Internal(format!("cannot resolve provider headers: {e}")))?;
+        resolved.into_iter().collect()
+    };
     // Ok(None): no credential stored — allowed for local endpoints and
     // keyless gateways, so absence is deliberately not an error here.
-    resolve_provider(provider, &model.model_id, api_key)
+    resolve_provider(provider, &model.model_id, api_key, extra_headers)
 }
 
 /// Pure core of the resolution: picks the model and derives the tool flag.
@@ -52,6 +91,7 @@ fn resolve_provider(
     provider: ProviderConfig,
     model_id: &str,
     api_key: Option<String>,
+    extra_headers: Vec<(String, String)>,
 ) -> Result<ResolvedProvider, AgentError> {
     let model = provider
         .models
@@ -64,6 +104,7 @@ fn resolve_provider(
         config: provider,
         model,
         api_key,
+        extra_headers,
         tools_supported,
     })
 }
@@ -164,7 +205,7 @@ mod tests {
             archived: false,
             connection_verified_at: None,
         };
-        let resolved = resolve_provider(provider, "a", None).unwrap();
+        let resolved = resolve_provider(provider, "a", None, vec![]).unwrap();
         assert_eq!(resolved.model.model_id, "a");
         assert!(!resolved.tools_supported, "the caller must degrade");
     }
@@ -182,7 +223,7 @@ mod tests {
             archived: false,
             connection_verified_at: None,
         };
-        let resolved = resolve_provider(provider, "first", Some("sk-x".into())).unwrap();
+        let resolved = resolve_provider(provider, "first", Some("sk-x".into()), vec![]).unwrap();
         assert_eq!(resolved.model.model_id, "first");
         assert!(!resolved.tools_supported);
         assert_eq!(resolved.api_key.as_deref(), Some("sk-x"));
@@ -203,7 +244,7 @@ mod tests {
         };
         // The store rejects this shape on write; resolution still answers
         // with a typed error instead of panicking.
-        let error = resolve_provider(provider, "a", None).unwrap_err();
+        let error = resolve_provider(provider, "a", None, vec![]).unwrap_err();
         assert!(matches!(error, AgentError::Internal(_)));
         assert_eq!(error.code(), "internal");
     }

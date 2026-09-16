@@ -10,7 +10,6 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   addTask,
-  deleteTask,
   patchTask,
   promoteLaterGoal,
   LATER_CYCLE_ID,
@@ -20,6 +19,7 @@ import {
 import { qk } from "../../lib/events";
 import { Button, Checkbox, Popover, PopoverItem, cn } from "../../ui";
 import { useTranslation } from "../../lib/i18n";
+import { useTaskDeletion } from "../planner/TaskDeletion";
 
 export type LaterTaskRowProps = {
   task: TaskNode;
@@ -42,6 +42,7 @@ export function LaterTaskRow({
 }: LaterTaskRowProps) {
   const { t } = useTranslation("planning");
   const queryClient = useQueryClient();
+  const deletion = useTaskDeletion();
   const preview = task.proposal != null;
   const [title, setTitle] = useState(task.title);
   const [promoteOpen, setPromoteOpen] = useState(false);
@@ -79,10 +80,6 @@ export function LaterTaskRow({
       invalidateLater();
       onRowCreated(created.id);
     },
-  });
-  const remove = useMutation({
-    mutationFn: () => deleteTask(task.id),
-    onSuccess: invalidateLater,
   });
   const promote = useMutation({
     mutationFn: (targetCycleId: string) => promoteLaterGoal(task.id, targetCycleId),
@@ -169,14 +166,16 @@ export function LaterTaskRow({
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => remove.mutate()}
-          disabled={preview || remove.isPending}
+          onClick={() => void deletion.requestDelete(task)}
+          disabled={preview || deletion.busy}
           aria-label={t("later.delete")}
           title={t("later.delete")}
         >
           <DeleteIcon />
         </Button>
       </div>
+      {deletion.dialog}
+      {deletion.error && <p role="alert" className="text-caption text-danger">{deletion.error}</p>}
       <Popover
         open={!preview && promoteOpen}
         onClose={() => setPromoteOpen(false)}

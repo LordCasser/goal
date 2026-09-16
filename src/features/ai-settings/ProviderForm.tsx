@@ -6,14 +6,14 @@
  * - API Key 只进不出：输入框永不回显（服务端也从不返回 Key），已有 Key
  *   仅以「已配置」徽标 + 移除入口表达（design.md §9.3：密钥不出现在普通
  *   状态）。本地端点留空 Key 是正常状态，不显示警告（design D4）。
- * - 保存 = saveProvider（配置文件）+ 可选 saveProviderApiKey（钥匙串）；
+ * - 保存 = saveProvider（配置文件 + API Key/Header 凭据输入）；
  *   后端校验错误（AppError code）行内显示（task 5.3）。
  * - 操作（设为激活 / 删除 / 连接测试）只对已保存供应商开放；连接测试
  *   结果按 design D3 的 error_code 映射文案，行内反馈（task 5.4）。
  * - 所有写操作成功后经 onChanged 请求页面失效 ai-settings 查询；查询
  *   key 由页面持有（见 AiSettingsPage.tsx 文件头注释）。
  */
-import { useId, useState, type JSX } from "react";
+import { useId, useRef, useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 import { Button, Dialog, Input, ProgressDot, Select, SelectItem, cn } from "../../ui";
@@ -51,6 +51,55 @@ const API_FORMATS: ReadonlyArray<{ value: ApiFormat; label: string }> = [
   },
   { value: "openai_responses", label: "OpenAI Responses" },
 ];
+
+type HeaderDraft = {
+  id: string;
+  name: string;
+  value: string;
+  /** Name returned by the backend when this row was loaded. */
+  savedName: string | null;
+};
+
+type HeaderIssue =
+  | "invalid_header_name"
+  | "duplicate_header_name"
+  | "reserved_header_name"
+  | "invalid_header_value"
+  | "missing_header_value"
+  | "unknown_header_value";
+
+const RESERVED_HEADER_NAMES = new Set([
+  "host",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "content-type",
+  "accept",
+]);
+
+// RFC 9110 §5.6.2 token. Header values may contain horizontal tabs and
+// printable ASCII only; this also rejects newlines before they reach IPC.
+const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const HEADER_VALUE_RE = /^[\x09\x20-\x7e]*$/;
+
+function headerName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function initialHeaders(provider: ProviderSummary | null): HeaderDraft[] {
+  return (provider?.extra_headers ?? []).map((name, index) => ({
+    id: `saved-header-${index}`,
+    name,
+    value: "",
+    savedName: headerName(name),
+  }));
+}
 
 /** 镜像 providers::config::is_http_base_url：http(s) scheme + 非空主机，本地 http 合法。 */
 function isHttpBaseUrl(url: string): boolean {
@@ -94,6 +143,8 @@ export function ProviderForm({
   const urlInputId = useId();
   const keyInputId = useId();
   const formatInputId = useId();
+  const headerSectionId = useId();
+  const headerId = useRef(0);
 
   const providerId = provider?.id ?? null;
 
@@ -104,6 +155,10 @@ export function ProviderForm({
   );
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<ModelConfig[]>(provider?.models ?? []);
+  const [headers, setHeaders] = useState<HeaderDraft[]>(() => initialHeaders(provider));
+  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(() => new Set());
+  const [touchedHeaders, setTouchedHeaders] = useState<Set<string>>(() => new Set());
+  const [headerSubmitError, setHeaderSubmitError] = useState<HeaderIssue | null>(null);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
@@ -120,6 +175,60 @@ export function ProviderForm({
     return providerId;
   };
 
+  const headerIssues = new Map<string, HeaderIssue>();
+  const normalizedHeaderNames = headers.map((header) => headerName(header.name));
+  normalizedHeaderNames.forEach((name, index) => {
+    const header = headers[index]!;
+    if (!name || !HEADER_NAME_RE.test(name)) {
+      headerIssues.set(header.id, "invalid_header_name");
+      return;
+    }
+    if (RESERVED_HEADER_NAMES.has(name)) {
+      headerIssues.set(header.id, "reserved_header_name");
+      return;
+    }
+    if (normalizedHeaderNames.indexOf(name) !== index) {
+      headerIssues.set(header.id, "duplicate_header_name");
+      return;
+    }
+    const savedName = header.savedName;
+    const needsValue = savedName === null || savedName !== name;
+    if (!header.value && needsValue) {
+      headerIssues.set(header.id, "missing_header_value");
+      return;
+    }
+    if (header.value && !HEADER_VALUE_RE.test(header.value)) {
+      headerIssues.set(header.id, "invalid_header_value");
+    }
+  });
+
+  const headerValues = Object.fromEntries(
+    headers.flatMap((header) => {
+      const name = headerName(header.name);
+      return !headerIssues.has(header.id) && name && header.value
+        ? [[name, header.value] as const]
+        : [];
+    }),
+  );
+
+  const headerErrorText = (issue: HeaderIssue): string =>
+    translate(`settings.${issue}`);
+
+  const addHeader = () => {
+    headerId.current += 1;
+    const id = `new-header-${headerId.current}`;
+    setHeaders((previous) => [...previous, { id, name: "", value: "", savedName: null }]);
+  };
+
+  const touchHeader = (id: string) => {
+    setTouchedHeaders((previous) => {
+      if (previous.has(id)) return previous;
+      const next = new Set(previous);
+      next.add(id);
+      return next;
+    });
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (): Promise<ProviderConfig> => {
       const config: ProviderConfig = {
@@ -127,22 +236,42 @@ export function ProviderForm({
         name: name.trim(),
         base_url: baseUrl.trim(),
         api_format: apiFormat,
-        // 表单不编辑 extra_headers/created_at/archived；编辑时原样保留。
-        extra_headers: provider?.extra_headers ?? [],
+        extra_headers: normalizedHeaderNames,
         models,
         created_at: provider?.created_at ?? 0,
         archived: provider?.archived ?? false,
         connection_verified_at: null,
       };
-      return saveProvider(config, apiKey.trim() || null);
+      return saveProvider(config, apiKey.trim() || null, headerValues);
     },
     onSuccess: async (saved) => {
       setName(saved.name);
       setBaseUrl(saved.base_url);
       setApiKey(""); // 保存成功即清空 Key 草稿：不回显（design §9.3）
+      setHeaders(initialHeaders({ ...saved, has_api_key: provider?.has_api_key ?? false, is_active: provider?.is_active ?? false }));
+      setVisibleHeaders(new Set());
+      setTouchedHeaders(new Set());
+      setHeaderSubmitError(null);
       setTestResult(null);
       await onChanged(); // 等失效重取完成后再切换选中，避免右栏闪空态
       onSaved(saved.id);
+    },
+    onError: (error) => {
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? (error as { code?: unknown }).code
+        : null;
+      setHeaderSubmitError(
+        typeof code === "string" && [
+          "invalid_header_name",
+          "duplicate_header_name",
+          "reserved_header_name",
+          "invalid_header_value",
+          "missing_header_value",
+          "unknown_header_value",
+        ].includes(code)
+          ? code as HeaderIssue
+          : null,
+      );
     },
   });
 
@@ -168,7 +297,11 @@ export function ProviderForm({
 
   const busy = saveMutation.isPending || testMutation.isPending || removeKeyMutation.isPending;
   const dirty = name !== (provider?.name ?? "") || baseUrl !== (provider?.base_url ?? "") || apiFormat !== provider?.api_format
-    || apiKey !== "" || JSON.stringify(models) !== JSON.stringify(provider?.models ?? []);
+    || apiKey !== "" || JSON.stringify(models) !== JSON.stringify(provider?.models ?? [])
+    || JSON.stringify(normalizedHeaderNames) !== JSON.stringify((provider?.extra_headers ?? []).map(headerName))
+    || headers.some((header) => header.value !== "");
+  const hasHeaderIssues = headerIssues.size > 0;
+  const canSaveWithHeaders = canSave && !hasHeaderIssues;
 
   return (
     <div className="flex min-h-0 flex-col">
@@ -315,6 +448,137 @@ export function ProviderForm({
           </Select>
         </div>
 
+        <section id={headerSectionId} className="flex min-w-0 flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h4 className="text-block-title font-semibold text-primary">{translate("settings.requestHeaders")}</h4>
+              <p className="text-caption text-hint">{translate("settings.requestHeadersHelp")}</p>
+            </div>
+            <Button size="compact" className="cursor-pointer duration-150" onClick={addHeader}>
+              {translate("settings.addHeader")}
+            </Button>
+          </div>
+          {headers.length > 0 && (
+            <ul className="flex min-w-0 flex-col gap-2" aria-label={translate("settings.requestHeaders")}>
+              {headers.map((header, index) => {
+                const issue = headerIssues.get(header.id);
+                const displayedIssue = touchedHeaders.has(header.id) ? issue : undefined;
+                const nameInputIdForRow = `${header.id}-name`;
+                const valueInputIdForRow = `${header.id}-value`;
+                const errorIdForRow = `${header.id}-error`;
+                const labelSuffix = `${index + 1}`;
+                const valueVisible = visibleHeaders.has(header.id);
+                const savedNameUnchanged = header.savedName !== null && header.savedName === headerName(header.name);
+                return (
+                  <li key={header.id} className="flex min-w-0 flex-wrap items-end gap-2 rounded-md border border-light bg-subtle p-2">
+                    <div className="min-w-[9rem] flex-1">
+                      <label htmlFor={nameInputIdForRow} className="mb-1 block text-caption text-secondary">
+                        {translate("settings.headerName")}
+                      </label>
+                      <Input
+                        id={nameInputIdForRow}
+                        aria-label={`${translate("settings.headerName")} ${labelSuffix}`}
+                        aria-invalid={displayedIssue === "invalid_header_name" || displayedIssue === "duplicate_header_name" || displayedIssue === "reserved_header_name" || undefined}
+                        aria-describedby={displayedIssue === "invalid_header_name" || displayedIssue === "duplicate_header_name" || displayedIssue === "reserved_header_name" ? errorIdForRow : undefined}
+                        autoFocus={header.savedName === null && index === headers.length - 1}
+                        value={header.name}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          touchHeader(header.id);
+                          setHeaderSubmitError(null);
+                          setHeaders((previous) => previous.map((item) => item.id === header.id ? { ...item, name: value } : item));
+                        }}
+                        onBlur={() => touchHeader(header.id)}
+                        placeholder={translate("settings.headerNamePlaceholder")}
+                      />
+                    </div>
+                    <div className="min-w-[11rem] flex-[1.4]">
+                      <label htmlFor={valueInputIdForRow} className="mb-1 block text-caption text-secondary">
+                        {translate("settings.headerValue")}
+                      </label>
+                      <div className="flex min-w-0 gap-1">
+                        <Input
+                          id={valueInputIdForRow}
+                          aria-label={`${translate("settings.headerValue")} ${labelSuffix}`}
+                          aria-invalid={displayedIssue === "invalid_header_value" || displayedIssue === "missing_header_value" || undefined}
+                          aria-describedby={displayedIssue === "invalid_header_value" || displayedIssue === "missing_header_value" ? errorIdForRow : undefined}
+                          type={valueVisible ? "text" : "password"}
+                          autoComplete="off"
+                          value={header.value}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            touchHeader(header.id);
+                            setHeaderSubmitError(null);
+                            setHeaders((previous) => previous.map((item) => item.id === header.id ? { ...item, value } : item));
+                          }}
+                          onBlur={() => touchHeader(header.id)}
+                          placeholder={translate(savedNameUnchanged ? "settings.savedHeaderValuePlaceholder" : "settings.headerValuePlaceholder")}
+                        />
+                        <button
+                          type="button"
+                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-secondary transition-colors duration-150 hover:bg-hover hover:text-primary disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
+                          disabled={header.value.length === 0}
+                          aria-label={translate(valueVisible ? "settings.hideHeaderValue" : "settings.showHeaderValue", { name: header.name || labelSuffix })}
+                          title={translate(valueVisible ? "settings.hideHeaderValue" : "settings.showHeaderValue", { name: header.name || labelSuffix })}
+                          aria-pressed={valueVisible}
+                          onClick={() => setVisibleHeaders((previous) => {
+                            const next = new Set(previous);
+                            if (next.has(header.id)) next.delete(header.id); else next.add(header.id);
+                            return next;
+                          })}
+                        >
+                          <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M2.25 8s2.05-3.25 5.75-3.25S13.75 8 13.75 8 11.7 11.25 8 11.25 2.25 8 2.25 8Z" />
+                            <circle cx="8" cy="8" r="1.5" />
+                            {valueVisible && <path d="m2.5 2.5 11 11" />}
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="flex h-9 shrink-0 cursor-pointer items-center justify-center rounded-md px-2 text-caption text-danger transition-colors duration-150 hover:bg-hover"
+                      aria-label={translate("settings.removeHeader", { name: header.name || labelSuffix })}
+                      onClick={(event) => {
+                        // Move focus before removing its row so keyboard editing
+                        // continues at the next row, previous row, or Add control.
+                        const row = event.currentTarget.closest("li");
+                        const nextInput = row?.nextElementSibling?.querySelector("input")
+                          ?? row?.previousElementSibling?.querySelector("input");
+                        const focusTarget = nextInput
+                          ?? document.getElementById(headerSectionId)?.querySelector("button");
+                        focusTarget?.focus({ preventScroll: true });
+                        setHeaders((previous) => previous.filter((item) => item.id !== header.id));
+                        setTouchedHeaders((previous) => {
+                          const next = new Set(previous);
+                          next.delete(header.id);
+                          return next;
+                        });
+                        setVisibleHeaders((previous) => {
+                          const next = new Set(previous);
+                          next.delete(header.id);
+                          return next;
+                        });
+                        setHeaderSubmitError(null);
+                      }}
+                    >
+                      {translate("settings.remove")}
+                    </button>
+                    {displayedIssue && (
+                      <p id={errorIdForRow} role="alert" className="basis-full text-caption text-danger">
+                        {headerErrorText(displayedIssue)}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {headerSubmitError && (
+            <p role="alert" className="text-caption text-danger">{headerErrorText(headerSubmitError)}</p>
+          )}
+        </section>
+
         {/* 模型列表（task 5.2）：model_id + 窗口 + 最大输出 + 工具调用标记。 */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
@@ -377,15 +641,15 @@ export function ProviderForm({
       {/* 底部：行内校验提示（列出缺什么）+ 主按钮（task 5.3）。 */}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-light px-4 py-3">
         <div className="flex min-w-0 flex-col">
-          {!canSave && <p className="text-caption text-hint">{translate("settings.needComplete", { items: missing.join(translate("common.listSeparator")) })}</p>}
-          {canSave && <p className="text-caption text-hint">{saveMutation.isPending ? translate("settings.testingSave") : translate("settings.saveHelp")}</p>}
+          {!canSaveWithHeaders && <p className="text-caption text-hint">{translate("settings.needComplete", { items: missing.concat(hasHeaderIssues ? [translate("settings.requestHeaders")] : []).join(translate("common.listSeparator")) })}</p>}
+          {canSaveWithHeaders && <p className="text-caption text-hint">{saveMutation.isPending ? translate("settings.testingSave") : translate("settings.saveHelp")}</p>}
           {saveMutation.isError && (
             <p className="text-caption text-danger">{errorText(saveMutation.error)}</p>
           )}
         </div>
         <Button
           variant="primary"
-          disabled={!canSave || busy}
+          disabled={!canSaveWithHeaders || busy}
           loading={saveMutation.isPending}
           onClick={() => saveMutation.mutate()}
         >

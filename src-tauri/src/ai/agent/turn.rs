@@ -663,6 +663,7 @@ mod tests {
                 supports_tools: true,
             },
             api_key: None,
+            extra_headers: vec![],
             tools_supported: true,
             config: crate::providers::config::ProviderConfig {
                 id: "p1".into(),

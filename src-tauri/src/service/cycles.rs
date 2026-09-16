@@ -58,6 +58,10 @@ pub struct CreateCycleArgs {
     pub parent_id: Option<String>,
     /// Long-term only: 1, 3 or 6 product months (28 days each).
     pub duration_months: Option<i64>,
+    /// Explicit bounds are mutually exclusive with preset product months.
+    pub starts_on: Option<String>,
+    pub ends_on: Option<String>,
+    pub progress_check: Option<crate::domain::cycle::ProgressCheck>,
     /// Optional title; dated cycles derive one from their bounds when absent.
     pub title: Option<String>,
     /// Day cycles: `YYYY-MM-DD`. Defaults to today (local).
@@ -93,27 +97,38 @@ pub fn create_planning_cycle(
 
     let (parent_id, position, starts_on, ends_on, duration, key, title) = match kind {
         CycleType::Month => {
-            let months = args.duration_months.ok_or_else(|| {
-                AppError::validation(
-                    "long_term_duration_required",
-                    "A long-term cycle needs a duration of 1, 3 or 6 months",
-                )
-            })?;
-            if !LONG_TERM_DURATIONS_MONTHS.contains(&months) {
-                return Err(AppError::validation(
-                    "unsupported_long_term_duration",
-                    "Long-term cycles last 1, 3 or 6 months (28 days per month)",
-                ));
-            }
             if args.parent_id.is_some() {
                 return Err(AppError::validation(
                     "invalid_parent_type",
                     "A long-term cycle is a root and cannot have a parent",
                 ));
             }
-            let starts_on = today;
-            let ends_on = calculate_ends_on(starts_on, months);
-            let duration = crate::domain::cycle::long_term_duration_ms(months);
+            let (starts_on, ends_on) = match (&args.starts_on, &args.ends_on, args.duration_months)
+            {
+                (Some(start), Some(end), None) => calendar::custom_long_term_bounds(start, end)?,
+                (None, None, Some(months)) if LONG_TERM_DURATIONS_MONTHS.contains(&months) => {
+                    (today, calculate_ends_on(today, months))
+                }
+                (None, None, Some(_)) => {
+                    return Err(AppError::validation(
+                        "unsupported_long_term_duration",
+                        "Choose a preset duration or custom dates.",
+                    ))
+                }
+                (None, None, None) => {
+                    return Err(AppError::validation(
+                        "long_term_duration_required",
+                        "Choose a preset duration or custom dates.",
+                    ))
+                }
+                _ => {
+                    return Err(AppError::validation(
+                        "invalid_cycle_range",
+                        "Provide both custom dates, without a preset duration.",
+                    ))
+                }
+            };
+            let duration = (ends_on - starts_on).num_days() * crate::domain::cycle::MS_PER_DAY;
             let key = long_term_key(starts_on, ends_on);
             let position = next_cycle_position(&tx, None)?;
             (
@@ -127,6 +142,13 @@ pub fn create_planning_cycle(
             )
         }
         CycleType::Week | CycleType::Day => {
+            if args.starts_on.is_some() || args.ends_on.is_some() || args.progress_check.is_some() {
+                return Err(AppError::validation(
+                    "unsupported_cycle_type",
+                    "Custom bounds and progress checks belong to long-term cycles.",
+                ));
+            }
+
             // Calendar containers may stand alone. Goal ownership belongs to
             // task.parent_id, not to the container's optional parent.
             let parent_id = args.parent_id.clone();
@@ -191,6 +213,22 @@ pub fn create_planning_cycle(
         created_at: now,
     };
     repo::insert(&tx, &new)?;
+    if kind == CycleType::Month {
+        let start = starts_on.expect("long-term start validated");
+        let end = ends_on.expect("long-term end validated");
+        let check = args.progress_check.clone().unwrap_or_else(|| {
+            crate::domain::cycle::ProgressCheck::Once {
+                date: format_date(calendar::add_days(start, (end - start).num_days() / 2)),
+            }
+        });
+        calendar::validate_progress_check(&check, start, end)?;
+        let json = serde_json::to_string(&check).map_err(|e| AppError::Internal(e.to_string()))?;
+        tx.execute(
+            "UPDATE cycles SET progress_check = ?1 WHERE id = ?2",
+            rusqlite::params![json, new.id],
+        )
+        .map_err(crate::error::from_rusqlite)?;
+    }
     let created = repo::require(&tx, &new.id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
@@ -508,6 +546,8 @@ pub struct CycleDeletionPreview {
     pub descendant_cycles: i64,
     pub tasks: i64,
     pub started_sessions: i64,
+    pub total_focus_blocks: i64,
+    pub confirmation_token: String,
 }
 
 /// The deletion guards, in evaluation order. `None` = deletable.
@@ -553,17 +593,40 @@ pub fn get_cycle_deletion_preview(db: &Db, cycle_id: &str) -> AppResult<CycleDel
     let conn = db.pool().get()?;
     let target = repo::require(&conn, cycle_id)?;
     let guard = deletion_guard(&conn, &target)?;
+    let impact = crate::service::deletion::cycle_impact(&conn, cycle_id)?;
     Ok(CycleDeletionPreview {
         cycle_id: cycle_id.to_string(),
         guard_code: guard.as_ref().map(|(code, _)| code.clone()),
         guard_message: guard.map(|(_, message)| message),
-        descendant_cycles: repo::count_descendant_cycles(&conn, cycle_id)?,
-        tasks: repo::count_tasks(&conn, cycle_id)?,
-        started_sessions: repo::count_started_sessions(&conn, cycle_id)?,
+        descendant_cycles: impact.descendant_cycles,
+        tasks: impact.task_ids.len() as i64,
+        started_sessions: impact.started_focus_count,
+        total_focus_blocks: impact.total_focus_blocks,
+        confirmation_token: impact.token,
     })
 }
 
 pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
+    delete_cycle_inner(db, cycle_id, None, false)
+}
+
+/// GUI deletion entry point.  The impact is recomputed inside the same
+/// transaction as the mutation, so a preview cannot authorize a changed
+/// subtree.  Coach and other trusted internal callers use `delete_cycle`.
+pub fn delete_cycle_confirmed(
+    db: &Db,
+    cycle_id: &str,
+    confirmation_token: Option<&str>,
+) -> AppResult<Mutation<()>> {
+    delete_cycle_inner(db, cycle_id, confirmation_token, true)
+}
+
+fn delete_cycle_inner(
+    db: &Db,
+    cycle_id: &str,
+    confirmation_token: Option<&str>,
+    require_confirmation: bool,
+) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
     let tx = conn
         .transaction()
@@ -573,7 +636,17 @@ pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
     if let Some((code, message)) = deletion_guard(&tx, &target)? {
         return Err(AppError::conflict(code, message));
     }
-    let subtree = repo::subtree_ids(&tx, cycle_id)?;
+    let impact = crate::service::deletion::cycle_impact(&tx, cycle_id)?;
+    crate::service::deletion::require_confirmation(
+        confirmation_token,
+        &impact.token,
+        require_confirmation,
+    )?;
+    // `ensure_cycle_tree_unlocked` covers the cycle subtree.  The explicit
+    // pass also covers task descendants linked from another cycle.
+    for task_id in &impact.task_ids {
+        crate::service::tasks::ensure_task_editable(&tx, task_id, true)?;
+    }
     let mut touched_parents = Vec::new();
     if target.cycle_type == CycleType::Session {
         let mut parent = target.parent_id.clone();
@@ -591,7 +664,7 @@ pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
     // reminder attached to the deleted pages and their tasks BEFORE the
     // delete — the FK cascade would remove the subtree rows and orphan the
     // lookup (change: add-reminders-notifications §1.3).
-    crate::service::reminders::purge_for_cycle(&tx, cycle_id)?;
+    crate::service::reminders::purge_for_cycle_impact(&tx, &impact.cycle_ids, &impact.task_ids)?;
     repo::delete(&tx, cycle_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
@@ -600,8 +673,11 @@ pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
     for parent in touched_parents {
         mutation.cycles.push(parent);
     }
-    for id in subtree {
+    for id in impact.cycle_ids {
         mutation.cycles.push(id);
+    }
+    for cycle_id in impact.task_cycle_ids {
+        mutation.tasks.push(cycle_id);
     }
     Ok(mutation)
 }

@@ -14,6 +14,8 @@
 //! calling [`Credentials::save`], never by storing a blank string. Only real
 //! access failures surface as [`AppError::Internal`].
 
+use std::collections::BTreeMap;
+
 use crate::error::{AppError, AppResult};
 
 /// Keychain service name: the application identifier from `tauri.conf.json`.
@@ -30,11 +32,33 @@ fn account(provider_id: &str) -> String {
 /// Stateless wrapper around the system keychain. All state lives in the
 /// keychain itself, keyed by [`SERVICE`] + [`account`].
 #[derive(Debug, Clone, Default)]
-pub struct Credentials;
+pub struct Credentials {
+    // A per-instance test double avoids replacing keyring's global builder
+    // or writing real credentials during parallel command tests.
+    #[cfg(test)]
+    test_headers:
+        Option<std::sync::Arc<std::sync::Mutex<BTreeMap<String, BTreeMap<String, String>>>>>,
+    #[cfg(test)]
+    fail_header_write: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl Credentials {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_headers() -> Self {
+        Self {
+            test_headers: Some(Default::default()),
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_header_write(&self) {
+        self.fail_header_write
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Stores `api_key` for `provider_id`, replacing any previous value.
@@ -82,6 +106,86 @@ impl Credentials {
             Err(e) => Err(keyring_error(e)),
         }
     }
+
+    /// Header values have a separate account so removing the API key does
+    /// not erase custom authentication or gateway configuration.
+    pub fn load_headers(&self, provider_id: &str) -> AppResult<BTreeMap<String, String>> {
+        #[cfg(test)]
+        if let Some(store) = &self.test_headers {
+            return Ok(store
+                .lock()
+                .unwrap()
+                .get(provider_id)
+                .cloned()
+                .unwrap_or_default());
+        }
+        let entry = header_entry(provider_id)?;
+        match entry.get_password() {
+            Ok(json) => {
+                let values: BTreeMap<String, String> =
+                    serde_json::from_str(&json).map_err(|_| {
+                        AppError::Internal("cannot read provider header credentials".into())
+                    })?;
+                for value in values.values() {
+                    crate::logging::register_secret(value);
+                }
+                Ok(values)
+            }
+            Err(keyring::Error::NoEntry) => Ok(BTreeMap::new()),
+            Err(error) => Err(keyring_error(error)),
+        }
+    }
+
+    pub fn save_headers(
+        &self,
+        provider_id: &str,
+        values: &BTreeMap<String, String>,
+    ) -> AppResult<()> {
+        #[cfg(test)]
+        if self
+            .fail_header_write
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(AppError::Internal(
+                "simulated credential write failure".into(),
+            ));
+        }
+        if values.is_empty() {
+            return self.delete_headers(provider_id);
+        }
+        for value in values.values() {
+            crate::logging::register_secret(value);
+        }
+        #[cfg(test)]
+        if let Some(store) = &self.test_headers {
+            store
+                .lock()
+                .unwrap()
+                .insert(provider_id.into(), values.clone());
+            return Ok(());
+        }
+        let json = serde_json::to_string(values)
+            .map_err(|_| AppError::Internal("cannot encode provider header credentials".into()))?;
+        header_entry(provider_id)?
+            .set_password(&json)
+            .map_err(keyring_error)
+    }
+
+    pub fn delete_headers(&self, provider_id: &str) -> AppResult<()> {
+        #[cfg(test)]
+        if let Some(store) = &self.test_headers {
+            store.lock().unwrap().remove(provider_id);
+            return Ok(());
+        }
+        match header_entry(provider_id)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(keyring_error(error)),
+        }
+    }
+}
+
+fn header_entry(provider_id: &str) -> AppResult<keyring::Entry> {
+    keyring::Entry::new(SERVICE, &format!("provider-headers:{provider_id}")).map_err(keyring_error)
 }
 
 fn entry_for(provider_id: &str) -> AppResult<keyring::Entry> {

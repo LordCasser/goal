@@ -19,6 +19,7 @@ import {
   moveTask,
   reorderTasks,
   setLocale,
+  saveProvider,
   updateCycle,
   updateTask,
 } from "./ipc";
@@ -37,6 +38,38 @@ describe("command name registry", () => {
 });
 
 describe("argument key contract", () => {
+  it("always sends a separate header value map without returning header secrets", async () => {
+    invokeMock.mockResolvedValue({
+      id: "p1",
+      name: "Provider",
+      base_url: "https://example.test",
+      api_format: "openai_chat_completions",
+      extra_headers: ["x-tenant"],
+      models: [],
+      created_at: 1,
+      archived: false,
+      connection_verified_at: null,
+    });
+    const provider = await saveProvider({
+      id: "p1",
+      name: "Provider",
+      base_url: "https://example.test",
+      api_format: "openai_chat_completions",
+      extra_headers: ["x-tenant"],
+      models: [],
+      created_at: 1,
+      archived: false,
+      connection_verified_at: null,
+    });
+    expect(invokeMock).toHaveBeenCalledWith(commands.saveProvider, {
+      provider: expect.objectContaining({ extra_headers: ["x-tenant"] }),
+      apiKey: null,
+      headerValues: {},
+    });
+    expect(provider).not.toHaveProperty("header_values");
+    expect(provider).not.toHaveProperty("x-tenant");
+  });
+
   it("sends only the canonical locale to the validated settings command", async () => {
     await setLocale("zh-CN");
     expect(invokeMock).toHaveBeenCalledWith("set_locale", { locale: "zh-CN" });

@@ -133,6 +133,7 @@ cycles(
   focused_time INTEGER NOT NULL DEFAULT 0,  -- 毫秒
   repeat_id TEXT REFERENCES repeats(id),    -- 由哪个重复模板生成；模板移除时置空而非级联删除
   starts_on TEXT, ends_on TEXT,  -- 'YYYY-MM-DD'
+  progress_check TEXT,           -- 可空 JSON；长期周期的 once/repeat 检查安排
   calendar_key TEXT,             -- 见"日历键"
   created_at INTEGER NOT NULL,
   CHECK (NOT (started = 0 AND finished = 1))
@@ -238,13 +239,13 @@ Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日�
 - 日历日期：`TEXT`，`YYYY-MM-DD`（本地日期，不用 UTC，避免跨时区偏移导致"哪一天"漂移）
 - 消息时间：`TEXT` ISO8601
 
-### 周期时长（毫秒，各类型固定）
+### 周期时长（毫秒）
 
 `duration` 是**毫秒**。上游证据：`2419200000 -- 28 days in milliseconds`、`86400000 -- 24 hours`、`604800000 -- 7 days`。
 
 | 类型 | 时长 | 毫秒 | 说明 |
 | --- | --- | --- | --- |
-| `month`（长周期） | 28 / 84 / 168 天 | `2419200000` / `7257600000` / `145152000000` | 即 1 / 3 / 6 × 28 天。**按周计算而非日历月**——3 个月 = 84 天 = 整 12 周，与创建界面承诺的 "12 weeks left" 一致 |
+| `month`（长周期） | 预设 28 / 84 / 168 天，或自定义日期差 | 预设 `2419200000` / `7257600000` / `14515200000` | 预设按产品月（4 周）计算；自定义允许非整周，以 date-only 日期差计算 |
 | `week` | 固定 7 天 | `604800000` | 上游文案 `Weekly planning cycles use a fixed 7-day duration.` |
 | `day` | 固定 24 小时 | `86400000` | 上游文案 `extend onboarding day to 24 hours` |
 | `session` | 用户指定 | — | 专注块，未定时长可为 `NULL` |
@@ -257,8 +258,12 @@ Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日�
 1. **启动前必须有时长**：`Cycle duration must be set before starting`（上游原文）。未定时长的周期不能被启动。
 2. **周、日容器允许独立**：日期身份保持唯一；目标归属由 `tasks.parent_id` 表达。2026-09-15 用户明确放开原版“周必须有父级”的约束。
 3. **已结束的长周期下不能再建周周期**：`Cannot create a weekly planning cycle under an ended long-term cycle.`
-4. **长周期时长只允许 1 / 3 / 6 × 28 天**（`validate_long_term_duration`）。
-5. **日期边界由时长推导**：`calculate_ends_on` 与 `dated_cycle_bounds` 共同决定 `starts_on` / `ends_on`，且 `calendar_key` 由 `start_of_week` 与本地日期格式化派生。
+4. **长周期预设为 1 / 3 / 6 × 28 天**；自定义传 `starts_on` / `ends_on`，两种参数互斥，结束日期必须晚于开始日期。
+5. **日期边界保持本地日期语义**：预设由时长推导，自定义直接校验日期边界，`ends_on` 为排他边界。
+
+长期检查安排由迁移 11 在 `cycles.progress_check` 可空 JSON 列持久化，封闭枚举为 `{kind:"once",date}` 或 `{kind:"repeat",every_days}`。一次检查须位于 `[starts_on, ends_on)`；重复间隔为正整数天，从开始日期推进，仅派生结束前的检查日。前后端按整天计算，预览只生成有限日期和总数，不物化检查实例，不新增通知调度器。预设保存中点检查，旧记录空值仅在展示时推导中点。
+
+删除影响由 `service/deletion.rs` 统一计算：先遍历周期子树，再沿任务父链递归遍历跨周期后代。任务删除只沿任务树，不推断同日独立专注块关联。GUI 预览返回影响计数和 token，删除事务重新计算 token，变化时要求再次确认；同一事务清理后代提醒及预览快照，并使所有受影响周期的查询失效。Coach 保留已有单一确认入口。
 
 ## IPC 契约
 
@@ -271,7 +276,7 @@ Tauri 命令的顶层参数使用默认 `camelCase`，例如 `get_editor_workspa
 | 组 | 命令 |
 | --- | --- |
 | 周期 | `get_planner_state` `list_sessions` `create_planning_cycle` `update_cycle` `delete_planning_cycle` `get_cycle_deletion_preview` `start_cycle` `finish_cycle` `add_session` `reorder_sessions` `copy_uncompleted_from_previous` `ensure_day` |
-| 任务 | `add_task` `update_task` `patch_task` `delete_task` `move_task` `reorder_tasks` `set_task_parent_link` `set_task_root_color` |
+| 任务 | `add_task` `update_task` `patch_task` `get_task_deletion_preview` `delete_task` `move_task` `reorder_tasks` `set_task_parent_link` `set_task_root_color` |
 | 编辑态 | `get_editor_workspace` `get_editor_workspaces_by_cycle_ids` |
 | 重复日程 | `add_repeat` `update_repeat` `stop_repeat` |
 | 预览 | `get_preview_summary` `keep_task_preview` `undo_task_preview` `keep_all_previews` `undo_all_previews` |
@@ -378,6 +383,8 @@ react-query 缓存 ←────────── 失效并重取 ←──�
 ## 按需技能与模型选择（2026-09-15）
 
 供应商元数据和当前激活的 `provider_id + model_id` 组合继续存于 providers.json，不新增模型选择实体。原子保存选中组合；解析器只取指定模型。配置测试、凭据更新和激活操作由同一异步互斥锁串行化；测试失败不覆盖旧配置。计划区的可用性检查只读配置，不因浏览页面访问钥匙串。
+
+供应商 `extra_headers` 只存名称数组，值通过 `save_provider` 的独立 `header_values` 参数单向提交，在系统凭据 `provider-headers:{id}` 中保存。留空保留同名值、删除名称移除值；统一 `providers::headers` 校验后逐模型测试，再提交配置和凭据，失败执行补偿。运行时解析和连接测试共用相同值；采样客户端统一按名称覆盖默认 Header 并脱敏错误，拒绝传输层保留名称和重定向转发。前端、普通配置和 Coach 上下文均不获得已存值。
 
 `ai/skills.rs` 管理内置文件、首次补齐和运行时读取；`ai/agent/prompt.rs` 只组合不可变契约、技能目录和当前工作流。模型调用 `load_skill` 选择技能，执行器在同一回合的下一轮更新系统指令与工具集合。长期、周、日规划分别读取文件；时段分析和问题诊断只有读取工具与技能切换工具，执行器验证调用是否属于当前集合。技能正文不可扩大代码层权限。
 

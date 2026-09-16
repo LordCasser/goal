@@ -231,7 +231,7 @@ export function CycleOptionsMenu({
       {repeatOpen && cycle.repeat_id && (
         <EditRepeatDialog cycle={cycle} open={repeatOpen} onClose={() => setRepeatOpen(false)} />
       )}
-      <DeleteCycleDialog cycle={cycle} open={deleteOpen} onClose={() => setDeleteOpen(false)} />
+      {deleteOpen && <DeleteCycleDialog cycle={cycle} open onClose={() => setDeleteOpen(false)} />}
     </span>
   );
 }
@@ -402,6 +402,7 @@ function DeleteCycleDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const { error, run, dismiss } = useActionError();
 
   useEffect(() => {
@@ -409,7 +410,7 @@ function DeleteCycleDialog({
     let cancelled = false;
     setPreview(null);
     setLoadError(null);
-    dismiss();
+    if (previewRevision === 0) dismiss();
     setLoading(true);
     getCycleDeletionPreview(cycle.id).then(
       (p) => {
@@ -426,12 +427,22 @@ function DeleteCycleDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, cycle.id, dismiss]);
+  }, [open, cycle.id, dismiss, previewRevision]);
 
   const onDelete = async () => {
     if (!preview || preview.guard_code || deleting) return;
     setDeleting(true);
-    const ok = await run(async () => { await deletePlanningCycle(cycle.id); return true; });
+    const ok = await run(async () => {
+      try { await deletePlanningCycle(cycle.id, preview.confirmation_token); }
+      catch (failure) {
+        if (typeof failure === "object" && failure !== null && "code" in failure && failure.code === "deletion_impact_changed") {
+          setPreview(null);
+          setPreviewRevision((revision) => revision + 1);
+        }
+        throw failure;
+      }
+      return true;
+    });
     setDeleting(false);
     if (ok) {
       invalidateCycles(qc);
@@ -444,7 +455,7 @@ function DeleteCycleDialog({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!deleting) onClose(); }}
       title={t("cycle.deleteTitle", { title: cycle.title || cycleTypeName(cycle.type, t) })}
       footer={
         <>
@@ -490,14 +501,11 @@ function DeleteCycleDialog({
               {t("cycle.tasks", { count: preview.tasks })}
             </li>
             <li>
-              {t("cycle.nestedCycles", { count: preview.descendant_cycles })}
+              {t("cycle.nestedPlans", { count: preview.descendant_cycles - preview.total_focus_blocks })}
             </li>
-            {preview.started_sessions > 0 && (
-              <li>
-                {t("cycle.startedFocus", { count: preview.started_sessions })}
-              </li>
-            )}
+            <li>{t("cycle.deletedFocus", { count: preview.total_focus_blocks })}</li>
           </ul>
+          <p className="mt-1 text-caption text-hint">{t("cycle.deleteRecursiveNote")}</p>
           </>}
         </div>
       )}

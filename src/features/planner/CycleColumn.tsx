@@ -5,9 +5,12 @@
  * 的编辑能力在 FocusArea 的 session 卡片上。
  */
 import { useQuery } from "@tanstack/react-query";
-import { type Cycle, lifecycleOf, listSessions } from "../../lib/ipc";
+import { useRef, useState } from "react";
+import { type Cycle, type ProgressCheck, lifecycleOf, listSessions } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import {
+  addDaysISO,
+  daysBetween,
   formatDateRange,
   isoWeekNumber,
   remainingWeeks,
@@ -17,9 +20,12 @@ import {
 import { CycleOptionsMenu } from "./CycleOptionsMenu";
 import { FocusArea } from "./FocusArea";
 import { TaskList } from "./TaskList";
+import { deriveCustomTimeline } from "./timeline";
 import type { RelationView } from "./relations";
 import { PlanWithAI } from "../agent/PlanWithAI";
 import { useTranslation, formatDate, formatDuration } from "../../lib/i18n"
+import { Popover } from "../../ui";
+import { ScrollModeHint } from "./ScrollModeHint";
 
 export function CycleColumn({
   active = true,
@@ -70,18 +76,24 @@ export function CycleColumn({
       className={`plan-enter flex h-full shrink-0 overflow-hidden rounded-lg border border-frame bg-content ${isDay ? "w-[calc(var(--spacing-plan)+var(--spacing-panel))]" : "w-plan"}`}
     >
       <div className="plan-ai-scope flex min-h-0 w-plan shrink-0 flex-col">
-      <header className="shrink-0 border-b border-light px-6 pb-5 pt-5">
+      <header className="workspace-scroll-heading shrink-0 border-b border-light px-6 pb-5 pt-5">
         <div className="flex items-center justify-between gap-2">
           <span className="text-caption font-medium text-secondary">
             {badge}
             {state === "finished" && <span className="ml-2 text-hint">{t("cycle.ended")}</span>}
           </span>
-          <CycleOptionsMenu cycle={cycle} runningElsewhere={false} />
+          <div className="flex items-center gap-3">
+            <ScrollModeHint />
+            <CycleOptionsMenu cycle={cycle} runningElsewhere={false} />
+          </div>
         </div>
         <h3 className="mt-1 text-section-title font-semibold text-primary">{title}</h3>
-        {meta && <p className="mt-0.5 text-caption text-hint">{meta}</p>}
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+          {meta && <p className="text-caption text-hint">{meta}</p>}
+          {cycle.type === "month" && <ProgressCheckDisclosure cycle={cycle} t={t} />}
+        </div>
       </header>
-      <div data-plan-scroll className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+      <div data-plan-scroll data-workspace-scroll-pane className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
         <TaskList revealTask={revealTask?.cycleId === cycle.id ? revealTask : undefined} active={active} cycleId={cycle.id} cycleType={cycle.type} locked={cycle.finished} relations={relations} onReviewIssues={() => onReviewIssues?.(cycle.id)} />
         {onPlanWithAI && <PlanWithAI active={active} cycle={cycle} onPlan={onPlanWithAI} />}
       </div>
@@ -90,6 +102,85 @@ export function CycleColumn({
         <FocusArea day={cycle} sessions={sessions} runningSessionId={runningSessionId} />
       </div>}
     </section>
+  );
+}
+
+function progressCheckForCycle(cycle: Cycle): ProgressCheck | null {
+  if (cycle.type !== "month" || !cycle.starts_on || !cycle.ends_on) return null;
+  if (cycle.progress_check) return cycle.progress_check;
+  const days = daysBetween(cycle.ends_on, cycle.starts_on);
+  if (days === null || days <= 1) return null;
+  // Keep old null rows aligned with the backend's historical midpoint rule.
+  return { kind: "once", date: addDaysISO(cycle.starts_on, Math.floor(days / 2)) };
+}
+
+function ProgressCheckDisclosure({
+  cycle,
+  t,
+}: {
+  cycle: Cycle;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const check = progressCheckForCycle(cycle);
+  if (!check || !cycle.starts_on || !cycle.ends_on) return null;
+  const preview = deriveCustomTimeline(cycle.starts_on, cycle.ends_on, check);
+  const shortRule = check.kind === "once"
+    ? t("cycle.progressOnce", { date: formatDate(check.date, { month: "short", day: "numeric" }) })
+    : check.every_days % 7 === 0
+      ? t("cycle.progressRepeatWeeks", { count: check.every_days / 7 })
+      : t("cycle.progressRepeatDays", { count: check.every_days });
+  const rule = check.kind === "once"
+    ? t("cycle.progressOnce", { date: formatDate(check.date, { year: "numeric", month: "short", day: "numeric" }) })
+    : shortRule;
+  const close = () => setOpen(false);
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${t("cycle.progressCheck")}: ${shortRule}`}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex h-6 max-w-full cursor-pointer items-center gap-1 rounded-sm px-1.5 text-caption text-secondary transition-colors duration-150 hover:bg-hover hover:text-primary focus-visible:outline-2 focus-visible:outline-focus"
+      >
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.35" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.75" />
+          <path d="M8 4.8v3.5l2.2 1.35" strokeLinecap="round" />
+        </svg>
+        <span className="min-w-0 truncate">{shortRule}</span>
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.35" aria-hidden="true">
+          <path d="m5 6.5 3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <Popover open={open} onClose={close} anchorRef={anchorRef} role="dialog" label={t("cycle.progressCheck")} className="w-[300px] p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-body font-medium text-primary">{t("cycle.progressCheck")}</p>
+            <p className="mt-0.5 text-caption text-secondary">{rule}</p>
+          </div>
+          <button type="button" aria-label={t("cycle.dismiss")} onClick={close} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-hint hover:bg-hover hover:text-primary focus-visible:outline-2 focus-visible:outline-focus">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.35" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-caption text-secondary">
+          {preview.days !== null && <span>{t("duration.customDays", { count: preview.days })}</span>}
+          <span>{t("duration.checkCount", { count: preview.totalChecks })}</span>
+        </div>
+        {preview.totalChecks > 0 ? (
+          <>
+            <ul className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-caption text-hint">
+              {preview.checkDates.map((date) => <li key={date}>{formatDate(date, { month: "short", day: "numeric" })}</li>)}
+            </ul>
+            {preview.totalChecks > preview.checkDates.length && <p className="mt-1 text-caption text-hint">{t("cycle.progressMore", { count: preview.totalChecks - preview.checkDates.length })}</p>}
+          </>
+        ) : (
+          <p className="mt-2 text-caption text-hint">{t("cycle.progressNone")}</p>
+        )}
+      </Popover>
+    </>
   );
 }
 

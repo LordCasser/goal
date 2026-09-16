@@ -471,7 +471,7 @@ fn next_dated_sibling(conn: &Connection, cycle: &Cycle) -> AppResult<Option<Cycl
     conn.query_row(
         "SELECT id, title, type, parent_id, position, archived, started, finished, \
          started_at, finished_at, duration, focused_time, starts_on, ends_on, calendar_key, \
-         repeat_id, created_at \
+         repeat_id, progress_check, created_at \
          FROM cycles \
          WHERE type = ?1 AND (type IN ('week', 'day') OR parent_id IS ?2) AND starts_on IS NOT NULL AND starts_on > ?3 \
          ORDER BY starts_on ASC LIMIT 1",

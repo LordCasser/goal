@@ -85,6 +85,7 @@ pub fn run() {
             commands::tasks::add_task,
             commands::tasks::update_task,
             commands::tasks::patch_task,
+            commands::tasks::get_task_deletion_preview,
             commands::tasks::delete_task,
             commands::tasks::move_task,
             commands::tasks::reorder_tasks,

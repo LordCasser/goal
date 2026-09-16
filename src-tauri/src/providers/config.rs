@@ -54,14 +54,6 @@ pub enum OutputType {
     Text,
 }
 
-/// A non-sensitive custom header sent with every request to this provider
-/// (e.g. gateway routing hints). Never used for credentials.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtraHeader {
-    pub name: String,
-    pub value: String,
-}
-
 /// One model of one provider, with user-declared capability metadata
 /// (design D1). Sampling needs `model_id` only; the rest informs compaction
 /// decisions and explicit capability downgrades in the agent layer.
@@ -99,7 +91,8 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub api_format: ApiFormat,
     #[serde(default)]
-    pub extra_headers: Vec<ExtraHeader>,
+    /// Names only. Values live in the provider header credential.
+    pub extra_headers: Vec<String>,
     pub models: Vec<ModelConfig>,
     /// Unix epoch milliseconds.
     pub created_at: i64,
@@ -435,14 +428,7 @@ pub(crate) fn validate(provider: &ProviderConfig) -> AppResult<()> {
             ));
         }
     }
-    for header in &provider.extra_headers {
-        if !is_valid_header_name(&header.name) {
-            return Err(AppError::validation(
-                "invalid_header_name",
-                "extra header names must be valid HTTP header names",
-            ));
-        }
-    }
+    super::headers::normalize_names(&provider.extra_headers)?;
     Ok(())
 }
 
@@ -460,32 +446,6 @@ fn is_http_base_url(url: &str) -> bool {
         }
         None => false,
     }
-}
-
-/// RFC 7230 `token` (a non-empty `tchar` run) — enough to reject header
-/// injection through names containing spaces, colons or non-ASCII bytes.
-fn is_valid_header_name(name: &str) -> bool {
-    let is_tchar = |b: u8| {
-        b.is_ascii_alphanumeric()
-            || matches!(
-                b,
-                b'!' | b'#'
-                    | b'$'
-                    | b'%'
-                    | b'&'
-                    | b'\''
-                    | b'*'
-                    | b'+'
-                    | b'-'
-                    | b'.'
-                    | b'^'
-                    | b'_'
-                    | b'`'
-                    | b'|'
-                    | b'~'
-            )
-    };
-    !name.is_empty() && name.bytes().all(is_tchar)
 }
 
 fn now_ms() -> i64 {
@@ -708,18 +668,12 @@ mod tests {
         let store = ProviderStore::load(dir.path()).expect("load");
         for name in ["", "Bad Header", "X-Header:", "høsted"] {
             let mut provider = sample_provider();
-            provider.extra_headers = vec![ExtraHeader {
-                name: name.into(),
-                value: "1".into(),
-            }];
+            provider.extra_headers = vec![name.into()];
             assert_rejected(store.add(provider), "invalid_header_name");
         }
         // A legal token name still passes.
         let mut provider = sample_provider();
-        provider.extra_headers = vec![ExtraHeader {
-            name: "X-Request-Source".into(),
-            value: "planner".into(),
-        }];
+        provider.extra_headers = vec!["x-request-source".into()];
         store.add(provider).expect("valid header name");
     }
 

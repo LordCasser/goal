@@ -47,6 +47,8 @@ function preview(cycleId: string, guard_code: string | null = null): CycleDeleti
     descendant_cycles: 0,
     tasks: 0,
     started_sessions: 0,
+    total_focus_blocks: 0,
+    confirmation_token: "impact-1",
   };
 }
 
@@ -85,7 +87,7 @@ describe("CycleOptionsMenu deletion", () => {
 
     fireEvent.click(confirm);
 
-    await waitFor(() => expect(mocks.deletePlanningCycle).toHaveBeenCalledWith(target.id));
+    await waitFor(() => expect(mocks.deletePlanningCycle).toHaveBeenCalledWith(target.id, "impact-1"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["planner-state"] });
   });
@@ -133,5 +135,22 @@ describe("CycleOptionsMenu deletion", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(mocks.deletePlanningCycle).not.toHaveBeenCalled();
+  });
+
+  it("lists focus blocks separately and reloads changed impact before another confirmation", async () => {
+    const target = cycle("week", { id: "week-preview" });
+    mocks.getCycleDeletionPreview.mockResolvedValueOnce({ ...preview(target.id), descendant_cycles: 4, total_focus_blocks: 3, tasks: 7 })
+      .mockResolvedValue({ ...preview(target.id), descendant_cycles: 5, total_focus_blocks: 4, tasks: 8, confirmation_token: "impact-2" });
+    mocks.deletePlanningCycle.mockRejectedValueOnce({ code: "deletion_impact_changed" });
+    mount(target);
+    await openDelete(target);
+    await screen.findByText("3 focus blocks");
+    expect(screen.getByText("1 nested plan")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete week plan" }));
+    await screen.findByText("4 focus blocks");
+    expect(mocks.deletePlanningCycle).toHaveBeenCalledTimes(1);
+    expect((await screen.findByRole("alert")).textContent).toContain("Review the updated impact");
+    fireEvent.click(screen.getByRole("button", { name: "Delete week plan" }));
+    await waitFor(() => expect(mocks.deletePlanningCycle).toHaveBeenLastCalledWith(target.id, "impact-2"));
   });
 });

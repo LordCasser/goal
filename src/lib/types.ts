@@ -20,6 +20,8 @@ export type CycleType = "session" | "day" | "week" | "month";
 /** `domain::cycle::LATER_CYCLE_ID` — id of the permanent Do Later container. */
 export const LATER_CYCLE_ID = "later";
 
+export type ProgressCheck = { kind: "once"; date: string } | { kind: "repeat"; every_days: number };
+
 /** One row of `cycles`, as it travels across IPC (`domain::cycle::Cycle`). */
 export interface Cycle {
   id: string;
@@ -48,6 +50,8 @@ export interface Cycle {
   calendar_key: string | null;
   /** Template this session was generated from; cleared, never cascaded. */
   repeat_id: string | null;
+  /** Long-term checkpoint policy; absent old cycles use their midpoint. */
+  progress_check?: ProgressCheck | null;
   /** Milliseconds since the Unix epoch. */
   created_at: number;
 }
@@ -135,6 +139,10 @@ export interface CreateCycleArgs {
   parent_id?: string | null;
   /** Long-term only: 1, 3 or 6 product months (28 days each). */
   duration_months?: number | null;
+  /** Explicit long-term bounds, mutually exclusive with duration_months. */
+  starts_on?: string | null;
+  ends_on?: string | null;
+  progress_check?: ProgressCheck | null;
   /** Optional; dated cycles derive a title from their bounds when absent. */
   title?: string | null;
   /** Day cycles: `YYYY-MM-DD`. Defaults to today (local). */
@@ -159,6 +167,14 @@ export interface CycleDeletionPreview {
   descendant_cycles: number;
   tasks: number;
   started_sessions: number;
+  total_focus_blocks: number;
+  confirmation_token: string;
+}
+
+export interface TaskDeletionPreview {
+  task_id: string;
+  descendant_tasks: number;
+  confirmation_token: string;
 }
 
 /** `service::tasks::AddTaskArgs`. */
@@ -274,12 +290,6 @@ export type InputType = "text" | "image" | "video" | "pdf";
 /** `providers::config::OutputType` — text is the only variant today. */
 export type OutputType = "text";
 
-/** `providers::config::ExtraHeader` — non-sensitive custom header, never credentials. */
-export interface ExtraHeader {
-  name: string;
-  value: string;
-}
-
 /** `providers::config::ModelConfig` — user-declared capability metadata. */
 export interface ModelConfig {
   /** Identifier sent to the API (e.g. `llama3`, `claude-sonnet-4`). */
@@ -302,7 +312,8 @@ export interface ProviderConfig {
   /** Scheme included; may carry a path prefix (e.g. `https://host/v1`). */
   base_url: string;
   api_format: ApiFormat;
-  extra_headers: ExtraHeader[];
+  /** Lowercase custom header names; values stay in the system credential store. */
+  extra_headers: string[];
   models: ModelConfig[];
   /** Unix epoch milliseconds. */
   created_at: number;

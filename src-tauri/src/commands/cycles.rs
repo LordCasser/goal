@@ -64,8 +64,9 @@ pub fn delete_planning_cycle(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
     cycle_id: String,
+    confirmation_token: Option<String>,
 ) -> AppResult<()> {
-    let mutation = cycles::delete_cycle(&db, &cycle_id)?;
+    let mutation = cycles::delete_cycle_confirmed(&db, &cycle_id, confirmation_token.as_deref())?;
     emit_mutation(&app, &mutation);
     Ok(())
 }

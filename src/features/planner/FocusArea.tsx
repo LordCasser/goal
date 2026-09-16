@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { ScrollModeHint } from "./ScrollModeHint";
 import { Button, Input, ProgressDot } from "../../ui";
 import { addSession, finishCycle, startCycle, type Cycle } from "../../lib/ipc";
 import { formatClock } from "./dates";
@@ -68,9 +69,10 @@ export function FocusArea({
 
   return (
     <section aria-label={t("focus.blocks")} className="flex h-full min-h-0 flex-col">
-      <header className="shrink-0 border-b border-light px-6 pb-5 pt-5">
+      <header className="workspace-scroll-heading shrink-0 border-b border-light px-6 pb-5 pt-5">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-section-title font-semibold text-primary">{t("focus.blocks")}</h3>
+          <h3 className="flex-1 text-section-title font-semibold text-primary">{t("focus.blocks")}</h3>
+          <ScrollModeHint />
           {!locked && <Button size="icon" variant="ghost" aria-label={t("focus.add")} title={t("focus.add")} onClick={() => setAdding(true)}>
             <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M8 3v10M3 8h10" strokeLinecap="round" /></svg>
           </Button>}
@@ -79,7 +81,7 @@ export function FocusArea({
           {t("focus.focusedPlanned", { focused: formatLocalizedDuration(day.focused_time), planned: formatLocalizedDuration(sorted.reduce((sum, session) => sum + (session.duration ?? 0), 0)) })}
         </p>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+      <div data-workspace-scroll-pane className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
       {sorted.length === 0 && !adding && (
         <div className="rounded-lg border border-light bg-content px-5 py-6">
           <svg className="mb-4 h-7 w-7 text-hint" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="2" /><path d="M4 3h16M4 21h16" strokeLinecap="round" /></svg>

@@ -46,6 +46,14 @@ impl CycleType {
     }
 }
 
+/// A planning checkpoint, kept as a schedule instead of generated task rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProgressCheck {
+    Once { date: String },
+    Repeat { every_days: i64 },
+}
+
 /// One row of `cycles`, as it travels across IPC.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Cycle {
@@ -71,6 +79,8 @@ pub struct Cycle {
     /// Template this session was generated from; cleared when the template is
     /// removed (unlink, never cascade).
     pub repeat_id: Option<String>,
+    #[serde(default)]
+    pub progress_check: Option<ProgressCheck>,
     pub created_at: i64,
 }
 
@@ -109,7 +119,7 @@ pub const WEEK_DURATION_MS: i64 = MS_PER_WEEK;
 pub const DAY_DURATION_MS: i64 = MS_PER_DAY;
 
 /// Whether `duration_ms` is one of the three permitted long-term durations.
-pub fn is_valid_long_term_duration(duration_ms: i64) -> bool {
+pub fn is_preset_long_term_duration(duration_ms: i64) -> bool {
     LONG_TERM_DURATIONS_MONTHS
         .iter()
         .any(|m| long_term_duration_ms(*m) == duration_ms)
@@ -117,8 +127,8 @@ pub fn is_valid_long_term_duration(duration_ms: i64) -> bool {
 
 /// Whether `duration_ms` is a whole number of weeks.
 ///
-/// Non-whole-week durations are rejected so that remaining-time readouts
-/// ("11 weeks left") stay integral.
+/// Preset durations use whole weeks; custom long-term bounds may also
+/// describe a non-whole-week number of days.
 pub fn is_whole_weeks(duration_ms: i64) -> bool {
     duration_ms > 0 && duration_ms % MS_PER_WEEK == 0
 }
@@ -200,12 +210,12 @@ mod tests {
         assert_eq!(long_term_duration_ms(1), 2_419_200_000);
         assert_eq!(long_term_duration_ms(3), 7_257_600_000);
         assert_eq!(long_term_duration_ms(6), 14_515_200_000);
-        assert!(is_valid_long_term_duration(2_419_200_000));
-        assert!(is_valid_long_term_duration(7_257_600_000));
-        assert!(is_valid_long_term_duration(14_515_200_000));
+        assert!(is_preset_long_term_duration(2_419_200_000));
+        assert!(is_preset_long_term_duration(7_257_600_000));
+        assert!(is_preset_long_term_duration(14_515_200_000));
         // 3 calendar months (91 days) is not a permitted duration.
-        assert!(!is_valid_long_term_duration(91 * MS_PER_DAY));
-        assert!(!is_valid_long_term_duration(0));
+        assert!(!is_preset_long_term_duration(91 * MS_PER_DAY));
+        assert!(!is_preset_long_term_duration(0));
     }
 
     #[test]

@@ -46,6 +46,7 @@ impl RealProvider {
             api_format: sampling_api_format(self.resolved.config.api_format),
             model: self.resolved.model.model_id.clone(),
             api_key: self.resolved.api_key.clone(),
+            extra_headers: self.resolved.extra_headers.clone(),
             messages,
             tools: tool_specs,
             max_tokens: max_tokens.or(Some(self.resolved.model.max_output_tokens)),
@@ -119,6 +120,7 @@ fn build_agent_request(
         api_format: sampling_api_format(resolved.config.api_format),
         model: resolved.model.model_id.clone(),
         api_key: resolved.api_key.clone(),
+        extra_headers: resolved.extra_headers.clone(),
         messages,
         tools: tool_specs,
         max_tokens: req.max_tokens.or(Some(resolved.model.max_output_tokens)),
@@ -332,6 +334,7 @@ mod tests {
             },
             model,
             api_key: None,
+            extra_headers: vec![],
             tools_supported,
         }
     }

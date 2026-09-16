@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, VecDeque};
 use serde_json::{json, Value};
 
 use super::client::{
-    emit_finished, endpoint, sanitize_message, PreparedRequest, ProtocolDecoder, ToolCallBuffer,
+    emit_finished, endpoint, sanitize_message_with_secrets, PreparedRequest, ProtocolDecoder,
+    ToolCallBuffer,
 };
 use super::sse::{SseEvent, SseParser};
 use super::types::{SamplingError, SamplingEvent, SamplingRequest, StopReason};
@@ -61,7 +62,7 @@ pub(crate) fn prepare(request: &SamplingRequest) -> Result<PreparedRequest, Samp
         body,
         decoder: Box::new(Decoder {
             parser: SseParser::new(),
-            api_key: request.api_key.clone(),
+            secrets: request.redaction_secrets(),
             usage_input: None,
             usage_output: None,
             stop_reason: None,
@@ -75,7 +76,7 @@ pub(crate) fn prepare(request: &SamplingRequest) -> Result<PreparedRequest, Samp
 struct Decoder {
     parser: SseParser,
     /// Kept only to scrub server-echoed secrets out of error messages.
-    api_key: Option<String>,
+    secrets: Vec<String>,
     usage_input: Option<u64>,
     usage_output: Option<u64>,
     stop_reason: Option<StopReason>,
@@ -145,7 +146,7 @@ impl Decoder {
                     .pointer("/error/message")
                     .and_then(Value::as_str)
                     .unwrap_or("provider streamed an error event");
-                let sanitized = sanitize_message(message, self.api_key.as_deref());
+                let sanitized = sanitize_message_with_secrets(message, &self.secrets);
                 self.fail(out, sanitized);
             }
             // `ping`, `content_block_stop` and future event kinds carry
@@ -289,6 +290,7 @@ mod tests {
             api_format: crate::sampling::types::ApiFormat::AnthropicMessages,
             model: "claude-3".into(),
             api_key: Some("secret-key".into()),
+            extra_headers: vec![],
             messages: vec![],
             tools: vec![],
             max_tokens: None,

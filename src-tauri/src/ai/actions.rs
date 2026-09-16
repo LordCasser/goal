@@ -4,6 +4,7 @@ use crate::providers::service::AiSettingsState;
 use crate::{
     ai::prioritization,
     db::Db,
+    domain::cycle::ProgressCheck,
     error::{AppError, AppResult},
     repository as repo, service,
 };
@@ -15,10 +16,20 @@ use serde_json::{json, Value};
 pub enum CycleAction {
     Create {
         cycle_type: String,
+        #[serde(default)]
         date: Option<String>,
+        #[serde(default)]
         title: Option<String>,
+        #[serde(default)]
         duration_months: Option<i64>,
+        #[serde(default)]
         parent_id: Option<String>,
+        #[serde(default)]
+        starts_on: Option<String>,
+        #[serde(default)]
+        ends_on: Option<String>,
+        #[serde(default)]
+        progress_check: Option<ProgressCheck>,
     },
     Start {
         cycle_id: String,
@@ -333,16 +344,13 @@ impl Action {
                 cycle_type,
                 duration_months,
                 date,
+                starts_on,
+                ends_on,
+                progress_check,
                 ..
             }) => {
                 if !["month", "week", "day"].contains(&cycle_type.as_str()) {
                     return Err(invalid("cycle_type must be month, week or day"));
-                }
-                if cycle_type == "month" && !duration_months.is_some_and(|m| [1, 3, 6].contains(&m))
-                {
-                    return Err(invalid(
-                        "Long-term duration must be 1, 3 or 6 product months",
-                    ));
                 }
                 if cycle_type != "day" && date.is_some() {
                     return Err(invalid("Only day creation accepts date; weekly/long-term containers start from the current local date"));
@@ -350,9 +358,72 @@ impl Action {
                 if cycle_type != "month" && duration_months.is_some() {
                     return Err(invalid("duration_months applies only to long-term cycles"));
                 }
+                if cycle_type != "month"
+                    && (starts_on.is_some() || ends_on.is_some() || progress_check.is_some())
+                {
+                    return Err(invalid(
+                        "Custom bounds and progress checks apply only to long-term cycles",
+                    ));
+                }
+                let parse_date = |value: &str| {
+                    crate::domain::calendar::parse_date(value)
+                        .filter(|date| crate::domain::calendar::format_date(*date) == value)
+                };
                 if let Some(date) = date {
-                    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-                        .map_err(|_| invalid("Date must be YYYY-MM-DD"))?;
+                    if parse_date(date).is_none() {
+                        return Err(invalid("Date must be YYYY-MM-DD"));
+                    }
+                }
+                let custom_bounds = starts_on.is_some() || ends_on.is_some();
+                if cycle_type == "month" {
+                    if custom_bounds {
+                        let (Some(start), Some(end)) = (starts_on.as_deref(), ends_on.as_deref())
+                        else {
+                            return Err(invalid(
+                                "Custom long-term cycles require both starts_on and ends_on",
+                            ));
+                        };
+                        let start_date = parse_date(start)
+                            .ok_or_else(|| invalid("starts_on must be YYYY-MM-DD"))?;
+                        let end_date =
+                            parse_date(end).ok_or_else(|| invalid("ends_on must be YYYY-MM-DD"))?;
+                        if end_date <= start_date {
+                            return Err(invalid("ends_on must be later than starts_on"));
+                        }
+                        if duration_months.is_some() {
+                            return Err(invalid(
+                                "Custom long-term bounds cannot be combined with duration_months",
+                            ));
+                        }
+                    } else if !duration_months.is_some_and(|m| [1, 3, 6].contains(&m)) {
+                        return Err(invalid(
+                            "Long-term duration must be 1, 3 or 6 product months, or use custom bounds",
+                        ));
+                    }
+                    if let Some(check) = progress_check {
+                        match check {
+                            ProgressCheck::Once { date } => {
+                                let check_date = parse_date(date).ok_or_else(|| {
+                                    invalid("Progress check date must be YYYY-MM-DD")
+                                })?;
+                                if let (Some(start), Some(end)) =
+                                    (starts_on.as_deref(), ends_on.as_deref())
+                                {
+                                    let start = parse_date(start).expect("validated custom start");
+                                    let end = parse_date(end).expect("validated custom end");
+                                    if check_date < start || check_date >= end {
+                                        return Err(invalid(
+                                            "Progress check date must be within the cycle",
+                                        ));
+                                    }
+                                }
+                            }
+                            ProgressCheck::Repeat { every_days } if *every_days <= 0 => {
+                                return Err(invalid("Progress check interval must be positive"));
+                            }
+                            ProgressCheck::Repeat { .. } => {}
+                        }
+                    }
                 }
             }
             Self::Prioritization(PrioritizationAction::Update { cycle_id, .. })
@@ -423,9 +494,11 @@ impl Action {
                 title,
                 duration_months,
                 parent_id,
-            }) => Ok((
-                "backend-actions:cycle.create".into(),
-                vec![
+                starts_on,
+                ends_on,
+                progress_check,
+            }) => Ok(("backend-actions:cycle.create".into(), {
+                let mut details = vec![
                     m(
                         "cycle.create.type",
                         json!({
@@ -447,8 +520,22 @@ impl Action {
                             "parent": parent_id.as_deref().map(&cycle).transpose()?.map(Value::String).unwrap_or_else(|| serde_json::to_value(m("cycle.create.no_parent", json!({}))).unwrap()),
                         }),
                     ),
-                ],
-            )),
+                ];
+                if let (Some(start), Some(end)) = (starts_on, ends_on) {
+                    details.push(m("cycle.create.range", json!({"start": start, "end": end})));
+                }
+                if let Some(check) = progress_check {
+                    details.push(match check {
+                        ProgressCheck::Once { date } => {
+                            m("cycle.create.check.once", json!({"date": date}))
+                        }
+                        ProgressCheck::Repeat { every_days } => {
+                            m("cycle.create.check.repeat", json!({"days": every_days}))
+                        }
+                    });
+                }
+                details
+            })),
             Self::Cycle(change) => {
                 let (summary, cycle_id) = match change {
                     CycleAction::Start { cycle_id } => ("backend-actions:cycle.start", cycle_id),
@@ -470,7 +557,13 @@ impl Action {
                     }
                     details.push(m(
                         "cycle.delete.impact",
-                        json!({"cycles": impact.descendant_cycles, "tasks": impact.tasks}),
+                        json!({
+                            "cycles": impact.descendant_cycles,
+                            "tasks": impact.tasks,
+                            "focus_blocks": impact.total_focus_blocks,
+                            // Included in approval freshness, not interpolated into UI text.
+                            "impact_token": impact.confirmation_token,
+                        }),
                     ));
                 }
                 Ok((summary.into(), details))
@@ -999,6 +1092,9 @@ pub async fn apply(db: &Db, ai: &AiSettingsState, action: &Action) -> AppResult<
                 title,
                 duration_months,
                 parent_id,
+                starts_on,
+                ends_on,
+                progress_check,
             } => {
                 service::cycles::create_planning_cycle(
                     db,
@@ -1008,6 +1104,10 @@ pub async fn apply(db: &Db, ai: &AiSettingsState, action: &Action) -> AppResult<
                         title: title.clone(),
                         duration_months: *duration_months,
                         parent_id: parent_id.clone(),
+                        starts_on: starts_on.clone(),
+                        ends_on: ends_on.clone(),
+                        progress_check: progress_check.clone(),
+                        ..Default::default()
                     },
                     crate::domain::calendar::today_local(),
                     now,
@@ -1355,6 +1455,60 @@ mod tests {
         approve(&db, &ai, &cycle, action).await;
         assert_eq!(read_settings(&db).unwrap()["coach_idle_minutes"], 30);
         assert!(list(&db, &cycle).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deletion_approval_detects_changed_content_even_when_counts_match() {
+        let (_dir, db, _ai, source_cycle) = setup();
+        let cycle = service::cycles::create_planning_cycle(&db, &service::cycles::CreateCycleArgs {
+            cycle_type: "month".into(),
+            duration_months: Some(1),
+            ..Default::default()
+        }, crate::domain::calendar::today_local(), 1).unwrap().value;
+        let task = service::tasks::add_task(&db, &service::tasks::AddTaskArgs {
+            cycle_id: cycle.id.clone(), title: "Original".into(), ..Default::default()
+        }, 1).unwrap().value;
+        let staged = stage(&db, &source_cycle, Action::Cycle(CycleAction::Delete { cycle_id: cycle.id }), "Delete the plan").unwrap();
+        db.pool().get().unwrap().execute("UPDATE tasks SET title='Revised' WHERE id=?1", [task.id]).unwrap();
+        let error = claim(&db, &source_cycle, staged["action_id"].as_str().unwrap(), true).unwrap_err();
+        assert!(matches!(error, AppError::Conflict { code, .. } if code == "action_changed"));
+    }
+
+    #[tokio::test]
+    async fn custom_long_term_cycle_action_stages_and_applies_bounds_and_progress() {
+        let (_dir, db, ai, source_cycle) = setup();
+        let action = Action::Cycle(CycleAction::Create {
+            cycle_type: "month".into(),
+            date: None,
+            title: Some("Launch window".into()),
+            duration_months: None,
+            parent_id: None,
+            starts_on: Some("2026-10-01".into()),
+            ends_on: Some("2026-10-11".into()),
+            progress_check: Some(ProgressCheck::Repeat { every_days: 2 }),
+        });
+        let staged = stage(&db, &source_cycle, action.clone(), "设定发布周期").unwrap();
+        let keys: Vec<&str> = staged["details"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|detail| detail["key"].as_str())
+            .collect();
+        assert!(keys.contains(&"backend-actions:cycle.create.range"));
+        assert!(keys.contains(&"backend-actions:cycle.create.check.repeat"));
+
+        approve(&db, &ai, &source_cycle, action).await;
+        let cycle = repo::cycles::get_by_calendar_key(
+            &db.pool().get().unwrap(),
+            "long-term:2026-10-01:2026-10-11",
+        )
+        .unwrap()
+        .expect("approved action creates the requested cycle");
+        assert_eq!(cycle.title, "Launch window");
+        assert_eq!(
+            cycle.progress_check,
+            Some(ProgressCheck::Repeat { every_days: 2 })
+        );
     }
 
     #[tokio::test]

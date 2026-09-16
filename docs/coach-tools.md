@@ -23,7 +23,7 @@
 | | | `update_goal_breakdown` | `task_id`、结构化 `update`、`rationale` |
 | | | `update_prioritization_breakdown` | 五类优先级的结构化 `update`、`rationale`；只在 prioritization 技能提供 |
 | | | `start_review` | 读取当前周期复盘事实并进入复盘；只在 cycle-review 技能提供 |
-| 周期与安排 | 4 | `propose_cycle` | `change.operation=create/start/finish/delete/copy_uncompleted`，各分支有独立参数 |
+| 周期与安排 | 4 | `propose_cycle` | `change.operation=create/start/finish/delete/copy_uncompleted`，各分支有独立参数；长期周期可选 1/3/6 个产品月或自定义 `starts_on` + `ends_on`，并可设置一次或按天重复的 `progress_check` |
 | | | `propose_focus_block` | `create/update/schedule/reorder`；使用 day/session ID；时长为分钟；`schedule.starts_at` 为 RFC 3339 时间，传 `null` 移回未安排并保留时长 |
 | | | `propose_task_organization` | `move/link/color/reorder`；保留任务 ID；归属、颜色可显式置 null |
 | | | `propose_day_move` | `cycle_id`、`target_date`、`strategy`；null 遇占用停止，merge/swap 必须有明确意图 |
@@ -66,7 +66,7 @@ Provider 的增删、endpoint、请求头和密钥编辑继续使用设置页；
 
 先查再写，使用真实 ID；标题和列表位置不是身份。省略可选修改字段表示保留，显式 null 只用于允许清除的字段。`completed` 是期望状态，不是 toggle；`subtasks` 是完整替换，空数组才表示清空。列表查询最多返回 100 条并明确 `truncated`，日历查询有日期上限。
 
-日期采用 YYYY-MM-DD；提醒、专注排期采用带明确时区的 RFC3339，避免秒 / 毫秒和时区混淆。专注块时长使用整数分钟。长期周期沿用现有产品的 1 / 3 / 6 × 28 天承诺；创建周 / 长期容器从当前本地日期开始，不能通过工具伪造其他起始日。
+日期采用 YYYY-MM-DD；提醒、专注排期采用带明确时区的 RFC3339，避免秒 / 毫秒和时区混淆。专注块时长使用整数分钟。长期周期可以使用现有产品的 1 / 3 / 6 × 28 天承诺，也可以在 `create` 中同时传入 `starts_on` 和 `ends_on` 建立任意日期范围；两种方式不能与 `duration_months` 混用。`progress_check` 使用 `{kind:"once",date}` 或 `{kind:"repeat",every_days}`，日期必须落在长期周期的开始日（含）与结束日（不含）之间，重复间隔为正整数。创建周 / 长期容器默认从当前本地日期开始；自定义长期范围只有显式传入日期时才改变起始日。
 
 ## 确认与聊天回执
 

@@ -43,6 +43,47 @@ pub fn parse_date(s: &str) -> Option<NaiveDate> {
     chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok()
 }
 
+/// Explicit long-term bounds are date identities, never timestamps.
+pub fn custom_long_term_bounds(
+    start: &str,
+    end: &str,
+) -> crate::error::AppResult<(NaiveDate, NaiveDate)> {
+    let parse =
+        |raw: &str| parse_date(raw).filter(|date| raw.len() == 10 && format_date(*date) == raw);
+    let starts_on = parse(start).ok_or_else(|| {
+        crate::error::AppError::validation("invalid_date", "Choose a valid start date.")
+    })?;
+    let ends_on = parse(end).ok_or_else(|| {
+        crate::error::AppError::validation("invalid_date", "Choose a valid end date.")
+    })?;
+    if ends_on <= starts_on {
+        return Err(crate::error::AppError::validation(
+            "invalid_cycle_range",
+            "The end date must be later than the start date.",
+        ));
+    }
+    Ok((starts_on, ends_on))
+}
+
+pub fn validate_progress_check(
+    check: &super::cycle::ProgressCheck,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> crate::error::AppResult<()> {
+    let valid = match check {
+        super::cycle::ProgressCheck::Once { date } => parse_date(date)
+            .is_some_and(|d| date.len() == 10 && format_date(d) == *date && d >= start && d < end),
+        super::cycle::ProgressCheck::Repeat { every_days } => *every_days > 0,
+    };
+    if !valid {
+        return Err(crate::error::AppError::validation(
+            "invalid_progress_check",
+            "Choose a positive interval or a check date within the cycle, before its end.",
+        ));
+    }
+    Ok(())
+}
+
 pub fn add_days(date: NaiveDate, days: i64) -> NaiveDate {
     date + Duration::days(days)
 }

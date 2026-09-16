@@ -24,6 +24,8 @@ use super::{
 
 /// Key used across tests; never equals a real credential.
 const TEST_KEY: &str = "sk-replay-key-1";
+const EXTRA_SECRET: &str = "gateway-header-secret-1";
+const STREAM_SECRET: &str = "gateway-stream-secret-1";
 
 const FORMATS: [ApiFormat; 3] = [
     ApiFormat::AnthropicMessages,
@@ -40,12 +42,16 @@ const FORMATS: [ApiFormat; 3] = [
 enum Scenario {
     /// Reply 200 with a fixed SSE payload, dribbled in small chunks.
     Sse(&'static str),
+    /// Reply 200 with an SSE provider error event.
+    SseError(&'static str),
     /// Reply with this HTTP status and raw body (JSON error shapes).
     Error(StatusCode, String),
     /// Accept the connection but never answer.
     Hang,
     /// Send an SSE prefix, then stall forever (idle-timeout path).
     StallAfter(&'static str),
+    /// Reply with a redirect to another local server.
+    Redirect(String),
 }
 
 /// One captured request.
@@ -70,6 +76,7 @@ async fn handle(State(ctx): State<Ctx>, headers: HeaderMap, body: axum::body::By
     });
     match ctx.scenario {
         Scenario::Sse(payload) => sse_response(payload, Chunking::Dribble),
+        Scenario::SseError(payload) => sse_response(payload, Chunking::Dribble),
         Scenario::Error(status, body) => Response::builder()
             .status(status)
             .header("content-type", "application/json")
@@ -80,6 +87,11 @@ async fn handle(State(ctx): State<Ctx>, headers: HeaderMap, body: axum::body::By
             unreachable!()
         }
         Scenario::StallAfter(prefix) => sse_response(prefix, Chunking::Stall),
+        Scenario::Redirect(location) => Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header("location", location)
+            .body(Body::empty())
+            .unwrap(),
     }
 }
 
@@ -268,6 +280,28 @@ const RESPONSES_TOOL: &str = concat!(
     "\n",
 );
 
+fn streaming_error_fixture(format: ApiFormat) -> &'static str {
+    match format {
+        ApiFormat::AnthropicMessages => concat!(
+            "event: error\n",
+            "data: {\"type\":\"error\",\"error\":{\"message\":\"gateway rejected ",
+            "gateway-stream-secret-1",
+            "\"}}\n\n",
+        ),
+        ApiFormat::OpenaiChatCompletions => concat!(
+            "data: {\"error\":{\"message\":\"gateway rejected ",
+            "gateway-stream-secret-1",
+            "\"}}\n\n",
+        ),
+        ApiFormat::OpenaiResponses => concat!(
+            "event: error\n",
+            "data: {\"type\":\"error\",\"message\":\"gateway rejected ",
+            "gateway-stream-secret-1",
+            "\"}\n\n",
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -278,6 +312,7 @@ fn request(base: &str, format: ApiFormat) -> SamplingRequest {
         api_format: format,
         model: "replay-model".into(),
         api_key: Some(TEST_KEY.into()),
+        extra_headers: vec![],
         messages: vec![SamplingMessage {
             role: MessageRole::User,
             content: "hello".into(),
@@ -637,9 +672,122 @@ async fn no_key_sends_no_auth_headers_on_any_format() {
     }
 }
 
+#[tokio::test]
+async fn custom_headers_merge_and_override_defaults_for_all_formats() {
+    for format in FORMATS {
+        let (base, captured) = spawn(Scenario::Sse(text_fixture(format))).await;
+        let mut req = request(&base, format);
+        req.extra_headers = match format {
+            ApiFormat::AnthropicMessages => vec![
+                ("X-Gateway-Route".into(), EXTRA_SECRET.into()),
+                ("X-API-KEY".into(), "custom-anthropic-key".into()),
+                (
+                    "ANTHROPIC-VERSION".into(),
+                    "custom-anthropic-version".into(),
+                ),
+            ],
+            ApiFormat::OpenaiChatCompletions | ApiFormat::OpenaiResponses => vec![
+                ("X-Gateway-Route".into(), EXTRA_SECRET.into()),
+                ("Authorization".into(), "Bearer custom-authorization".into()),
+            ],
+        };
+        run(sample(req, Timeouts::default()).await.unwrap()).await;
+        let records = captured.lock().unwrap();
+        assert_eq!(header(&records, "x-gateway-route"), Some(EXTRA_SECRET));
+        match format {
+            ApiFormat::AnthropicMessages => {
+                assert_eq!(header(&records, "x-api-key"), Some("custom-anthropic-key"));
+                assert_eq!(
+                    header(&records, "anthropic-version"),
+                    Some("custom-anthropic-version")
+                );
+                assert_eq!(records[0].headers.get_all("x-api-key").iter().count(), 1);
+            }
+            ApiFormat::OpenaiChatCompletions | ApiFormat::OpenaiResponses => {
+                assert_eq!(
+                    header(&records, "authorization"),
+                    Some("Bearer custom-authorization")
+                );
+                assert_eq!(
+                    records[0].headers.get_all("authorization").iter().count(),
+                    1
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn invalid_custom_headers_are_rejected_before_network_for_all_formats() {
+    for format in FORMATS {
+        let (base, captured) = spawn(Scenario::Sse(text_fixture(format))).await;
+        let mut req = request(&base, format);
+        req.extra_headers = vec![("X-Gateway-Route".into(), "line\nbreak".into())];
+        let error = sample(req, Timeouts::default()).await.unwrap_err();
+        assert_eq!(
+            error,
+            SamplingError::InvalidRequest {
+                message: "invalid request headers".into()
+            }
+        );
+        assert!(captured.lock().unwrap().is_empty(), "{format:?}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Task 3.8 scenario 4: error classification (design D3)
 // ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn http_error_redacts_custom_header_values() {
+    for format in FORMATS {
+        let body = format!(r#"{{"error":{{"message":"gateway rejected {EXTRA_SECRET}"}}}}"#);
+        let (base, _) = spawn(Scenario::Error(StatusCode::BAD_REQUEST, body)).await;
+        let mut req = request(&base, format);
+        req.extra_headers = vec![("X-Gateway-Route".into(), EXTRA_SECRET.into())];
+        let error = sample(req, Timeouts::default()).await.unwrap_err();
+        let SamplingError::InvalidRequest { message } = error else {
+            panic!("expected InvalidRequest");
+        };
+        assert!(!message.contains(EXTRA_SECRET), "{format:?}: {message}");
+        assert!(message.contains("[REDACTED]"), "{format:?}: {message}");
+    }
+}
+
+#[tokio::test]
+async fn streaming_error_redacts_custom_header_values() {
+    for format in FORMATS {
+        let (base, _) = spawn(Scenario::SseError(streaming_error_fixture(format))).await;
+        let mut req = request(&base, format);
+        req.extra_headers = vec![("X-Gateway-Route".into(), STREAM_SECRET.into())];
+        let events = run(sample(req, Timeouts::default()).await.unwrap()).await;
+        let Some(Err(SamplingError::ProtocolError { message })) = events.first() else {
+            panic!("expected one streaming protocol error: {events:?}");
+        };
+        assert!(!message.contains(STREAM_SECRET), "{format:?}: {message}");
+        assert!(message.contains("[REDACTED]"), "{format:?}: {message}");
+    }
+}
+
+#[tokio::test]
+async fn redirects_do_not_forward_sampling_credentials() {
+    let (target, target_captured) = spawn(Scenario::Sse(text_fixture(
+        ApiFormat::OpenaiChatCompletions,
+    )))
+    .await;
+    let (base, _) = spawn(Scenario::Redirect(target)).await;
+    let error = sample(
+        request(&base, ApiFormat::OpenaiChatCompletions),
+        Timeouts::default(),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, SamplingError::InvalidRequest { .. }));
+    assert!(
+        target_captured.lock().unwrap().is_empty(),
+        "redirect target received a request"
+    );
+}
 
 #[tokio::test]
 async fn http_errors_classify_per_design_d3() {

@@ -25,13 +25,25 @@ pub fn row_to_cycle(row: &rusqlite::Row<'_>) -> rusqlite::Result<Cycle> {
         ends_on: row.get("ends_on")?,
         calendar_key: row.get("calendar_key")?,
         repeat_id: row.get("repeat_id")?,
+        progress_check: row
+            .get::<_, Option<String>>("progress_check")?
+            .map(|json| {
+                serde_json::from_str(&json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })
+            })
+            .transpose()?,
         created_at: row.get("created_at")?,
     })
 }
 
 const CYCLE_COLUMNS: &str = "id, title, type, parent_id, position, archived, started, finished, \
      started_at, finished_at, duration, focused_time, starts_on, ends_on, calendar_key, \
-     repeat_id, created_at";
+     repeat_id, progress_check, created_at";
 
 pub struct NewCycle {
     pub id: String,
