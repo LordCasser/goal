@@ -1,0 +1,3 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 menu Planning cycle options, Secondary Actions: Cancel
+	1 Delete

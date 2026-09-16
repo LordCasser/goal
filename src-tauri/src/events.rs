@@ -86,21 +86,18 @@ pub const AGENT_CONVERSATION_UPDATED: &str = "agent:conversation_updated";
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentConversationPayload {
     pub conversation_id: String,
-    pub cycle_id: String,
     pub revision: i64,
 }
 
 pub fn emit_agent_conversation_updated<R: Runtime>(
     app: &tauri::AppHandle<R>,
     conversation_id: &str,
-    cycle_id: &str,
     revision: i64,
 ) {
     let _ = app.emit(
         AGENT_CONVERSATION_UPDATED,
         AgentConversationPayload {
             conversation_id: conversation_id.to_string(),
-            cycle_id: cycle_id.to_string(),
             revision,
         },
     );

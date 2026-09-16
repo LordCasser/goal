@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState } from "../../ui";
-import { createPlanningCycle, ensureDay, getEditorWorkspace, getEditorWorkspacesByCycleIds, getPlannerState, getSettings, listSessions, LATER_CYCLE_ID, type Cycle } from "../../lib/ipc";
+import { createPlanningCycle, ensureDay, getEditorWorkspace, getEditorWorkspacesByCycleIds, getPlannerState, getSettings, listSessions, LATER_CYCLE_ID, type AgentPageContext, type Cycle } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import { isoWeekNumber, todayISO, weekdayName } from "./dates";
 import { invalidateCycles, useActionError } from "./actions";
@@ -120,7 +120,7 @@ export function useWorkspaceWheelRouting(
   }, [enabled, horizontalRef, rootRef]);
 }
 
-export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewIssues, onPlanWithAI, revealTask }: { revealTask?: {cycleId:string;taskId:string;requestId:number}; active?: boolean; onActiveCycleChange?: (id: string) => void; onReviewIssues?: (id: string) => void; onPlanWithAI?: (id: string) => void }) {
+export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageContextChange, onReviewIssues, onPlanWithAI, revealTask }: { revealTask?: {cycleId:string;taskId:string;requestId:number}; active?: boolean; onActiveCycleChange?: (id: string | null) => void; onPageContextChange?: (context: AgentPageContext) => void; onReviewIssues?: (id: string) => void; onPlanWithAI?: (id: string) => void }) {
   const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const { data: state, isLoading, isError } = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
@@ -146,6 +146,17 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
   const day = selectedDayDate ? (allDays.find((c) => c.starts_on === selectedDayDate) ?? null)
     : (days.find((c) => c.starts_on === today) ?? days[0] ?? null);
   const visibleDate = selectedDayDate ?? day?.starts_on ?? week?.starts_on ?? today;
+  useEffect(() => {
+    if (!active) return;
+    onPageContextChange?.({
+      view: "workspace",
+      long_term_cycle_id: month?.id ?? null,
+      week_cycle_id: week?.id ?? null,
+      day_cycle_id: day?.id ?? null,
+      week_starts_on: week?.starts_on ?? visibleWeekDate ?? null,
+      selected_date: visibleDate ?? null,
+    });
+  }, [active, day?.id, month?.id, onPageContextChange, visibleDate, visibleWeekDate, week?.id, week?.starts_on]);
   // Load into the same caches used by TaskList/FocusArea before replacing the
   // old panels. A fresh date must not first render as an empty task/focus list.
   const targetWorkspaces = useQueries({ queries: [week, day].filter((cycle): cycle is Cycle => cycle !== null).map((cycle) => ({
@@ -202,14 +213,14 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onReviewI
     setSelectedWeekDate(date);
     setSelectedDayDate(date);
     const target = weeks.find((cycle) => cycle.starts_on === date);
-    if (target) onActiveCycleChange?.(target.id);
+    onActiveCycleChange?.(target?.id ?? null);
   };
   const selectDate = (date: string) => {
     const owner = weekContainingDate(weeks, date, week?.id);
     setSelectedWeekDate(owner?.starts_on ?? weekStartForDate(date, weekStartDay));
     setSelectedDayDate(date);
     const target = allDays.find((cycle) => cycle.starts_on === date);
-    if (target || owner) onActiveCycleChange?.(target?.id ?? owner!.id);
+    onActiveCycleChange?.(target?.id ?? null);
   };
 
   // A diagnostic points to the real task in its own planning horizon.

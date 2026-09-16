@@ -8,7 +8,7 @@ import { commands, getEditorWorkspace, type PreviewSummary, type Task, type Task
 import { qk } from "../../lib/events";
 import { applyLocale } from "../../lib/i18n";
 
-const task: Task = { id: "t1", cycle_id: "day", parent_id: null, title: "Revised goal", completed: false, subtasks: [], position: 0, goal_breakdown: null, needs_refinement: null, needs_breakdown: null, root_color_key: null, copied_from_task_id: null, proposal: "upsert", created_at: 1 };
+const task: Task = { id: "t1", cycle_id: "day", later_plan_type: null, parent_id: null, title: "Revised goal", completed: false, subtasks: [], position: 0, goal_breakdown: null, needs_refinement: null, needs_breakdown: null, root_color_key: null, copied_from_task_id: null, proposal: "upsert", created_at: 1 };
 const original: TaskSnapshot = { ...task, original_exists: true, title: "Original goal" };
 let pending: PreviewSummary;
 let committed: Task[];
@@ -17,6 +17,7 @@ beforeEach(() => {
   pending = { cycle_id: "day", tasks: [{ ...task }], count: 1, deletion_impacts: {}, originals: { t1: original } };
   committed = [];
   invoke.mockReset().mockImplementation(async (cmd: string, args: { taskId?: string; approve?:boolean }) => {
+    if (cmd === "get_pending_task_cycles") return ["day"];
     if (cmd === commands.getPlannerState) return { cycles: [{ id: "day", title: "Tuesday plan", starts_on: "2026-09-15" }] };
     if (cmd === commands.getPreviewSummary) return pending;
     if (cmd === commands.getEditorWorkspace) return { tasks: committed };
@@ -36,7 +37,7 @@ function Plan() {
 }
 function mount(disabled = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><Plan /><PlanApprovalCard cycleId="day" disabled={disabled} /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><Plan /><PlanApprovalCard disabled={disabled} /></QueryClientProvider>);
 }
 
 it("reviews the exact change and applies it into the main plan without a text reply", async () => {
@@ -55,7 +56,7 @@ it("declining restores the original and does not call the model or keep endpoint
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "放弃：Revised goal" }));
   await waitFor(() => expect(screen.getByLabelText("Main plan").textContent).toBe("Original goal"));
-  expect(invoke).toHaveBeenCalledWith("resolve_coach_task_preview", { sourceCycleId:"day", taskId: "t1", approve:false });
+  expect(invoke).toHaveBeenCalledWith("resolve_coach_task_preview", { taskId: "t1", approve:false });
   expect(invoke.mock.calls.some(([cmd]) => cmd === commands.keepTaskPreview || cmd === commands.sendAgentMessage)).toBe(false);
 });
 

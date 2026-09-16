@@ -84,10 +84,15 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 /** `domain::proposal::ProposalKind`. */
 export type ProposalKind = "upsert" | "delete";
 
+/** The planning intent retained while a task lives in the Later container. */
+export type LaterPlanType = "month" | "week" | "day";
+
 /** `domain::task::Task` — goals, week items, daily tasks and subtasks alike. */
 export interface Task {
   id: string;
   cycle_id: string;
+  /** Later intent; null means a direct/legacy Later item (treated as month), and is always null outside Later. */
+  later_plan_type: LaterPlanType | null;
   parent_id: string | null;
   title: string;
   subtasks: Subtask[];
@@ -386,6 +391,16 @@ export interface MessageView {
   payload: MessagePayload;
 }
 
+/** Context of the visible planning surface sent with each Coach turn. */
+export interface AgentPageContext {
+  view: "workspace" | "calendar";
+  long_term_cycle_id: string | null;
+  week_cycle_id: string | null;
+  day_cycle_id: string | null;
+  week_starts_on: string | null;
+  selected_date: string | null;
+}
+
 /** Tagged payloads stored per message type (mirrors turn.rs MessagePayload). */
 export type MessagePayload =
   | { kind: "text"; text: string }
@@ -400,12 +415,12 @@ export type MessagePayload =
     }
   | { kind: "app_tool_result"; name: string; result: unknown };
 
-/** `ai::agent::turn::ConversationView` — one cycle's conversation. */
+/** `ai::agent::turn::ConversationView` — the global Coach conversation. */
 export interface ConversationView {
   expires_at: number | null;
   context_idle_minutes: number;
   id: string;
-  cycle_id: string;
+  active_turn_id: string | null;
   revision: number;
   active_skill: string | null;
   last_error: string | null;

@@ -6,7 +6,7 @@
  * 方式 mock——组件经由 lib/ipc 走真实包装，同时钉住线上的参数键。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { applyLocale } from "../../lib/i18n";
 
@@ -85,7 +85,7 @@ function conversationView(
     expires_at: null,
     context_idle_minutes: 15,
     id: "conv-1",
-    cycle_id: "c1",
+    active_turn_id: null,
     revision: 1,
     active_skill: null,
     last_error: null,
@@ -151,16 +151,14 @@ beforeEach(() => {
 });
 
 describe("AgentPanel", () => {
-  it("fetches the cycle's own conversation shell on mount", async () => {
+  it("fetches the global conversation shell on mount", async () => {
     mockBackend({
       conversation: conversationView([userMessage("帮我把目标拆细", 1)]),
     });
     renderPanel();
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith(commands.startAgentConversation, {
-        cycleId: "c1",
-      }),
+      expect(invokeMock).toHaveBeenCalledWith(commands.startAgentConversation),
     );
     expect(await screen.findByText("帮我把目标拆细")).toBeDefined();
   });
@@ -214,6 +212,7 @@ describe("AgentPanel", () => {
         cycleId: "c1",
         text: "先做周计划",
         focusedTaskId: null,
+        pageContext: null,
       }),
     );
   });
@@ -236,6 +235,7 @@ describe("AgentPanel", () => {
         cycleId: "c1",
         text: "先做周计划",
         focusedTaskId: null,
+        pageContext: null,
       }),
     );
   });
@@ -300,6 +300,7 @@ describe("AgentPanel", () => {
       cycleId: "c1",
       text: "帮我把目标拆细",
       focusedTaskId: null,
+      pageContext: null,
     });
   });
 
@@ -322,7 +323,7 @@ describe("AgentPanel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "开始规划" }));
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith(commands.startPlanning, { cycleId: "c1" }),
+      expect(invokeMock).toHaveBeenCalledWith(commands.startPlanning, { cycleId: "c1", pageContext: null }),
     );
   });
 
@@ -349,7 +350,7 @@ describe("AgentPanel", () => {
     expect(await screen.findByRole("table")).toBeDefined();
     expect(screen.getByRole("cell", { name: "Review" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /继续规划/ }));
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith(commands.sendAgentMessage, { cycleId: "c1", text: "继续规划", focusedTaskId: null }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith(commands.sendAgentMessage, { cycleId: "c1", text: "继续规划", focusedTaskId: null, pageContext: null }));
     expect(document.body.textContent).not.toContain("next_steps");
   });
 
@@ -361,7 +362,7 @@ it("automatically clears expired history using the backend deadline", async () =
     if (cmd !== commands.startAgentConversation) return Promise.resolve(null);
     reads += 1;
     return Promise.resolve(reads === 1
-      ? conversationView([modelTextMessage("Expiring context", 1)], { expires_at: Date.now() + 50 })
+      ? conversationView([modelTextMessage("Expiring context", 1)], { active_turn_id: "turn-1" })
       : conversationView([], { revision: 2 }));
   });
   renderPanel();
@@ -403,6 +404,55 @@ it("sends from the composer button and disables duplicate sends while pending", 
   finish(turnResult());
   await waitFor(() => expect((screen.getByLabelText("给助理发消息") as HTMLTextAreaElement).value).toBe(""));
   expect(screen.queryByRole("status")).toBeNull();
+});
+
+it.each([true, false])("the first displayed import card is actionable after the turn completes (%s)", async (approve) => {
+  let finish!: (value: TurnResult) => void;
+  let pending = false;
+  let done = false;
+  const task = { id: "imported", cycle_id: "past-day", later_plan_type: null, parent_id: null,
+    title: "整理记录", completed: false, subtasks: [], position: 0, proposal: "upsert",
+    goal_breakdown: null, needs_refinement: null, needs_breakdown: null, root_color_key: null, copied_from_task_id: null, created_at: 1 };
+  invokeMock.mockImplementation((cmd: string) => {
+    if (cmd === commands.startAgentConversation) {
+      // The verification read is slow. Completed IPC data must already release the buttons.
+      if (done) return new Promise(() => {});
+      return Promise.resolve(conversationView([], { active_turn_id: pending ? "import-turn" : null }));
+    }
+    if (cmd === commands.sendAgentMessage) return new Promise<TurnResult>((resolve) => { pending = true; finish = resolve; });
+    if (cmd === "get_pending_task_cycles") return Promise.resolve(pending ? ["past-day"] : []);
+    if (cmd === "get_agent_actions") return Promise.resolve([]);
+    if (cmd === commands.getPlannerState) return Promise.resolve({ cycles: [{ id: "past-day", title: "2026/09/13", starts_on: "2026-09-13" }] });
+    if (cmd === commands.getPreviewSummary) return Promise.resolve({ cycle_id: "past-day", count: 1, tasks: [task], originals: { imported: { ...task, original_exists: false } }, deletion_impacts: {} });
+    return Promise.resolve(null);
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  render(<QueryClientProvider client={client}><AgentPanel cycleId="today" onClose={() => {}} /></QueryClientProvider>);
+  await screen.findByText("开始规划");
+  fireEvent.keyDown(typeDraft("2026/09/13 整理记录\n2026/09/14-2026/09/16 完成初稿"), { key: "Enter" });
+  await waitFor(() => expect(pending).toBe(true));
+  await act(async () => { await client.invalidateQueries(); });
+  const button = await screen.findByRole("button", { name: `${approve ? "应用" : "放弃"}：整理记录` }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  await act(async () => { done = true; finish(turnResult([modelTextMessage("已准备好，等待确认", 1)])); });
+  await waitFor(() => expect(button.disabled).toBe(false));
+  fireEvent.click(button);
+  await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("resolve_coach_task_preview", { taskId: "imported", approve }));
+});
+
+it("keeps a new draft typed while the previous message is being processed", async () => {
+  let finish!: (value: TurnResult) => void;
+  mockBackend();
+  const route = invokeMock.getMockImplementation()!;
+  invokeMock.mockImplementation((cmd: string) => cmd === commands.sendAgentMessage
+    ? new Promise<TurnResult>((resolve) => { finish = resolve; }) : route(cmd));
+  renderPanel();
+  await screen.findByText("开始规划");
+  fireEvent.keyDown(typeDraft("导入第一份记录"), { key: "Enter" });
+  await screen.findByRole("status");
+  typeDraft("这是下一份记录");
+  await act(async () => finish(turnResult()));
+  expect((screen.getByLabelText("给助理发消息") as HTMLTextAreaElement).value).toBe("这是下一份记录");
 });
 
 it("preserves reading position on conversation refresh and offers an explicit return to latest", async () => {
@@ -458,6 +508,16 @@ it("renders structured approval receipts in the active locale", async () => {
   const status = await screen.findByRole("status");
   expect(status.textContent).toBe("✓已更新任务「Example」。");
 });
+
+it("shows the persisted destination for an imported task even on a different page", async () => {
+  const receipt = structuredReceiptMessage(1);
+  if (receipt.payload.kind !== "app_tool_result") throw new Error("Expected receipt");
+  const payload = receipt.payload.result as { result: { details: unknown[] } };
+  payload.result.details.push({ key: "backend-actions:task.destination", args: { target: "2026-09-13" } });
+  mockBackend({ conversation: conversationView([receipt]) });
+  renderPanel({ cycleId: "different-cycle" });
+  expect((await screen.findByRole("status")).textContent).toContain("目标：2026-09-13");
+});
 it("refreshes structured receipts on a locale switch but preserves historical text", async () => {
   mockBackend({conversation:conversationView([structuredReceiptMessage(1), receiptMessage(2, "applied")])});
   renderPanel();
@@ -474,5 +534,44 @@ it("prepares an issue discussion as an editable draft and sends the exact task c
   expect((input as HTMLTextAreaElement).value).toBe("请核对 Prototype 的验证方式");
   expect(invokeMock.mock.calls.some(([cmd]) => cmd === commands.sendAgentMessage)).toBe(false);
   fireEvent.keyDown(input,{key:"Enter"});
-  await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith(commands.sendAgentMessage,{cycleId:"c1",text:"请核对 Prototype 的验证方式",focusedTaskId:"t1"}));
+  await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith(commands.sendAgentMessage,{cycleId:"c1",text:"请核对 Prototype 的验证方式",focusedTaskId:"t1",pageContext:null}));
+});
+
+it("keeps the global transcript and draft while the selected page changes during a turn", async () => {
+  const contextA = { view: "workspace" as const, long_term_cycle_id: "month-a", week_cycle_id: "week-a", day_cycle_id: "day-a", week_starts_on: "2026-09-14", selected_date: "2026-09-15" };
+  const contextB = { view: "calendar" as const, long_term_cycle_id: null, week_cycle_id: "week-b", day_cycle_id: "day-b", week_starts_on: "2026-09-21", selected_date: "2026-09-22" };
+  let finish!: (result: TurnResult) => void;
+  const sends: Array<{ cycleId: string | null; text: string; focusedTaskId: string | null; pageContext: unknown }> = [];
+  invokeMock.mockImplementation((cmd: string, args: { cycleId?: string | null; text?: string; focusedTaskId?: string | null; pageContext?: unknown }) => {
+    if (cmd === commands.startAgentConversation) return Promise.resolve(conversationView([modelTextMessage("同一会话历史", 1)]));
+    if (cmd === commands.sendAgentMessage) {
+      sends.push({ cycleId: args.cycleId ?? null, text: args.text ?? "", focusedTaskId: args.focusedTaskId ?? null, pageContext: args.pageContext });
+      return new Promise<TurnResult>((resolve) => { finish = resolve; });
+    }
+    if (cmd === "get_pending_task_cycles" || cmd === "get_agent_actions") return Promise.resolve([]);
+    return Promise.resolve(null);
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const view = (cycleId: string | null, pageContext: typeof contextA | typeof contextB) => (
+    <QueryClientProvider client={client}><AgentPanel cycleId={cycleId} pageContext={pageContext} onClose={() => {}} /></QueryClientProvider>
+  );
+  const mounted = render(view("day-a", contextA));
+  expect(await screen.findByText("同一会话历史")).toBeDefined();
+  const input = typeDraft("保留这段草稿");
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByRole("status");
+
+  mounted.rerender(view("day-b", contextB));
+  expect((screen.getByLabelText("给助理发消息") as HTMLTextAreaElement).value).toBe("保留这段草稿");
+  expect(screen.getByText("同一会话历史")).toBeDefined();
+  expect(sends).toHaveLength(1);
+  expect(sends[0]).toMatchObject({ cycleId: "day-a", text: "保留这段草稿", pageContext: contextA });
+
+  finish(turnResult());
+  await waitFor(() => expect((screen.getByLabelText("给助理发消息") as HTMLTextAreaElement).value).toBe(""));
+  const nextInput = typeDraft("切换后继续");
+  fireEvent.keyDown(nextInput, { key: "Enter" });
+  await waitFor(() => expect(sends).toHaveLength(2));
+  expect(sends[1]).toMatchObject({ cycleId: "day-b", text: "切换后继续", pageContext: contextB });
+  finish(turnResult());
 });

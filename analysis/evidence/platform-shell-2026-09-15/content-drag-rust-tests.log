@@ -1,0 +1,611 @@
+   Compiling objc2-exception-helper v0.1.1
+   Compiling aws-lc-sys v0.43.0
+   Compiling libsqlite3-sys v0.38.2
+   Compiling mac-notification-sys v0.6.15
+   Compiling objc2 v0.6.4
+   Compiling block2 v0.6.2
+   Compiling objc2-core-foundation v0.3.2
+   Compiling dispatch2 v0.3.1
+   Compiling rusqlite v0.40.2
+   Compiling objc2-foundation v0.3.2
+   Compiling r2d2_sqlite v0.35.0
+   Compiling objc2-app-kit v0.3.2
+   Compiling notify-rust v4.11.7
+   Compiling aws-lc-rs v1.17.3
+   Compiling rustls v0.23.43
+   Compiling objc2-web-kit v0.3.2
+   Compiling tao v0.35.3
+   Compiling window-vibrancy v0.6.0
+   Compiling muda v0.19.3
+   Compiling rfd v0.16.0
+   Compiling rustls-webpki v0.103.13
+   Compiling wry v0.55.1
+   Compiling tauri-runtime v2.11.3
+   Compiling tauri-runtime-wry v2.11.4
+   Compiling tauri v2.11.5
+   Compiling tokio-rustls v0.26.5
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.5
+   Compiling tauri-plugin-fs v2.5.2
+   Compiling tauri-plugin-opener v2.5.5
+   Compiling tauri-plugin-notification v2.4.0
+   Compiling tauri-plugin-dialog v2.7.3
+   Compiling planner v0.1.0 (/Users/lordcasser/workspace/projects/goal/src-tauri)
+warning: unused import: `NotificationExt`
+   --> src/commands/onboarding.rs:209:51
+    |
+209 |     use tauri_plugin_notification::{Notification, NotificationExt};
+    |                                                   ^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `FakeTurn`
+   --> src/ai/review.rs:857:75
+    |
+857 |         AgentError, AgentRequest, AgentResponse, BoxFuture, FakeProvider, FakeTurn, LlmProvider,
+    |                                                                           ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `NotificationExt`
+   --> src/commands/onboarding.rs:209:51
+    |
+209 |     use tauri_plugin_notification::{Notification, NotificationExt};
+    |                                                   ^^^^^^^^^^^^^^^
+
+warning: value assigned to `reply` is never read
+   --> src/ai/agent/turn.rs:373:21
+    |
+373 |     let mut reply = String::new();
+    |                     ^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+393 |             reply = response.text.clone();
+    |             ----- `reply` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/ai/agent/context.rs:377:13
+    |
+377 |         let mut ctx = CycleContext {
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `ctx`
+   --> src/ai/agent/context.rs:376:13
+    |
+376 |         let ctx = empty_ctx(cycle_of(CycleType::Month));
+    |             ^^^ help: if this is intentional, prefix it with an underscore: `_ctx`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `provider`
+   --> src/ai/agent/turn.rs:656:13
+    |
+656 |         let provider: Arc<dyn LlmProvider> = Arc::new(FakeProvider::with_script(vec![
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_provider`
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:33:23
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<Result<AgentResponse, AgentError>>;
+   |                       ^^^^^                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                       |
+   |                       the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+   = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<'_, Result<AgentResponse, AgentError>>;
+   |                                                              +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:35:22
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<Result<serde_json::Value, AgentError>>;
+   |                      ^^^^^                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                      |
+   |                      the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<'_, Result<serde_json::Value, AgentError>>;
+   |                                                           +++
+
+warning: unused variable: `conn`
+    --> src/service/reviews.rs:1320:13
+     |
+1320 |         let conn = db.pool().get().unwrap();
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_conn`
+
+warning: struct `ScriptedProvider` is never constructed
+   --> src/ai/agent/turn.rs:611:12
+    |
+611 |     struct ScriptedProvider {
+    |            ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `add_task` is never used
+   --> src/commands/onboarding.rs:296:8
+    |
+296 |     fn add_task(db: &crate::db::Db, cycle_id: &str, title: &str) -> Task {
+    |        ^^^^^^^^
+
+warning: `planner` (lib test) generated 11 warnings (3 duplicates) (run `cargo fix --lib -p planner --tests` to apply 6 suggestions)
+warning: `planner` (lib) generated 4 warnings (run `cargo fix --lib -p planner` to apply 3 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 19.89s
+     Running unittests src/lib.rs (target/debug/deps/planner_lib-7e3d04c952d68a8c)
+
+running 377 tests
+test ai::agent::prompt_xml::tests::escapes_the_five_predefined_entities ... ok
+test ai::agent::prompt_xml::tests::plain_text_passes_through ... ok
+test ai::agent::prompt::tests::week_and_day_load_distinct_workflows_with_shared_contract ... ok
+test ai::agent::context::tests::editor_blank_row_is_not_a_task_in_model_context ... ok
+test ai::agent::context::tests::tasks_are_escaped_and_flagged ... ok
+test ai::agent::context::tests::renders_cycle_metadata_with_product_words ... ok
+test ai::agent::context::tests::parent_key_uses_the_parent_cycle_key ... ok
+test ai::agent::context::tests::budget_drops_optional_blocks_first_then_important ... ok
+test ai::agent::turn::tests::provider_failure_sets_last_error_and_releases_the_turn ... ok
+test ai::agent::turn::tests::app_tool_result_persists_and_activates_skill ... ok
+test ai::actions::tests::strict_action_shapes_reject_ambiguous_nulls_secrets_and_invalid_units ... ok
+test ai::breakdown::tests::decomposition_confirmed_follows_only_an_explicit_true ... ok
+test ai::breakdown::tests::empty_update_is_rejected_with_empty_update_code ... ok
+test ai::breakdown::tests::explicit_null_clears_a_single_field ... ok
+test ai::breakdown::tests::fresh_goal_misses_every_major_field ... ok
+test ai::breakdown::tests::from_value_tolerates_arbitrary_json ... ok
+test ai::breakdown::tests::incomplete_parts_keep_needs_refinement ... ok
+test ai::breakdown::tests::missing_fields_are_deterministic ... ok
+test ai::breakdown::tests::missing_fields_shrink_in_fixed_order_and_blank_strings_count_as_missing ... ok
+test ai::breakdown::tests::no_output_and_no_outcome_keeps_current_title ... ok
+test ai::breakdown::tests::outcome_only_uses_current_title_as_the_action ... ok
+test ai::breakdown::tests::output_and_outcome_combines_active_output_with_result ... ok
+test ai::breakdown::tests::output_only_turns_participle_into_action ... ok
+test ai::breakdown::tests::part_level_null_clears_the_whole_part ... ok
+test ai::breakdown::tests::partial_update_keeps_other_fields ... ok
+test ai::breakdown::tests::same_input_yields_same_derivation ... ok
+test ai::breakdown::tests::three_parts_complete_allow_clearing_needs_refinement ... ok
+test ai::breakdown::tests::title_shapes_are_classified_by_presence ... ok
+test ai::breakdown::tests::to_value_omits_empty_parts_and_round_trips ... ok
+test ai::breakdown::tests::update_deserialization_separates_null_missing_and_value ... ok
+test ai::agent::turn::tests::approved_task_receipt_is_committed_with_the_task_and_replayed_in_context ... ok
+test ai::llm::fake::tests::default_provider_fails_loudly ... ok
+test ai::llm::fake::tests::json_returns_the_preset_value_every_time ... ok
+test ai::llm::fake::tests::script_plays_in_order_through_the_trait_object ... ok
+test ai::llm::real::tests::agent_request_maps_onto_the_sampling_request ... ok
+test ai::llm::real::tests::aggregator_collects_text_tool_calls_and_usage ... ok
+test ai::llm::real::tests::aggregator_rejects_malformed_tool_arguments ... ok
+test ai::llm::real::tests::explicit_max_tokens_win_over_model_configuration ... ok
+test ai::llm::real::tests::json_output_tolerates_plain_and_fenced_answers ... ok
+test ai::llm::real::tests::json_request_is_a_single_user_message_without_tools ... ok
+test ai::llm::real::tests::tool_less_requests_pass_through_without_the_flag ... ok
+test ai::llm::real::tests::tools_are_rejected_when_the_model_cannot_use_them ... ok
+test ai::llm::resolved::tests::resolve_without_active_provider_is_no_active_provider ... ok
+test ai::llm::resolved::tests::resolve_without_any_provider_is_no_active_provider ... ok
+test ai::llm::resolved::tests::selected_toolless_model_degrades_to_conversation ... ok
+test ai::llm::resolved::tests::selection_does_not_substitute_tool_capable_model ... ok
+test ai::llm::resolved::tests::selection_rejects_a_model_less_provider_defensively ... ok
+test ai::llm::tests::agent_error_codes_map_to_ipc_tokens ... ok
+test ai::llm::tools::tests::assembler_is_empty_for_every_skill_until_task_5_lands ... ok
+test ai::llm::tools::tests::tool_def_maps_onto_the_sampling_spec_untouched ... ok
+test ai::llm::types::tests::agent_message_serializes_with_lowercase_role_and_optional_tool_fields ... ok
+test ai::llm::types::tests::response_round_trips_with_usage_and_calls ... ok
+test ai::llm::types::tests::review_skill_wire_value_round_trips ... ok
+test ai::llm::types::tests::skill_wire_values_are_lowercase_and_round_trip ... ok
+test ai::agent::turn::tests::second_turn_sees_the_first_turn_in_history ... ok
+test ai::agent::turn::tests::busy_conversation_rejects_concurrent_turns ... ok
+test ai::persona::tests::default_install_preserves_edits_and_runtime_rereads ... ok
+test ai::prioritization::tests::candidates_for_drops_tasks_bucketed_by_a_merge ... ok
+test ai::prioritization::tests::candidates_for_lists_unbucketed_tasks_in_input_order ... ok
+test ai::prioritization::tests::candidates_for_with_no_tasks_yields_empty_pending ... ok
+test ai::prioritization::tests::from_value_rejects_garbage_with_explicit_error ... ok
+test ai::agent::turn::tests::nop_tool_calls_become_error_results_and_terminate ... ok
+test ai::prioritization::tests::is_empty_only_when_all_five_buckets_are_empty ... ok
+test ai::actions::tests::settings_are_pending_until_confirmed_and_reject_preserves_state ... ok
+test ai::prioritization::tests::merge_explicit_empty_vec_clears_the_bucket ... ok
+test ai::prioritization::tests::merge_keeps_buckets_absent_from_the_update ... ok
+test ai::prioritization::tests::merge_rejects_an_invalid_result_and_yields_nothing ... ok
+test ai::prioritization::tests::merge_replaces_submitted_bucket_wholesale ... ok
+test ai::prioritization::tests::render_escapes_markup_in_titles_and_reasons ... ok
+test ai::prioritization::tests::render_is_deterministic ... ok
+test ai::prioritization::tests::render_marks_big_wins_and_non_negotiables_only ... ok
+test ai::prioritization::tests::render_pending_without_title_stays_a_bare_element ... ok
+test ai::prioritization::tests::render_self_closes_empty_buckets_and_keeps_canonical_order ... ok
+test ai::prioritization::tests::serializes_with_snake_case_keys_and_round_trips ... ok
+test ai::llm::resolved::tests::resolve_uses_selected_model_even_without_tools ... ok
+test ai::actions::tests::task_move_keeps_ids_and_same_cycle_children_but_not_linked_weekly_tasks ... ok
+test ai::prioritization::tests::validate_accepts_a_well_formed_breakdown ... ok
+test ai::prioritization::tests::validate_rejects_missing_or_blank_reason ... ok
+test ai::prioritization::tests::validate_rejects_task_in_two_buckets ... ok
+test ai::prioritization::tests::validate_rejects_unknown_pending_id ... ok
+test ai::prioritization::tests::validate_rejects_unknown_task ... ok
+test ai::prioritization::tests::validate_tolerates_a_task_both_bucketed_and_still_pending ... ok
+test ai::actions::tests::changed_state_requires_a_fresh_review_and_inflight_is_not_retried ... ok
+test ai::review::tests::cache_clears_itself_when_over_the_entry_cap ... ok
+test ai::review::tests::content_hash_follows_only_the_reviewed_content ... ok
+test ai::agent::turn::tests::current_instruction_survives_skill_and_write_rounds_then_preview_resolves ... ok
+test ai::actions::tests::focus_schedule_repeat_and_reminder_share_gui_services ... ok
+test ai::prioritization::tests::load_flags_a_corrupted_column_as_a_db_error ... ok
+test ai::agent::turn::tests::turn_persists_user_and_model_messages_in_order ... ok
+test ai::review::tests::filter_dismissed_respects_both_scopes ... ok
+test ai::review::tests::issue_type_wire_value_is_the_snake_case_enum_name ... ok
+test ai::review::tests::missing_something_lists_the_missing_fields_per_task ... ok
+test ai::review::tests::not_sure_what_to_do_next_flags_the_breakdown_flag_and_stepless_goals ... ok
+test ai::agent::turn::tests::skill_activation_reloads_instructions_and_tools_in_the_same_turn ... ok
+test ai::prioritization::tests::load_returns_none_for_a_null_column_and_not_found_for_a_missing_cycle ... ok
+test ai::period_analysis::tests::period_uses_exclusive_cycle_end_and_includes_archived_overlaps_once ... ok
+test ai::review::tests::semantic_review_checks_unflagged_day_tasks_and_skips_completed_or_empty ... ok
+test ai::review::tests::semantic_review_validates_findings_and_rejects_false_success ... ok
+test ai::prioritization::tests::store_reports_a_missing_cycle_as_not_found ... ok
+test ai::review::tests::too_many_goals_fires_past_the_cap_in_a_long_term_cycle_only ... ok
+test ai::review::tests::too_many_tasks_fires_for_week_and_day_cycles ... ok
+test ai::review::tests::too_much_work_counts_uncompleted_day_tasks_only ... ok
+test ai::skills::tests::install_preserves_user_edits_and_load_observes_changes ... ok
+test ai::prioritization::tests::store_then_load_round_trips_the_whole_breakdown ... ok
+test ai::review::tests::cycle_level_dismiss_keeps_exactly_one_row_per_type ... ok
+test ai::review::tests::a_plan_edited_during_review_cannot_receive_a_completed_report ... ok
+test ai::period_analysis::tests::analysis_is_read_only_and_rejects_invalid_model_output ... ok
+test ai::tools::tests::definitions_match_the_skill_state ... ok
+test ai::review::tests::dismissals_round_trip_through_the_table ... ok
+test ai::review::tests::explicit_report_tracks_freshness_model_changes_and_failure_without_hiding_rules ... ok
+test ai::review::tests::task_level_dismiss_is_idempotent ... ok
+test ai::tools::tests::delete_goal_stages_a_revertible_delete ... ok
+test ai::tools::tests::get_cycle_context_defaults_to_focus_and_accepts_explicit_ids ... ok
+test ai::tools::tests::get_task_details_reports_fields_and_missing_list ... ok
+test ai::tools::tests::create_goal_reuses_a_trailing_empty_row ... ok
+test ai::review::tests::review_cached_answers_from_the_cache_without_recomputing ... ok
+test ai::tools::tests::model_loads_workflows_on_demand_and_analysis_tools_are_read_only ... ok
+test ai::review::tests::review_cycle_survives_garbage_and_unknown_cycles ... ok
+test ai::tools::tests::create_goal_stages_a_preview_and_never_touches_committed_data ... ok
+test ai::review::tests::explicit_semantic_refresh_reloads_even_when_structural_cache_exists ... ok
+test ai::review::tests::review_cached_recomputes_when_content_changes ... ok
+test ai::tools::tests::start_prioritization_returns_breakdown_and_recomputed_pending ... ok
+test ai::tools::tests::start_goal_setting_returns_details_and_rejects_unknown_tasks ... ok
+test commands::ai_settings::tests::api_key_commands_require_an_existing_provider ... ok
+test commands::ai_settings::tests::api_key_roundtrip_through_commands ... ignored, requires a usable system keychain (cargo test -- --ignored)
+test commands::ai_settings::tests::connection_test_result_serialization_shape ... ok
+test commands::ai_settings::tests::delete_provider_is_idempotent_on_retry ... ok
+test commands::ai_settings::tests::delete_provider_removes_config_and_clears_activation ... ok
+test commands::ai_settings::tests::failed_draft_probe_never_saves_or_overwrites_working_configuration ... ok
+test commands::ai_settings::tests::get_ai_settings_empty_configuration ... ok
+test commands::ai_settings::tests::get_ai_settings_lists_providers_and_marks_the_active_one ... ok
+test commands::ai_settings::tests::provider_summary_flattens_every_config_field ... ok
+test commands::ai_settings::tests::save_provider_adds_then_updates ... ok
+test commands::ai_settings::tests::save_provider_api_key_rejects_empty_strings ... ok
+test commands::ai_settings::tests::save_provider_passes_config_validation_codes_through ... ok
+test commands::ai_settings::tests::save_provider_update_of_missing_id_is_not_found ... ok
+test commands::ai_settings::tests::saving_probes_every_model_and_persists_verification ... ok
+test commands::ai_settings::tests::summary_serialization_carries_no_key_material ... ok
+test ai::tools::tests::update_goal_breakdown_merges_and_reports_the_snapshot ... ok
+test commands::ai_settings::tests::test_connection_real_provider ... ignored, needs a real provider; set PLANNER_TEST_BASE_URL, PLANNER_TEST_MODEL and PLANNER_TEST_API_KEY
+test commands::ai_settings::tests::test_connection_maps_classified_failures_into_the_result ... ok
+test commands::ai_settings::tests::test_connection_unknown_provider_is_not_found ... ok
+test ai::tools::tests::start_review_has_no_previous_review_on_the_first_cycle ... ok
+test commands::ai_settings::tests::test_connection_without_models_reports_validation ... ok
+test ai::tools::tests::start_review_rejects_session_cycles_without_activating ... ok
+test commands::ai_settings::tests::test_connection_succeeds_against_local_fake_provider ... ok
+test commands::ai_settings::tests::test_connection_unreachable_endpoint_is_a_classified_result ... ok
+test ai::tools::tests::start_review_arguments_are_strict ... ok
+test ai::tools::tests::start_planning_dispatches_by_cycle_type ... ok
+test ai::tools::tests::strict_arguments_reject_unknown_fields_and_type_mismatches ... ok
+test commands::onboarding::tests::notify_gate_two_states ... ok
+test ai::tools::tests::start_planning_rejects_session_cycles_with_the_spec_sentence ... ok
+test ai::tools::tests::start_review_activates_the_review_skill_with_facts_and_latest_conclusion ... ok
+test ai::tools::tests::write_tools_refuse_ended_cycles_through_the_service_rule ... ok
+test ai::tools::tests::update_prioritization_breakdown_persists_buckets_and_rejects_blank_reasons ... ok
+test ai::tools::tests::update_goal_stages_only_in_preview ... ok
+test domain::calendar::grid_tests::align_range_keeps_aligned_bounds_and_handles_cross_month ... ok
+test domain::calendar::grid_tests::align_range_to_weeks_pads_month_edges ... ok
+test domain::calendar::grid_tests::cross_midnight_schedule_is_cut_at_midnight_and_flagged ... ok
+test domain::calendar::grid_tests::dates_between_is_inclusive_and_reversed_is_empty ... ok
+test domain::calendar::grid_tests::schedule_inside_day_is_not_truncated ... ok
+test domain::calendar::grid_tests::zero_and_negative_durations_never_truncate ... ok
+test domain::calendar::tests::calculate_ends_on_across_leap_day ... ok
+test domain::calendar::tests::calculate_ends_on_crosses_year ... ok
+test domain::calendar::tests::calculate_ends_on_is_days_not_calendar_months ... ok
+test domain::calendar::tests::calendar_key_ignores_week_start_setting ... ok
+test domain::calendar::tests::dated_bounds_per_type ... ok
+test domain::calendar::tests::day_key_format ... ok
+test domain::calendar::tests::leap_day_is_valid_and_adds_correctly ... ok
+test domain::calendar::tests::long_term_key_contains_both_bounds ... ok
+test domain::calendar::tests::parse_format_round_trip ... ok
+test domain::calendar::tests::remaining_weeks_is_whole ... ok
+test domain::calendar::tests::start_of_week_across_year_boundary ... ok
+test domain::calendar::tests::start_of_week_monday ... ok
+test domain::calendar::tests::start_of_week_saturday ... ok
+test domain::calendar::tests::start_of_week_sunday ... ok
+test domain::calendar::tests::week_key_uses_week_start_date ... ok
+test domain::calendar::tests::week_start_day_validation ... ok
+test domain::cycle::tests::illegal_transitions_are_rejected ... ok
+test domain::cycle::tests::legal_transitions ... ok
+test domain::cycle::tests::long_term_durations_in_ms ... ok
+test domain::cycle::tests::state_from_flags ... ok
+test domain::cycle::tests::whole_week_check ... ok
+test domain::proposal::tests::absent_snapshot_never_matches ... ok
+test domain::proposal::tests::capture_keeps_none_fields_distinct_from_values ... ok
+test domain::proposal::tests::capture_preserves_every_snapshotted_field ... ok
+test domain::proposal::tests::edited_task_no_longer_matches_snapshot ... ok
+test domain::proposal::tests::snapshot_serializes_for_storage ... ok
+test domain::task::tests::color_key_validation ... ok
+test domain::task::tests::empty_input_row_detection ... ok
+test domain::task::tests::empty_subtasks_render_to_empty_string ... ok
+test domain::task::tests::markdown_escapes_meta_characters ... ok
+test domain::task::tests::markdown_renders_levels_and_order ... ok
+test domain::task::tests::markdown_round_trips_nested_levels ... ok
+test domain::task::tests::markdown_sanitizes_newlines_instead_of_breaking_structure ... ok
+test domain::task::tests::subtask_json_is_backward_compatible_flat_form ... ok
+test domain::task::tests::tree_groups_by_parent_and_stable_sorts_by_position ... ok
+test domain::task::tests::tree_survives_parent_cycle ... ok
+test domain::task::tests::tree_treats_cross_cycle_parent_as_root ... ok
+test error::tests::calendar_key_unique_maps_to_taken ... ok
+test error::tests::error_serializes_to_code_and_message ... ok
+test error::tests::trigger_tokens_map_to_conflict_with_token_code ... ok
+test error::tests::unknown_constraint_degrades_with_original_message ... ok
+test logging::tests::init_is_idempotent_and_keeps_first_directory ... ok
+test logging::tests::level_filtering_respects_threshold ... ok
+test logging::tests::lines_carry_timestamp_module_and_level ... ok
+test logging::tests::rotation_evicts_oldest_files ... ok
+test logging::tests::secrets_are_redacted_including_error_chains ... ok
+test logging::tests::write_failures_are_silent ... ok
+test platform::geometry::tests::maps_current_viewport_once_at_fractional_dpi ... ok
+test platform::geometry::tests::rejects_nonfinite_outside_and_overlapping_regions ... ok
+test platform::geometry::tests::rejects_stale_or_wrong_sized_measurements ... ok
+test providers::config::tests::accepts_local_http_and_https_base_urls ... ok
+test providers::config::tests::clear_active_is_idempotent_and_persisted ... ok
+test providers::config::tests::corrupt_file_is_backed_up_and_recoverable ... ok
+test providers::config::tests::crud_roundtrip_survives_reload ... ok
+test providers::config::tests::dangling_active_id_resolves_to_none ... ok
+test providers::config::tests::deleting_active_provider_clears_selection_without_fallback ... ok
+test providers::config::tests::missing_file_is_an_empty_configuration ... ok
+test providers::config::tests::rejects_empty_model_id ... ok
+test providers::config::tests::rejects_empty_name ... ok
+test providers::config::tests::rejects_input_types_without_text ... ok
+test providers::config::tests::rejects_invalid_header_name ... ok
+test providers::config::tests::rejects_non_http_base_url ... ok
+test providers::config::tests::rejects_non_positive_model_limits ... ok
+test providers::config::tests::rejects_output_types_without_text ... ok
+test providers::config::tests::rejects_provider_without_models ... ok
+test commands::onboarding::tests::lifecycle_prefs_command_main_path ... ok
+test providers::config::tests::selected_model_survives_reload_and_removal_clears_selection ... ok
+test providers::config::tests::serde_uses_the_spec_wire_names ... ok
+test providers::config::tests::set_active_requires_an_existing_provider ... ok
+test providers::config::tests::supports_tools_defaults_to_true_when_absent ... ok
+test commands::onboarding::tests::hint_dismissal_main_path ... ok
+test providers::config::tests::update_missing_provider_is_not_found ... ok
+test providers::config::tests::update_keeps_id_and_created_at ... ok
+test providers::credentials::acceptance::keychain_material_never_hits_disk ... ignored, requires a usable system keychain (cargo test -- --ignored)
+test providers::credentials::tests::error_mapping_is_fixed_prefix_plus_status_text ... ok
+test providers::credentials::tests::keychain_delete_then_load_is_none ... ignored, requires a usable system keychain
+test providers::credentials::tests::keychain_missing_entry_loads_none ... ignored, requires a usable system keychain
+test providers::credentials::tests::keychain_save_load_roundtrip ... ignored, requires a usable system keychain
+test providers::credentials::tests::service_constant_and_account_format ... ok
+test commands::onboarding::tests::get_onboarding_main_path_starts_empty ... ok
+test providers::service::tests::api_format_conversion_covers_every_variant ... ok
+test providers::config::tests::update_runs_the_same_validation ... ok
+test providers::service::tests::state_load_uses_the_given_directory ... ok
+test commands::onboarding::tests::complete_then_reconcile_main_path ... ok
+test db::migrations::tests::database_at_0004_upgrades_to_0005_without_data_loss ... ok
+test commands::onboarding::tests::skip_main_path_reports_and_emits_deletions ... ok
+test providers::config::tests::save_writes_complete_json_atomically ... ok
+test commands::onboarding::tests::feedback_main_path_rejects_empty_then_stages ... ok
+test commands::onboarding::tests::version_and_update_check_commands ... ok
+test commands::onboarding::tests::exit_poll_lifecycle_main_path ... ok
+test db::migrations::tests::fresh_database_carries_the_ai_planning_schema ... ok
+test sampling::anthropic::tests::input_json_delta_for_unknown_block_is_a_protocol_error ... ok
+test sampling::anthropic::tests::max_tokens_defaults_to_4096_when_absent ... ok
+test sampling::anthropic::tests::stream_without_message_stop_is_a_protocol_error ... ok
+test sampling::client::tests::endpoint_joins_base_and_path_without_double_slash ... ok
+test sampling::client::tests::sanitize_message_redacts_key_and_caps_length ... ok
+test sampling::client::tests::tool_call_buffer_defaults_empty_arguments_to_object ... ok
+test sampling::client::tests::tool_call_buffer_rejects_malformed_arguments ... ok
+test sampling::openai_chat::tests::body_omits_max_tokens_when_unset ... ok
+test sampling::openai_chat::tests::missing_done_sentinel_tolerates_seen_finish_reason ... ok
+test sampling::openai_chat::tests::stream_without_done_or_finish_reason_is_a_protocol_error ... ok
+test sampling::openai_chat::tests::tool_fragments_without_index_are_a_protocol_error ... ok
+test sampling::openai_responses::tests::input_maps_roles_to_typed_content ... ok
+test sampling::openai_responses::tests::stream_without_completion_event_is_a_protocol_error ... ok
+test sampling::openai_responses::tests::unknown_well_formed_events_are_skipped_silently ... ok
+test sampling::sse::tests::finish_flushes_block_without_trailing_blank_line ... ok
+test sampling::sse::tests::frames_event_and_data_lines ... ok
+test sampling::sse::tests::handles_crlf_comments_and_ignored_fields ... ok
+test sampling::sse::tests::joins_multiple_data_lines_with_newline ... ok
+test sampling::sse::tests::splits_lines_across_chunk_boundaries ... ok
+test sampling::tests::anthropic_delivers_tool_call_whole_after_stream ... ok
+test sampling::tests::anthropic_replays_text_deltas_usage_and_stop ... ok
+test sampling::tests::anthropic_sends_x_api_key_and_version_headers ... ok
+test sampling::tests::connection_refused_is_provider_unreachable ... ok
+test commands::onboarding::tests::talk_to_founder_main_path ... ok
+test repository::reminders::tests::due_returns_only_unfired_rows_ascending ... ok
+test sampling::tests::http_errors_classify_per_design_d3 ... ok
+test sampling::tests::malformed_sse_is_a_protocol_error_and_is_not_retried ... ok
+test repository::reminders::tests::duplicate_target_and_time_reuses_the_row ... ok
+test repository::reminders::tests::purge_for_cycle_subtree_covers_cycle_and_task_targets ... ok
+test sampling::tests::openai_chat_assembles_tool_call_fragments ... ok
+test sampling::tests::openai_chat_replays_text_deltas_usage_and_stop ... ok
+test sampling::tests::no_key_sends_no_auth_headers_on_any_format ... ok
+test sampling::tests::openai_responses_delivers_tool_call_with_call_id ... ok
+test sampling::tests::invalid_request_message_never_leaks_key_into_logs ... ok
+test sampling::tests::openai_chat_sends_bearer_and_maps_tools ... ok
+test sampling::tests::redaction_subprocess_helper ... ignored, spawned as a subprocess by invalid_request_message_never_leaks_key_into_logs
+test sampling::tests::provider_message_is_truncated_and_non_json_bodies_fall_back ... ok
+test sampling::tests::openai_responses_replays_text_deltas_usage_and_stop ... ok
+test sampling::types::tests::api_format_serializes_snake_case ... ok
+test sampling::types::tests::default_timeouts_match_design_d5 ... ok
+test sampling::types::tests::error_codes_cover_design_d3_classes ... ok
+test sampling::tests::openai_responses_sends_bearer_and_maps_input ... ok
+test repository::agent::tests::finish_turn_bumps_revision_and_persists_skill ... ok
+test repository::agent::tests::get_or_create_is_one_per_cycle ... ok
+test repository::agent::tests::message_type_check_rejects_unknown_types ... ok
+test repository::agent::tests::expiry_clears_only_idle_context_at_fifteen_minutes_and_never_extends_on_read ... ok
+test repository::agent::tests::configured_timeout_is_validated_and_controls_expiration_immediately ... ok
+test repository::agent::tests::cycle_delete_cascades_conversation_and_messages ... ok
+test repository::agent::tests::messages_are_sequential_and_isolated_per_conversation ... ok
+test sampling::tests::stalled_stream_hits_idle_timeout_between_chunks ... ok
+test service::calendar::tests::budget_covers_unset_under_and_over_states ... ok
+test service::calendar::tests::budget_for_a_date_without_day_cycle_is_zero ... ok
+test service::calendar::tests::move_is_guarded_like_merge_because_it_also_discards_the_source_day ... ok
+test service::calendar::tests::moving_a_day_onto_itself_is_a_no_op ... ok
+test service::calendar::tests::merge_into_ended_day_conflicts ... ok
+test service::calendar::tests::move_outside_a_long_term_cycle_keeps_content ... ok
+test service::calendar::tests::merge_with_running_block_conflicts_and_leaves_no_half_state ... ok
+test service::calendar::tests::move_creates_an_independent_week_when_needed ... ok
+test service::calendar::tests::move_to_empty_date_creates_target_day_and_moves_content ... ok
+test service::calendar::tests::merge_folds_source_into_target_in_position_order_and_deletes_source ... ok
+test service::calendar::tests::occupied_target_without_strategy_conflicts ... ok
+test service::calendar::tests::range_rejects_reversed_and_malformed_bounds ... ok
+test sampling::tests::hanging_provider_hits_total_generate_timeout ... ok
+test service::calendar::tests::range_covers_cross_month_grid_without_holes ... ok
+test service::calendar::tests::range_with_no_day_cycles_returns_empty_cells ... ok
+test service::calendar::tests::range_single_day_multiple_blocks_keeps_column_order ... ok
+test service::calendar::tests::removing_a_slot_keeps_the_block_duration_and_refreshes_its_day ... ok
+test service::calendar::tests::schedule_keeps_duration_and_enforces_started_rules ... ok
+test service::calendar::tests::swap_keeps_an_optional_day_parent_and_both_days_content ... ok
+test service::calendar::tests::schedule_overlap_detection_reports_pairs_without_touching_data ... ok
+test service::calendar::tests::swap_across_weeks_reparents_both_days ... ok
+test service::calendar::tests::swap_exchanges_date_identities_within_a_week ... ok
+test service::onboarding::tests::clarified_long_term_goal_completes_step_one_only ... ok
+test service::onboarding::tests::continue_and_exit_record_state_without_queue_entries ... ok
+test service::onboarding::tests::complete_onboarding_persists_and_is_idempotent ... ok
+test service::onboarding::tests::daily_plan_time_validates_hhmm ... ok
+test service::onboarding::tests::cross_level_links_complete_steps_three_and_four ... ok
+test service::onboarding::tests::feedback_keeps_an_anonymous_id_stable ... ok
+test service::onboarding::tests::exit_poll_not_eligible_on_a_fresh_database ... ok
+test service::onboarding::tests::exit_poll_manual_force_bypasses_guards_but_still_records ... ok
+test service::onboarding::tests::session_due_gate_requires_a_positive_duration ... ok
+test service::onboarding::tests::feedback_rejects_blank_and_stages_with_context ... ok
+test service::onboarding::tests::exit_poll_outcomes_reach_the_local_queue_and_state_machine ... ok
+test service::onboarding::tests::fresh_database_starts_at_zero_of_five ... ok
+test service::onboarding::tests::exit_poll_shows_once_and_records_the_timestamp ... ok
+test service::onboarding::tests::exit_poll_eligible_after_three_finished_sessions_or_thirty_minutes ... ok
+test service::onboarding::tests::deleting_evidence_rolls_the_step_back ... ok
+test service::onboarding::tests::hints_start_empty_and_persist_dismissals ... ok
+test service::onboarding::tests::hint_ids_are_validated ... ok
+test service::onboarding::tests::version_comparison_boundaries ... ok
+test service::onboarding::tests::version_comparison_rejects_malformed_input ... ok
+test service::onboarding::tests::reconcile_matches_get_and_is_event_safe ... ok
+test service::onboarding::tests::skip_cleanup_keeps_repeat_linked_and_titled_cycles ... ok
+test service::onboarding::tests::update_check_is_disabled_without_endpoint ... ok
+test service::onboarding::tests::skip_cleanup_removes_empty_cycles_and_tasks_without_touching_real_data ... ok
+test service::onboarding::tests::later_item_completes_step_two ... ok
+test service::onboarding::tests::skip_persists_and_marks_undone_steps_skipped ... ok
+test service::onboarding::tests::talk_to_founder_open_and_close_are_recorded ... ok
+test service::onboarding::tests::talk_to_founder_requires_a_review_or_a_finished_cycle ... ok
+test service::onboarding::tests::short_focus_block_does_not_complete_step_five ... ok
+test service::onboarding::tests::update_check_reports_channel_unavailable_with_endpoint_set ... ok
+test service::reviews::tests::all_completed_and_all_uncompleted_rates ... ok
+test service::reviews::tests::answers_are_validated ... ok
+test service::reviews::tests::empty_cycle_reports_no_content_instead_of_zero_percent ... ok
+test service::reviews::tests::carry_copies_into_the_next_cycle_with_lineage_and_keeps_the_original ... ok
+test service::reviews::tests::completed_linked_item_closes_its_branch ... ok
+test service::reviews::tests::dispositions_need_a_saved_review_and_a_known_outcome ... ok
+test service::reviews::tests::deleted_child_lets_the_parent_become_the_unit_again ... ok
+test service::reviews::tests::carry_keeps_the_same_cycle_subtree ... ok
+test service::reviews::tests::drop_records_without_copying_or_moving ... ok
+test service::reviews::tests::empty_linked_rows_are_skipped ... ok
+test service::reviews::tests::export_includes_answers_skips_and_outcomes_when_present ... ok
+test service::reviews::tests::export_requires_a_saved_review ... ok
+test service::reviews::tests::facts_only_export_is_valid_markdown_without_empty_headings ... ok
+test service::reviews::tests::later_moves_the_item_into_the_later_container ... ok
+test service::reviews::tests::resaving_overwrites_the_same_row_and_keeps_created_at ... ok
+test service::reviews::tests::partial_save_continues_with_a_second_save ... ok
+test service::reviews::tests::snapshot_survives_later_data_changes ... ok
+test service::reviews::tests::long_term_cycle_aggregates_linked_lower_items_without_double_counting ... ok
+test service::reviews::tests::summary_reads_snapshots_in_snapshot_order ... ok
+test service::onboarding::tests::finished_half_hour_focus_block_completes_step_five ... ok
+test service::reviews::tests::undecided_items_get_no_disposition_row ... ok
+test service::reviews::tests::latest_review_context_returns_only_the_most_recent_other_review ... ok
+test service::reviews::tests::all_skipped_marks_facts_only_and_interim_finality ... ok
+
+test result: ok. 370 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 1.84s
+
+     Running tests/invariants.rs (target/debug/deps/invariants-69523c0e46a9058f)
+
+running 14 tests
+test skill_migration_preserves_messages_with_foreign_keys_enabled ... ok
+test trigger_rejects_moving_colored_task_into_week_cycle ... ok
+test calendar_key_is_globally_unique_but_nulls_repeat ... ok
+test empty_database_reaches_latest_version_in_order ... ok
+test deleting_cycle_cascades_to_tasks_and_snapshots ... ok
+test trigger_rejects_retyping_cycle_with_root_colors ... ok
+test lifecycle_check_rejects_finished_without_started ... ok
+test repeats_table_and_cycles_link_exist_after_migrations ... ok
+test checksum_drift_fails_loudly ... ok
+test later_container_is_seeded_with_zero_duration_and_no_dates ... ok
+test backup_export_contains_all_committed_data ... ok
+test unknown_cycle_type_is_rejected_by_check ... ok
+test migrations_apply_idempotently_and_version_is_stable ... ok
+test trigger_rejects_root_color_outside_long_term_on_insert ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/reorder_tasks.rs (target/debug/deps/reorder_tasks-7c0c4f416740bcd0)
+
+running 3 tests
+test reorder_rejects_locked_task_without_partially_writing_positions ... ok
+test reorder_rejects_mixed_nested_group_without_writing_positions ... ok
+test reorder_visible_roots_accepts_cross_cycle_links_without_reparenting ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/root_colors.rs (target/debug/deps/root_colors-00f7660fdf1f2898)
+
+running 5 tests
+test manual_no_color_survives_later_title_edits ... ok
+test an_existing_uncolored_empty_root_gets_color_on_first_title ... ok
+test ai_preview_reuses_or_creates_colored_roots_and_rejection_restores_state ... ok
+test same_cycle_nesting_clears_child_color_but_cross_cycle_link_keeps_parent_color ... ok
+test manual_creation_spreads_long_term_root_colors_and_leaves_other_levels_uncolored ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/services.rs (target/debug/deps/services-5d45ac8f992ef46a)
+
+running 39 tests
+test delete_preview_keeps_row_revertible_then_keep_removes_it ... ok
+test copy_uncompleted_records_lineage_and_skips_completed ... ok
+test deletion_guard_blocks_past_cycles ... ok
+test deletion_guard_blocks_cycles_with_started_sessions ... ok
+test copy_from_completed_week_returns_empty ... ok
+test editing_template_never_touches_existing_instances ... ok
+test deleting_one_days_instance_leaves_the_template_alone ... ok
+test deletion_guard_allows_only_latest_n ... ok
+test creating_a_goal_reuses_trailing_empty_row ... ok
+test batch_keep_and_undo_cover_whole_cycle ... ok
+test agent_upsert_lands_in_preview_and_is_hidden_from_visible_queries ... ok
+test editing_template_with_undated_instance_fails_explicitly ... ok
+test cross_level_links_allow_only_adjacent_levels ... ok
+test coach_preview_locks_only_affected_tasks_and_rejection_restores_the_exact_tree ... ok
+test editor_workspace_renders_subtasks_markdown ... ok
+test later_container_is_protected_from_deletion ... ok
+test long_term_durations_use_28_day_months ... ok
+test finishing_a_session_accrues_focused_time_up_the_chain ... ok
+test manual_goals_default_to_needing_clarity ... ok
+test independent_weeks_copy_unfinished_tasks_from_the_previous_date ... ok
+test keep_clears_snapshot_and_commits_the_row ... ok
+test editor_workspace_matches_batch_entry_and_handles_missing_cycles ... ok
+test next_day_generates_instances_in_template_order ... ok
+test moving_into_ended_cycle_is_rejected ... ok
+test root_color_on_week_task_is_rejected ... ok
+test opening_an_independent_day_does_not_force_a_parent_or_duplicate_it ... ok
+test planning_cycles_cannot_be_renamed_or_resized ... ok
+test repeat_instances_obey_the_same_deletion_guards ... ok
+test removing_template_unlinks_but_never_deletes_instances ... ok
+test long_term_rejects_durations_outside_allowed_set ... ok
+test start_requires_duration ... ok
+test stop_repeat_archives_unlinks_and_preserves_history ... ok
+test save_as_repeat_links_first_instance ... ok
+test undo_removes_rows_that_never_existed_and_restores_rows_that_did ... ok
+test week_can_be_created_without_long_term_goals ... ok
+test weekly_items_can_link_goals_outside_the_container_parent ... ok
+test week_under_ended_long_term_is_rejected ... ok
+test work_mix_counts_real_commitments_and_follows_optional_goal_links ... ok
+test duplicate_calendar_key_maps_to_taken ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+

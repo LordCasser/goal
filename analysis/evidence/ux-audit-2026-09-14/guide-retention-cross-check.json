@@ -1,0 +1,10 @@
+{
+  "database_restored_to_baseline": true,
+  "visible_progress_after_restart": "3 of 5",
+  "guide_config_completed_step_ids": [
+    "add_item_to_later",
+    "connect_weekly_to_long_term",
+    "connect_daily_to_weekly"
+  ],
+  "scope_note": "数据备份恢复的诊断观察；未执行产品内删除动作。"
+}

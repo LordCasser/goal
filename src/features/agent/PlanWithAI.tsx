@@ -1,6 +1,7 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
 import { getAiAvailability, getAppFlag, type Cycle } from "../../lib/ipc";
 import { useTranslation } from "../../lib/i18n";
+import { qk } from "../../lib/events";
 import { Button } from "../../ui";
 
 export const AI_SETTINGS_KEY = ["ai-settings"] as const;
@@ -18,7 +19,9 @@ export function PlanWithAI({ cycle, active, onPlan }: { cycle: Cycle; active: bo
   const { t } = useTranslation("ai");
   const preference = usePlanWithAIPreference();
   const ai = useQuery({ queryKey: AI_AVAILABILITY_KEY, queryFn: getAiAvailability, enabled: active });
-  const busy = useIsMutating({ mutationKey: AI_TURN_MUTATION_KEY }) > 0;
+  const turnBusy = useIsMutating({ mutationKey: AI_TURN_MUTATION_KEY }) > 0;
+  const decisionBusy = useIsMutating({ mutationKey: qk.agentDecision() }) > 0;
+  const busy = turnBusy || decisionBusy;
   if (!active || !onPlan || cycle.finished || cycle.archived || cycle.type === "session"
     || preference.isPending || preference.isError || preference.data === "false" || !ai.data) return null;
   return <div className="plan-ai-entry mx-3 mt-4">

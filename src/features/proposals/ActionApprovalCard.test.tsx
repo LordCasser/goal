@@ -12,7 +12,7 @@ beforeEach(()=>{applyLocale("zh-CN");pending=[item];invoke.mockReset().mockImple
   if(cmd==="resolve_agent_action") {pending=[];return null;}
 });});
 afterEach(cleanup);
-function mount(){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})}><ActionApprovalCard cycleId="day"/></QueryClientProvider>);}
+function mount(){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})}><ActionApprovalCard/></QueryClientProvider>);}
 it("does not execute on display, then confirms the exact action once and removes the footer item",async()=>{
   mount(); expect(await screen.findByText(/15 → 30/)).toBeTruthy();
   expect(invoke.mock.calls.every(([name])=>name==="get_agent_actions")).toBe(true);

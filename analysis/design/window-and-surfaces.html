@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="white">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planner · 白底与灰底主题预览</title>
+<script>
+try { const theme=localStorage.getItem('planner-design-theme'); if(theme==='white'||theme==='gray') document.documentElement.dataset.theme=theme; } catch {}
+</script>
+<style>
+:root { color-scheme:light; --canvas:#fff; --chrome:#fff; --surface:#fff; --soft:#fafbfc; --hover:#f5f7f8; --line:#edf0f2; --ink:#25292f; --muted:#616974; --subtle:#6b727b; --control:#858c96; --blue:#2f62a3; --blue-soft:#eef5ff; --link:#adc9ee; --orange:#b34b29; --radius:4px; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+* { box-sizing:border-box; }
+body { margin:0; background:#fff; color:var(--ink); font-size:14px; line-height:1.6; }
+button { font:inherit; color:inherit; cursor:pointer; }
+button:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+button { border:0; border-radius:var(--radius); background:none; }
+button:hover { background:var(--hover); }
+svg { width:17px; height:17px; flex:none; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.review { height:66px; display:flex; align-items:center; justify-content:space-between; padding:0 28px; gap:18px; border-bottom:1px solid var(--line); }
+h1 { font-size:14px; font-weight:600; margin:0; }
+.review .caption { font-size:12px; color:var(--muted); }
+.choice { display:flex; gap:4px; padding:3px; background:var(--soft); border:1px solid var(--line); border-radius:6px; }
+.choice button { min-height:30px; padding:3px 12px; font-size:12px; white-space:nowrap; }
+.choice button[aria-pressed="true"] { background:#fff; color:var(--blue); box-shadow:0 0 0 1px #dde3ea; }
+.shell { margin:20px 24px 0; height:calc(100dvh - 135px); min-height:480px; border:1px solid #e2e5e9; border-radius:12px; overflow:hidden; background:var(--canvas); display:flex; flex-direction:column; }
+.chrome { height:52px; min-height:52px; display:flex; align-items:center; gap:8px; padding-right:16px; background:var(--chrome); border-bottom:1px solid var(--line); }
+.lights { width:104px; flex:none; display:flex; align-items:center; padding-left:20px; gap:8px; }
+.lights i { width:12px; height:12px; border-radius:50%; background:#ff6058; border:1px solid #e14c45; }
+.lights i:nth-child(2) { background:#ffbd2e; border-color:#dfa323; }.lights i:nth-child(3) { background:#28c840; border-color:#20a933; }
+.tool { display:flex; align-items:center; gap:7px; min-height:32px; padding:4px 9px; font-size:13px; font-weight:500; color:var(--muted); }
+.tool[aria-expanded="true"] { color:var(--blue); background:var(--blue-soft); }
+.spacer { flex:1; min-width:48px; }
+.app-label { color:var(--subtle); font-size:12px; padding:0 8px; }
+#clear { color:var(--blue); font-size:12px; }
+#clear[hidden] { display:none; }
+.icon-only { padding:6px; }
+.work { display:flex; min-height:0; flex:1; }
+.board { flex:1; min-width:0; overflow:auto; position:relative; background:var(--canvas); }
+.board-inner { width:max-content; min-width:100%; padding:26px 30px 48px; position:relative; }
+.board-meta { display:flex; align-items:center; gap:12px; height:32px; margin-bottom:26px; color:var(--subtle); font-size:12px; }
+.board-meta strong { font-weight:500; color:var(--muted); }
+.board-meta .rule { width:28px; height:1px; background:#ccd2da; }
+.periods { display:flex; gap:32px; align-items:stretch; }
+.period { display:flex; gap:20px; width:618px; }
+.period.day { width:650px; }
+.time-nav { width:86px; flex:none; padding-top:4px; }
+.nav-label { display:none; font-size:11px; color:var(--subtle); margin:0 0 15px; letter-spacing:.02em; }
+.time-nav button { width:100%; min-height:34px; text-align:left; padding:6px 9px; color:var(--muted); margin-bottom:4px; font-size:12px; }
+.time-nav button[aria-current="date"] { background:var(--blue-soft); color:var(--blue); font-weight:600; }
+.time-nav .range { white-space:nowrap; display:block; font-size:11px; font-weight:400; margin-top:1px; }
+.content { width:512px; border-left:1px solid var(--line); padding-left:24px; min-height:415px; }
+.day .content { width:544px; }
+.content-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; padding-right:9px; }
+h2 { font-size:16px; line-height:22px; font-weight:600; margin:0; letter-spacing:.01em; }
+.remaining { font-size:12px; color:var(--subtle); }
+.task { padding:7px 9px; margin-bottom:5px; border:1px solid transparent; border-radius:3px; background:var(--surface); position:relative; }
+.task.related { background:var(--relation-bg,#eef5ff); border-color:var(--relation-edge,#e0ecfb); }
+.task.is-source { border-color:var(--relation-source,#abc8ed); }
+.row { display:flex; align-items:flex-start; gap:7px; }
+.check { width:15px; height:15px; margin:5px 1px 0 0; border:1px solid var(--control); border-radius:2px; flex:none; position:relative; }
+.task[data-done="true"] .check::after { content:""; position:absolute; width:7px; height:4px; border-left:1.5px solid var(--ink); border-bottom:1.5px solid var(--ink); transform:rotate(-45deg); left:3px; top:3px; }
+.task[data-done="true"] .task-title { text-decoration:line-through; color:var(--muted); }
+.marker { width:5px; height:12px; border-radius:3px; margin-top:6px; background:#d5e5fa; border:1px solid #86b2e9; flex:none; }
+.marker.green { background:#e1f0e8; border-color:#78ac93; }.marker.orange { background:#ffe6d5; border-color:#d1a17a; }
+.task-title { text-align:left; flex:1; min-width:0; padding:0; line-height:24px; font-size:14px; overflow-wrap:anywhere; }
+.task-title:hover { background:none; color:var(--blue); }
+.steps { margin:8px 0 2px 28px; padding:0; list-style:none; color:var(--muted); font-size:13px; }
+.steps li { display:flex; gap:8px; padding:3px 0; }.steps .check { width:13px; height:13px; margin-top:5px; }
+.add-line { font-size:13px; color:var(--subtle); padding:7px 9px; margin-top:5px; min-height:32px; }
+.section-note { padding:24px 9px 0; margin-top:28px; max-width:320px; font-size:12px; color:var(--subtle); }
+.section-note strong { font-weight:500; color:var(--muted); }
+.focus { margin:24px 8px; padding:16px 0; border-top:1px solid var(--line); }
+.focus .title { display:flex; justify-content:space-between; gap:20px; font-size:13px; font-weight:500; }
+.timer { color:var(--orange); font-variant-numeric:tabular-nums; }
+.progress { height:2px; background:#f5e8e2; margin:15px 0; }.progress i { display:block; width:48%; height:100%; background:#c47550; }
+.focus p { font-size:12px; color:var(--muted); }
+#edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+#edges path { stroke:var(--link); stroke-width:1; fill:none; }#edges rect { fill:var(--link); stroke:none; }
+.panel { flex:none; width:320px; background:var(--surface); padding:22px; overflow:auto; }
+.panel[hidden] { display:none; }.panel.left { border-right:1px solid var(--line); }.panel.right { border-left:1px solid var(--line); }
+.panel-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:22px; }.panel h2 { font-size:14px; }.panel p { font-size:13px; color:var(--muted); }.panel .task { padding-left:0; }
+.panel-note { background:var(--soft); padding:14px; border-radius:4px; line-height:1.8; margin-top:20px; }
+.review-note { font-size:12px; color:var(--muted); margin:12px 28px 14px; display:flex; justify-content:space-between; gap:16px; }
+.review-note a { color:var(--blue); text-decoration:none; }
+#status { min-width:0; }
+:root[data-theme="gray"] .shell { --canvas:#f6f6f6; --chrome:#f6f6f6; --soft:#f0f0f0; --hover:#e8e8e8; --line:#e2e2e2; --subtle:#666e78; }
+:root[data-theme="gray"] .content { position:relative; isolation:isolate; border-left-color:transparent; }
+:root[data-theme="gray"] .content::before { content:""; position:absolute; inset:-16px -12px -16px 0; background:var(--surface); border:1px solid #e3e3e3; z-index:-1; pointer-events:none; }
+@media (max-width:700px) { .review { height:auto; min-height:80px; padding:12px; flex-wrap:wrap; gap:8px; }.review .caption{display:none}.shell { margin:10px 8px 0; height:calc(100dvh - 154px); }.chrome { padding-right:8px; gap:2px; }.lights { width:86px; padding-left:16px; gap:6px; }.tool { padding:4px 6px; }.app-label{display:none}.spacer{min-width:8px}.review-note{margin:10px 12px;font-size:11px}.review-note a{display:none}.board-inner{padding:20px 18px 36px}.work{position:relative;overflow:hidden}.panel{position:absolute;inset:0 0 0 auto;width:min(320px,100%);z-index:3;box-shadow:-6px 0 20px #25292f0a}.panel.left{inset:0 auto 0 0}.board{min-width:0} }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs><symbol id="tray" viewBox="0 0 24 24"><path d="M4 8l3-4h10l3 4v11H4zM4 13h5l2 3h2l2-3h5"/></symbol><symbol id="spark" viewBox="0 0 24 24"><path d="M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></symbol><symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M9 3h6l.5 3 2 .9 2.7-1 2 5-2.5 1.8v2.5l2 2-3.5 3.5-2.5-1-2 .8-1 2.5H9l-.8-2.5-2-1-2.7.7L1 16l2.2-2v-2L1 10l2.5-4 2.7 1 2-.9z" transform="translate(1 0) scale(.92)"/></symbol><symbol id="close" viewBox="0 0 24 24"><path d="M6 6l12 12M6 18L18 6"/></symbol></defs></svg>
+<header class="review"><div><h1>窗口与工作台 · 两种浅色主题</h1><div class="caption">同一套布局与交互，选择适合自己的表面层次</div></div><div class="choice" role="group" aria-label="选择界面主题"><button data-theme-choice="white" aria-pressed="true">白底</button><button data-theme-choice="gray" aria-pressed="false">灰底</button></div></header>
+<div class="shell" id="shell">
+  <header class="chrome" aria-label="应用窗口栏示意">
+    <span class="lights" role="img" aria-label="原生关闭、最小化、全屏按钮的布局示意"><i></i><i></i><i></i></span>
+    <button class="tool" id="later" aria-expanded="false" aria-controls="later-panel"><svg aria-hidden="true"><use href="#tray"/></svg>Later</button>
+    <button id="clear" hidden>退出关联查看</button><div class="spacer" aria-hidden="true"></div>
+    <button class="tool" id="assistant" aria-expanded="false" aria-controls="assistant-panel"><svg aria-hidden="true"><use href="#spark"/></svg>助手</button>
+    <span class="tool icon-only" role="img" aria-label="设置入口的布局示意"><svg aria-hidden="true"><use href="#gear"/></svg></span>
+  </header>
+  <div class="work">
+    <aside class="panel left" id="later-panel" hidden aria-label="Later 预览">
+      <div class="panel-head"><h2>Later</h2><button class="tool icon-only" data-close="later" aria-label="关闭 Later"><svg aria-hidden="true"><use href="#close"/></svg></button></div>
+      <p>先放在这里，准备好再安排。</p><div class="task"><div class="row"><span class="check" aria-hidden="true"></span><span>整理下一版想尝试的功能</span></div></div>
+      <p class="panel-note">面板沿用白色表面，用一条细边界划分区域。</p>
+    </aside>
+    <main class="board" id="board" aria-label="横向规划工作台" tabindex="0">
+      <div class="board-inner" id="inner">
+        <div class="board-meta"><strong>2026</strong><span class="rule" aria-hidden="true"></span><span>9 月 14 日，星期一</span></div>
+        <div class="periods">
+          <section class="period" aria-labelledby="long-title">
+            <nav class="time-nav" aria-label="长期周期"><div class="nav-label">长期</div><button aria-current="date">9–12 月<span class="range">09.14–12.07</span></button></nav>
+            <div class="content"><div class="content-head"><h2 id="long-title">长期目标</h2><span class="remaining">还有 12 周</span></div>
+              <article class="task" data-node="long" data-done="false"><div class="row"><span class="check" aria-hidden="true"></span><span class="marker" aria-hidden="true"></span><button class="task-title" data-rel="long" aria-pressed="false">完成规划应用的第一版</button></div><ul class="steps"><li><span class="check" aria-hidden="true"></span>确定核心体验和设计规范</li><li><span class="check" aria-hidden="true"></span>跑通从目标到行动的完整流程</li><li><span class="check" aria-hidden="true"></span>用真实计划验证一周</li></ul></article>
+              <article class="task" data-node="reading"><div class="row"><span class="check" aria-hidden="true"></span><span class="marker green" aria-hidden="true"></span><button class="task-title" data-rel="reading" aria-pressed="false">建立稳定的阅读习惯</button></div></article>
+              <div class="add-line">＋ 记录一个目标</div><div class="section-note"><strong>想清楚要得到什么结果。</strong><br>步骤可以慢慢补，先留下最重要的方向。</div>
+            </div>
+          </section>
+          <section class="period" aria-labelledby="week-title">
+            <nav class="time-nav" aria-label="周周期"><div class="nav-label">周</div><button aria-current="date">第 38 周<span class="range">09.14–09.20</span></button></nav>
+            <div class="content"><div class="content-head"><h2 id="week-title">本周计划</h2><span class="remaining">还有 7 天</span></div>
+              <article class="task" data-node="week"><div class="row"><span class="check" aria-hidden="true"></span><span class="marker" aria-hidden="true"></span><button class="task-title" data-rel="week" aria-pressed="false">确定前端设计与交互</button></div><ul class="steps"><li><span class="check" aria-hidden="true"></span>把窗口栏与工作台统一</li><li><span class="check" aria-hidden="true"></span>复核点击查看关联的体验</li><li><span class="check" aria-hidden="true"></span>补齐空状态和边界说明</li></ul></article>
+              <article class="task" data-node="read-week"><div class="row"><span class="check" aria-hidden="true"></span><span class="marker green" aria-hidden="true"></span><button class="task-title" data-rel="read-week" aria-pressed="false">读完一本书的前两章</button></div></article>
+              <article class="task" data-node="ordinary"><div class="row"><span class="check" aria-hidden="true"></span><button class="task-title" data-rel="ordinary" aria-pressed="false">安排一次周末散步</button></div></article>
+              <div class="add-line">＋ 记下这周要推进的事</div><div class="section-note">先选最值得推进的几件事，给临时事务留出余地。</div>
+            </div>
+          </section>
+          <section class="period day" aria-labelledby="day-title">
+            <nav class="time-nav" aria-label="日期"><div class="nav-label">日</div><button aria-current="date">星期一<span class="range">9 月 14 日</span></button></nav>
+            <div class="content"><div class="content-head"><h2 id="day-title">今天的行动</h2><span class="remaining">9 月 14 日</span></div>
+              <article class="task" data-node="day"><div class="row"><span class="check" aria-hidden="true"></span><span class="marker" aria-hidden="true"></span><button class="task-title" data-rel="day" aria-pressed="false">调整窗口栏和界面灰阶</button></div><ul class="steps"><li><span class="check" aria-hidden="true"></span>看实际窗口，核对视觉重量</li><li><span class="check" aria-hidden="true"></span>更新 design.md 并检查可读性</li></ul></article>
+              <div class="focus"><div class="title"><span>专注 · 设计复核</span><span class="timer">12:40 / 25:00</span></div><div class="progress" aria-hidden="true"><i></i></div><p>运行中的暖色只用于时间和进度。</p></div>
+            </div>
+          </section>
+        </div><svg id="edges" aria-hidden="true"></svg>
+      </div>
+    </main>
+    <aside class="panel right" id="assistant-panel" hidden aria-label="助手布局预览"><div class="panel-head"><h2>规划助手</h2><button class="tool icon-only" data-close="assistant" aria-label="关闭助手"><svg aria-hidden="true"><use href="#close"/></svg></button></div><p>针对本周计划</p><div class="panel-note">这周最想完成哪一个具体结果？</div><p>两种主题都保留白色阅读面，靠位置、留白和文字层次表达关系。</p></aside>
+  </div>
+</div>
+<footer class="review-note"><span id="status" role="status">可切换主题并记住选择、开合侧栏、点击任务查看关系。输入、计时与系统按钮仅作布局示意。</span><a href="../../design.md">对应 design.md</a></footer>
+<script>
+const shell=document.querySelector('#shell'), board=document.querySelector('#board'), inner=document.querySelector('#inner'), edges=document.querySelector('#edges'), clear=document.querySelector('#clear'), status=document.querySelector('#status');
+const nodes=Object.fromEntries([...document.querySelectorAll('[data-node]')].map(n=>[n.dataset.node,n]));
+const links=[['long','week'],['week','day'],['reading','read-week']];let selected=null;
+function draw(){edges.replaceChildren();if(!selected)return;const rect=inner.getBoundingClientRect();for(const [a,b] of links.filter(([a,b])=>a===selected||b===selected)){const ar=nodes[a].querySelector('.row').getBoundingClientRect(),br=nodes[b].querySelector('.row').getBoundingClientRect();const x1=ar.right-rect.left+9,y1=ar.top-rect.top+12,x2=br.left-rect.left-9,y2=br.top-rect.top+12,xm=(x1+x2)/2;const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',`M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}`);edges.append(p);for(const [x,y] of [[x1,y1],[x2,y2]]){const t=document.createElementNS('http://www.w3.org/2000/svg','rect');Object.entries({x:x-2.5,y:y-2.5,width:5,height:5}).forEach(([k,v])=>t.setAttribute(k,v));edges.append(t);}}}
+function select(id){selected=id;const green=id==='reading'||id==='read-week';for(const [key,value]of Object.entries({'--link':green?'#a9cdb8':'#adc9ee','--relation-bg':green?'#f0f8f3':'#eef5ff','--relation-edge':green?'#dceee3':'#e0ecfb','--relation-source':green?'#9ec7ae':'#abc8ed'}))shell.style.setProperty(key,value);let related=new Set(id?[id]:[]);for(const [a,b] of links)if(a===id||b===id){related.add(a);related.add(b)}for(const [key,node]of Object.entries(nodes)){node.classList.toggle('related',related.has(key));node.classList.toggle('is-source',key===id);node.querySelector('[data-rel]')?.setAttribute('aria-pressed',String(key===id))}clear.hidden=!id;status.textContent=id?(related.size===1?'此任务暂未关联上层目标。':`正在查看「${nodes[id].querySelector('.task-title').textContent}」的直接关系。移开指针后仍保留；Escape 退出。`):'可切换主题并记住选择、开合侧栏、点击任务查看关系。输入、计时与系统按钮仅作布局示意。';draw()}
+document.querySelectorAll('[data-rel]').forEach(b=>b.addEventListener('click',()=>select(b.dataset.rel)));clear.addEventListener('click',()=>{const previous=selected;select(null);nodes[previous]?.querySelector('button').focus()});
+function applyTheme(theme,persist=false){
+  if(theme!=='white'&&theme!=='gray')theme='white';
+  document.documentElement.dataset.theme=theme;
+  document.querySelectorAll('[data-theme-choice]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.themeChoice===theme)));
+  if(persist){try{localStorage.setItem('planner-design-theme',theme)}catch{status.textContent='主题已切换，浏览器未能保存本次选择。'}}
+  draw();
+}
+applyTheme(document.documentElement.dataset.theme);
+document.querySelectorAll('[data-theme-choice]').forEach(button=>button.addEventListener('click',()=>applyTheme(button.dataset.themeChoice,true)));
+function togglePanel(id,open){const button=document.getElementById(id),panel=document.getElementById(id+'-panel');panel.hidden=!open;button.setAttribute('aria-expanded',String(open));if(open){for(const other of ['later','assistant'])if(other!==id){document.getElementById(other+'-panel').hidden=true;document.getElementById(other).setAttribute('aria-expanded','false')}shell.dataset.panel=id==='later'?'left':'right'}else delete shell.dataset.panel;draw()}
+for(const id of ['later','assistant'])document.getElementById(id).addEventListener('click',()=>togglePanel(id,document.getElementById(id+'-panel').hidden));
+document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>{togglePanel(b.dataset.close,false);document.getElementById(b.dataset.close).focus()}));
+document.addEventListener('keydown',e=>{if(e.key!=='Escape'||e.isComposing)return;for(const id of ['later','assistant'])if(!document.getElementById(id+'-panel').hidden){togglePanel(id,false);document.getElementById(id).focus();return}if(selected){const previous=selected;select(null);nodes[previous]?.querySelector('button').focus()}});
+new ResizeObserver(draw).observe(inner);window.addEventListener('resize',()=>{draw();const focused=document.activeElement;if(board.contains(focused)&&focused.matches('button'))focused.scrollIntoView({block:'nearest',inline:'nearest'});});document.fonts.ready.then(draw);
+</script>
+</body>
+</html>

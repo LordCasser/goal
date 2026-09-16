@@ -14,9 +14,10 @@
 
 use std::sync::Arc;
 
+use rusqlite::{Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::ai::agent::context::{load_context, render};
+use crate::ai::agent::context::{load_turn_context, TurnContext};
 use crate::ai::agent::prompt::build_system_instruction;
 use crate::ai::llm::types::{AgentMessage, AgentRequest, AgentRole, AgentSkill, ToolCallRecord};
 use crate::ai::llm::{AgentError, LlmProvider, ResolvedProvider};
@@ -175,42 +176,143 @@ fn stored(
     }
 }
 
-/// Human decisions are transcript events, not model prose or a footer toast.
-/// Caller may use a transaction to commit the decision and its receipt together.
-pub fn record_decision(
+fn decision_in_progress() -> AppError {
+    AppError::conflict(
+        "turn_in_progress",
+        "Wait for the current Coach response before confirming changes",
+    )
+}
+
+/// Appends one human decision receipt to a conversation that the caller has
+/// already claimed with `turn_id`.
+fn append_decision(
     conn: &rusqlite::Connection,
-    cycle_id: &str,
+    conversation_id: &str,
+    turn_id: &str,
     result: serde_json::Value,
 ) -> AppResult<()> {
-    if crate::repository::cycles::get(conn, cycle_id)?.is_none() {
-        return Ok(());
-    }
-    let conversation = repo::get_or_create_conversation(conn, cycle_id, now_ms())?;
-    if conversation.active_turn_id.is_some() {
-        return Err(AppError::conflict(
-            "turn_in_progress",
-            "Wait for the current Coach response before confirming changes",
-        ));
-    }
     let payload = MessagePayload::AppToolResult {
         name: "approval_decision".into(),
         result,
     };
     let message = stored(
-        &conversation.id,
-        &uuid::Uuid::new_v4().to_string(),
-        repo::max_sequence(conn, &conversation.id)? + 1,
+        conversation_id,
+        turn_id,
+        repo::max_sequence(conn, conversation_id)? + 1,
         &payload,
     );
-    repo::insert_message(conn, &message)?;
+    repo::insert_message(conn, &message)
+}
+
+/// Finishes a claimed decision receipt. The owner check happens in the same
+/// transaction as the append and release, so a stale guard cannot clear a
+/// newer turn.
+fn finish_decision(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    turn_id: &str,
+    result: serde_json::Value,
+) -> AppResult<()> {
+    let conversation = repo::conversation_by_id(conn, conversation_id)?
+        .ok_or_else(|| AppError::Internal("Coach conversation missing".into()))?;
+    if conversation.active_turn_id.as_deref() != Some(turn_id) {
+        return Err(decision_in_progress());
+    }
+    append_decision(conn, conversation_id, turn_id, result)?;
     repo::finish_turn(
         conn,
-        &conversation.id,
+        conversation_id,
         now_ms(),
         None,
         conversation.last_error.as_deref(),
     )?;
     Ok(())
+}
+
+fn record_decision_in_transaction(
+    conn: &rusqlite::Connection,
+    result: serde_json::Value,
+) -> AppResult<()> {
+    let conversation = repo::get_or_create_conversation(conn, now_ms())?;
+    let turn_id = uuid::Uuid::new_v4().to_string();
+    if !repo::claim_turn(conn, &conversation.id, &turn_id)? {
+        return Err(decision_in_progress());
+    }
+    finish_decision(conn, &conversation.id, &turn_id, result)
+}
+
+/// Human decisions are transcript events, not model prose or a footer toast.
+/// Caller may use a transaction to commit the decision and its receipt together.
+pub fn record_decision(conn: &rusqlite::Connection, result: serde_json::Value) -> AppResult<()> {
+    if conn.is_autocommit() {
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+            .map_err(crate::error::from_rusqlite)?;
+        record_decision_in_transaction(&tx, result)?;
+        tx.commit().map_err(crate::error::from_rusqlite)
+    } else {
+        record_decision_in_transaction(conn, result)
+    }
+}
+
+/// Holds the global conversation while an asynchronous action is applied.
+/// The token is also the receipt turn id, making ownership explicit in the
+/// append/finish transaction.
+pub struct DecisionGuard {
+    db: Db,
+    conversation_id: String,
+    turn_id: String,
+    completed: bool,
+}
+
+impl DecisionGuard {
+    pub fn begin(db: &Db) -> AppResult<Self> {
+        let conn = db.pool().get()?;
+        let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate)
+            .map_err(crate::error::from_rusqlite)?;
+        let conversation = repo::get_or_create_conversation(&tx, now_ms())?;
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        if !repo::claim_turn(&tx, &conversation.id, &turn_id)? {
+            return Err(decision_in_progress());
+        }
+        tx.commit().map_err(crate::error::from_rusqlite)?;
+        Ok(Self {
+            db: db.clone(),
+            conversation_id: conversation.id,
+            turn_id,
+            completed: false,
+        })
+    }
+
+    pub fn record(&mut self, result: serde_json::Value) -> AppResult<()> {
+        if self.completed {
+            return Err(AppError::Conflict {
+                code: "decision_already_recorded".into(),
+                message: "This Coach decision has already been recorded".into(),
+            });
+        }
+        let conn = self.db.pool().get()?;
+        let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate)
+            .map_err(crate::error::from_rusqlite)?;
+        finish_decision(&tx, &self.conversation_id, &self.turn_id, result)?;
+        tx.commit().map_err(crate::error::from_rusqlite)?;
+        self.completed = true;
+        Ok(())
+    }
+}
+
+impl Drop for DecisionGuard {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+        if let Ok(conn) = self.db.pool().get() {
+            let _ = conn.execute(
+                "UPDATE agent_conversations SET active_turn_id = NULL \
+                 WHERE id = ?1 AND active_turn_id = ?2",
+                rusqlite::params![self.conversation_id, self.turn_id],
+            );
+        }
+    }
 }
 
 /// The turn's complete outcome, also the IPC reply shape for a send.
@@ -259,17 +361,17 @@ pub struct ConversationView {
     pub expires_at: Option<i64>,
     pub context_idle_minutes: i64,
     pub id: String,
-    pub cycle_id: String,
+    pub active_turn_id: Option<String>,
     pub revision: i64,
     pub active_skill: Option<String>,
     pub last_error: Option<String>,
     pub messages: Vec<MessageView>,
 }
 
-pub fn get_conversation(db: &Db, cycle_id: &str) -> AppResult<Option<ConversationView>> {
+pub fn get_conversation(db: &Db) -> AppResult<Option<ConversationView>> {
     let conn = db.pool().get()?;
     repo::expire_idle(&conn, now_ms())?;
-    let Some(conversation) = repo::conversation_for_cycle(&conn, cycle_id)? else {
+    let Some(conversation) = repo::conversation(&conn)? else {
         return Ok(None);
     };
     let messages = repo::list_messages(&conn, &conversation.id, 0)?;
@@ -285,7 +387,7 @@ pub fn get_conversation(db: &Db, cycle_id: &str) -> AppResult<Option<Conversatio
             repo::expires_at(&conversation, context_idle_minutes)
         },
         id: conversation.id,
-        cycle_id: conversation.cycle_id,
+        active_turn_id: conversation.active_turn_id,
         revision: conversation.revision,
         active_skill: conversation.active_skill,
         last_error: conversation.last_error,
@@ -300,14 +402,13 @@ pub async fn run_turn(
     provider: Arc<dyn LlmProvider>,
     resolved: ResolvedProvider,
     executor: Arc<dyn ToolExecutor>,
-    cycle_id: &str,
+    selection: &TurnContext,
     user_text: &str,
-    focused_task_id: Option<String>,
 ) -> AppResult<TurnResult> {
     let turn_id = uuid::Uuid::new_v4().to_string();
     let conversation = {
         let conn = db.pool().get()?;
-        repo::get_or_create_conversation(&conn, cycle_id, now_ms())?
+        repo::get_or_create_conversation(&conn, now_ms())?
     };
     {
         let conn = db.pool().get()?;
@@ -318,11 +419,17 @@ pub async fn run_turn(
             ));
         }
     }
-    let current_skill = conversation
-        .active_skill
-        .as_deref()
-        .and_then(AgentSkill::parse)
-        .unwrap_or(AgentSkill::None);
+    // Re-read after the claim: another turn may have finished between the
+    // initial conversation read and our atomic claim.
+    let current_skill = {
+        let conn = db.pool().get()?;
+        repo::conversation_by_id(&conn, &conversation.id)?
+            .ok_or_else(|| AppError::Internal("Coach conversation missing".into()))?
+            .active_skill
+            .as_deref()
+            .and_then(AgentSkill::parse)
+            .unwrap_or(AgentSkill::None)
+    };
 
     // Stored history plus this turn's user message (in memory until the end).
     let history: Vec<MessagePayload> = {
@@ -338,13 +445,12 @@ pub async fn run_turn(
         provider.as_ref(),
         &resolved,
         executor.as_ref(),
-        cycle_id,
+        selection,
         &conversation.id,
         &turn_id,
         current_skill,
         &history,
         user_text,
-        focused_task_id,
     )
     .await;
 
@@ -369,27 +475,22 @@ async fn drive_turn(
     provider: &dyn LlmProvider,
     resolved: &ResolvedProvider,
     executor: &dyn ToolExecutor,
-    cycle_id: &str,
+    selection: &TurnContext,
     conversation_id: &str,
     turn_id: &str,
     current_skill: AgentSkill,
     stored_history: &[MessagePayload],
     user_text: &str,
-    focused_task_id: Option<String>,
 ) -> AppResult<TurnResult> {
-    // Context is loaded once per turn (spec: 回合开始时注入); the focused
-    // task snapshot rides along for single-goal clarification.
+    // Read one immutable snapshot for all model/tool rounds in this turn.
     let context_conn = db.pool().get()?;
-    let mut cycle_context = load_context(&context_conn, cycle_id)?;
+    let (cycle, context_xml) = load_turn_context(&context_conn, selection)?;
     drop(context_conn);
-    if let Some(task_id) = &focused_task_id {
-        cycle_context.focused_task = cycle_context
-            .tasks
-            .iter()
-            .find(|t| &t.id == task_id)
-            .cloned();
-    }
-    let context_xml = render(&cycle_context, None);
+    let cycle_id = cycle.as_ref().map(|cycle| cycle.id.as_str()).unwrap_or("");
+    let cycle_type = cycle
+        .as_ref()
+        .map(|cycle| cycle.cycle_type)
+        .unwrap_or(crate::domain::cycle::CycleType::Month);
 
     // Replay: everything stored before this turn, minus the trailing none.
     let mut history: Vec<AgentMessage> = stored_history
@@ -410,7 +511,7 @@ async fn drive_turn(
             skill,
             system: format!(
                 "{}\n{}",
-                build_system_instruction(skill, cycle_context.cycle.cycle_type)?,
+                build_system_instruction(skill, cycle_type)?,
                 crate::i18n::for_db(db)?.instruction()
             ),
             context_block: context_xml.clone(),
@@ -535,7 +636,7 @@ pub fn run_app_tool(
 ) -> AppResult<TurnResult> {
     let turn_id = uuid::Uuid::new_v4().to_string();
     let conn = db.pool().get()?;
-    let conversation = repo::get_or_create_conversation(&conn, cycle_id, now_ms())?;
+    let conversation = repo::get_or_create_conversation(&conn, now_ms())?;
     if !repo::claim_turn(&conn, &conversation.id, &turn_id)? {
         return Err(AppError::conflict(
             "turn_in_progress",
@@ -598,8 +699,8 @@ mod tests {
         )
         .unwrap()
         .value;
-        crate::ai::actions::resolve_task_preview(&db, &cycle, &task.id, true).unwrap();
-        let view = get_conversation(&db, &cycle).unwrap().unwrap();
+        crate::ai::actions::resolve_task_preview(&db, &task.id, true).unwrap();
+        let view = get_conversation(&db).unwrap().unwrap();
         assert_eq!(view.messages.len(), 1);
         let payload: MessagePayload =
             serde_json::from_value(view.messages[0].payload.clone()).unwrap();
@@ -607,7 +708,9 @@ mod tests {
             panic!("receipt expected")
         };
         assert_eq!(name, "approval_decision");
-        assert_eq!(result["text"], "已添加任务「A useful step」。");
+        let receipt = result["text"].as_str().unwrap();
+        assert!(receipt.starts_with("已添加任务「A useful step」。"), "{receipt}");
+        assert!(receipt.contains("目标：Long-term"));
         assert_eq!(result["target_id"], task.id);
         assert_eq!(result["target_kind"], "task");
         assert_eq!(result["decision"], "applied");
@@ -616,15 +719,119 @@ mod tests {
             .unwrap()
             .content
             .contains("A useful step"));
-        assert!(crate::ai::actions::resolve_task_preview(&db, &cycle, &task.id, true).is_err());
+        assert!(crate::ai::actions::resolve_task_preview(&db, &task.id, true).is_err());
+        assert_eq!(get_conversation(&db).unwrap().unwrap().messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn decision_guard_blocks_turn_app_tool_and_other_receipt() {
+        let (db, _dir) = db();
+        let guard = DecisionGuard::begin(&db).unwrap();
+        let cycle = month_cycle(&db);
+
+        let turn_error = run_turn(
+            &db,
+            Arc::new(ContextRecorder::default()),
+            fake_resolved(),
+            executor(),
+            &turn_context(&cycle),
+            "must wait",
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            turn_error,
+            AppError::Conflict { ref code, .. } if code == "turn_in_progress"
+        ));
+
+        let app_tool_error = run_app_tool(
+            &db,
+            &NopExecutor,
+            &cycle,
+            "start_planning",
+            serde_json::json!({}),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            app_tool_error,
+            AppError::Conflict { ref code, .. } if code == "turn_in_progress"
+        ));
+
+        let conn = db.pool().get().unwrap();
+        let receipt_error =
+            record_decision(&conn, serde_json::json!({"decision":"rejected"})).unwrap_err();
+        assert!(matches!(
+            receipt_error,
+            AppError::Conflict { ref code, .. } if code == "turn_in_progress"
+        ));
+        drop(conn);
+        drop(guard);
+        let conn = db.pool().get().unwrap();
+        assert!(repo::conversation(&conn)
+            .unwrap()
+            .unwrap()
+            .active_turn_id
+            .is_none());
+    }
+
+    #[test]
+    fn decision_guard_records_sequential_receipts_and_releases_lock() {
+        let (db, _dir) = db();
+        let mut first = DecisionGuard::begin(&db).unwrap();
+        first
+            .record(serde_json::json!({"decision":"applied","target_id":"a"}))
+            .unwrap();
+
+        let mut second = DecisionGuard::begin(&db).unwrap();
+        second
+            .record(serde_json::json!({"decision":"rejected","target_id":"b"}))
+            .unwrap();
+
+        let conn = db.pool().get().unwrap();
+        let conversation = repo::conversation(&conn).unwrap().unwrap();
+        assert!(conversation.active_turn_id.is_none());
+        let messages = repo::list_messages(&conn, &conversation.id, 0).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].sequence_number, 1);
+        assert_eq!(messages[1].sequence_number, 2);
+        assert_ne!(messages[0].turn_id, messages[1].turn_id);
+    }
+
+    #[test]
+    fn decision_guard_drop_and_error_do_not_clear_a_newer_lock() {
+        let (db, _dir) = db();
+        {
+            let _guard = DecisionGuard::begin(&db).unwrap();
+        }
+
+        let conn = db.pool().get().unwrap();
+        let conversation = repo::conversation(&conn).unwrap().unwrap();
+        assert!(repo::claim_turn(&conn, &conversation.id, "successor").unwrap());
+        repo::release_turn(&conn, &conversation.id).unwrap();
+        drop(conn);
+
+        let mut stale = DecisionGuard::begin(&db).unwrap();
+        let conn = db.pool().get().unwrap();
+        repo::release_turn(&conn, &stale.conversation_id).unwrap();
+        assert!(repo::claim_turn(&conn, &stale.conversation_id, "successor-after-error").unwrap());
+        drop(conn);
+
+        assert!(stale
+            .record(serde_json::json!({"decision":"stale"}))
+            .is_err());
+        drop(stale);
+
+        let conn = db.pool().get().unwrap();
+        let conversation_id = repo::conversation(&conn).unwrap().unwrap().id;
         assert_eq!(
-            get_conversation(&db, &cycle)
+            repo::conversation(&conn)
                 .unwrap()
                 .unwrap()
-                .messages
-                .len(),
-            1
+                .active_turn_id
+                .as_deref(),
+            Some("successor-after-error")
         );
+        repo::release_turn(&conn, &conversation_id).unwrap();
     }
 
     fn db() -> (Arc<Db>, tempfile::TempDir) {
@@ -689,8 +896,517 @@ mod tests {
 
     // FakeProvider covers the scripted path; the loop tests only need it.
 
+    fn turn_context(cycle: &str) -> TurnContext {
+        TurnContext {
+            cycle_id: Some(cycle.into()),
+            ..Default::default()
+        }
+    }
+
     fn executor() -> Arc<dyn ToolExecutor> {
         Arc::new(NopExecutor)
+    }
+
+    #[derive(Default)]
+    struct ContextRecorder(Mutex<Vec<AgentRequest>>);
+    impl LlmProvider for ContextRecorder {
+        fn generate_agent(
+            &self,
+            request: AgentRequest,
+        ) -> crate::ai::llm::BoxFuture<'_, Result<crate::ai::llm::AgentResponse, AgentError>>
+        {
+            self.0.lock().unwrap().push(request);
+            Box::pin(async {
+                Ok(crate::ai::llm::AgentResponse {
+                    text: "Kept in Coach".into(),
+                    tool_calls: vec![],
+                    usage: None,
+                })
+            })
+        }
+        fn generate_json(
+            &self,
+            _: crate::ai::llm::LlmRequest,
+        ) -> crate::ai::llm::BoxFuture<'_, Result<serde_json::Value, AgentError>> {
+            unreachable!()
+        }
+    }
+
+    fn create_goal_call(id: &str, cycle_id: &str, title: &str) -> ToolCallRecord {
+        ToolCallRecord {
+            id: id.into(),
+            name: "create_goal".into(),
+            arguments: serde_json::json!({
+                "cycle_id": cycle_id,
+                "title": title,
+                "rationale": "imported from the user's plan"
+            }),
+        }
+    }
+
+    async fn stage_batch_import(
+        db: &Arc<Db>,
+        focused_cycle: &str,
+        day_cycle: &str,
+        custom_cycle: &str,
+    ) -> Vec<(String, String)> {
+        let provider = FakeProvider::with_script(vec![
+            // The global Coach starts without a skill. Loading planning first
+            // makes the following three writes valid in the same tool round.
+            FakeTurn::Calls(vec![ToolCallRecord {
+                id: "load-planning".into(),
+                name: "load_skill".into(),
+                arguments: serde_json::json!({"name":"long-term-planning"}),
+            }]),
+            FakeTurn::Calls(vec![
+                create_goal_call("goal-1", day_cycle, "做了一个xx事情"),
+                create_goal_call("goal-2", day_cycle, "做了另一个事情"),
+                create_goal_call("goal-3", custom_cycle, "做了一个xx事情；做了另一个事情"),
+            ]),
+            FakeTurn::Text("Three goals are ready for review.".into()),
+        ]);
+        run_turn(
+            db,
+            Arc::new(provider),
+            fake_resolved(),
+            Arc::new(crate::ai::tools::ToolRegistry),
+            &turn_context(focused_cycle),
+            "2026/09/13 做了一个xx事情 做了另一个事情\n2026/09/14-2026/09/16 做了一个xx事情 做了另一个事情",
+        )
+        .await
+        .unwrap();
+
+        let mut ids = Vec::new();
+        for cycle_id in [day_cycle, custom_cycle] {
+            ids.extend(
+                crate::service::proposals::get_preview_summary(db, cycle_id)
+                    .unwrap()
+                    .tasks
+                    .into_iter()
+                    .map(|task| (cycle_id.to_string(), task.id)),
+            );
+        }
+        ids
+    }
+
+    fn resolve_batch_previews(db: &Db, task_ids: &[(String, String)], approve: bool) {
+        for (_, task_id) in task_ids {
+            crate::ai::actions::resolve_task_preview(db, task_id, approve).unwrap();
+        }
+    }
+
+    fn top_level_titles(db: &Db, cycle: &str) -> Vec<String> {
+        crate::service::editor::get_editor_workspace(db, cycle)
+            .unwrap()
+            .tasks
+            .into_iter()
+            .map(|node| node.task.title)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn batch_import_confirming_all_previews_commits_goals_and_receipts() {
+        let (db, _dir) = db();
+        let focused_cycle = month_cycle(&db);
+        let day_cycle = crate::service::cycles::get_or_create_day(
+            &db,
+            crate::domain::calendar::parse_date("2026-09-13").unwrap(),
+            now_ms(),
+        )
+        .unwrap()
+        .value;
+        let custom_cycle = crate::service::cycles::create_planning_cycle(
+            &db,
+            &crate::service::cycles::CreateCycleArgs {
+                cycle_type: "month".into(),
+                starts_on: Some("2026-09-14".into()),
+                ends_on: Some("2026-09-17".into()),
+                title: Some("Custom import target".into()),
+                ..Default::default()
+            },
+            crate::domain::calendar::parse_date("2026-09-16").unwrap(),
+            now_ms(),
+        )
+        .unwrap()
+        .value;
+        assert_eq!(custom_cycle.starts_on.as_deref(), Some("2026-09-14"));
+        // Inclusive user range 09/14–09/16 uses an exclusive end bound.
+        assert_eq!(custom_cycle.ends_on.as_deref(), Some("2026-09-17"));
+        let task_ids =
+            stage_batch_import(&db, &focused_cycle, &day_cycle.id, &custom_cycle.id).await;
+        assert_eq!(task_ids.len(), 3);
+
+        // Pending rows are projected to the editor, while committed queries
+        // still exclude them until the user confirms each preview.
+        assert!(crate::service::editor::get_editor_workspace(&db, &focused_cycle)
+            .unwrap()
+            .tasks
+            .is_empty());
+        let staged_day = crate::service::editor::get_editor_workspace(&db, &day_cycle.id).unwrap();
+        assert_eq!(staged_day.tasks.len(), 2);
+        assert!(staged_day
+            .tasks
+            .iter()
+            .all(|node| node.task.proposal.is_some()));
+        let staged_custom =
+            crate::service::editor::get_editor_workspace(&db, &custom_cycle.id).unwrap();
+        assert_eq!(staged_custom.tasks.len(), 1);
+        assert!(staged_custom
+            .tasks
+            .iter()
+            .all(|node| node.task.proposal.is_some()));
+        let conn = db.pool().get().unwrap();
+        assert!(crate::repository::tasks::list_visible_by_cycle(&conn, &day_cycle.id)
+            .unwrap()
+            .is_empty());
+        assert!(crate::repository::tasks::list_visible_by_cycle(&conn, &custom_cycle.id)
+            .unwrap()
+            .is_empty());
+        drop(conn);
+
+        resolve_batch_previews(&db, &task_ids, true);
+
+        let committed_day = crate::service::editor::get_editor_workspace(&db, &day_cycle.id).unwrap();
+        let day_titles: Vec<_> = committed_day
+            .tasks
+            .iter()
+            .map(|node| node.task.title.as_str())
+            .collect();
+        assert_eq!(day_titles, vec!["做了一个xx事情", "做了另一个事情"]);
+        assert!(committed_day
+            .tasks
+            .iter()
+            .all(|node| node.task.proposal.is_none()));
+        let committed_custom =
+            crate::service::editor::get_editor_workspace(&db, &custom_cycle.id).unwrap();
+        assert_eq!(
+            committed_custom.tasks[0].task.title,
+            "做了一个xx事情；做了另一个事情"
+        );
+        assert!(committed_custom.tasks[0].task.proposal.is_none());
+        assert!(crate::service::editor::get_editor_workspace(&db, &focused_cycle)
+            .unwrap()
+            .tasks
+            .is_empty());
+
+        let conn = db.pool().get().unwrap();
+        let visible_day = crate::repository::tasks::list_visible_by_cycle(&conn, &day_cycle.id).unwrap();
+        assert_eq!(
+            visible_day
+                .iter()
+                .map(|task| task.title.as_str())
+                .collect::<Vec<_>>(),
+            day_titles
+        );
+        assert!(visible_day.iter().all(|task| task.proposal.is_none()));
+        let visible_custom =
+            crate::repository::tasks::list_visible_by_cycle(&conn, &custom_cycle.id).unwrap();
+        assert_eq!(visible_custom.len(), 1);
+        assert_eq!(visible_custom[0].title, "做了一个xx事情；做了另一个事情");
+        assert!(visible_custom[0].proposal.is_none());
+        drop(conn);
+        assert_eq!(
+            crate::service::proposals::get_preview_summary(&db, &day_cycle.id)
+                .unwrap()
+                .count,
+            0
+        );
+        assert_eq!(
+            crate::service::proposals::get_preview_summary(&db, &custom_cycle.id)
+                .unwrap()
+                .count,
+            0
+        );
+
+        let conversation = get_conversation(&db).unwrap().unwrap();
+        let receipts: Vec<_> = conversation
+            .messages
+            .iter()
+            .filter(|message| message.message_type == "app_tool_result")
+            .collect();
+        assert_eq!(receipts.len(), 3);
+        assert!(receipts.iter().all(|message| {
+            message.payload["kind"] == "app_tool_result"
+                && message.payload["name"] == "approval_decision"
+                && message.payload["result"]["decision"] == "applied"
+        }));
+        for task_id in &task_ids {
+            assert!(receipts
+                .iter()
+                .any(|message| message.payload["result"]["target_id"] == task_id.1));
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_import_rejecting_all_previews_leaves_no_goals_or_pending_receipts() {
+        let (db, _dir) = db();
+        let focused_cycle = month_cycle(&db);
+        let day_cycle = crate::service::cycles::get_or_create_day(
+            &db,
+            crate::domain::calendar::parse_date("2026-09-13").unwrap(),
+            now_ms(),
+        )
+        .unwrap()
+        .value;
+        let custom_cycle = crate::service::cycles::create_planning_cycle(
+            &db,
+            &crate::service::cycles::CreateCycleArgs {
+                cycle_type: "month".into(),
+                starts_on: Some("2026-09-14".into()),
+                ends_on: Some("2026-09-17".into()),
+                title: Some("Custom import target".into()),
+                ..Default::default()
+            },
+            crate::domain::calendar::parse_date("2026-09-16").unwrap(),
+            now_ms(),
+        )
+        .unwrap()
+        .value;
+        let task_ids =
+            stage_batch_import(&db, &focused_cycle, &day_cycle.id, &custom_cycle.id).await;
+        assert_eq!(task_ids.len(), 3);
+
+        resolve_batch_previews(&db, &task_ids, false);
+
+        assert!(top_level_titles(&db, &focused_cycle).is_empty());
+        assert!(top_level_titles(&db, &day_cycle.id).is_empty());
+        assert!(top_level_titles(&db, &custom_cycle.id).is_empty());
+        let conn = db.pool().get().unwrap();
+        assert!(crate::repository::tasks::list_visible_by_cycle(&conn, &day_cycle.id)
+            .unwrap()
+            .is_empty());
+        assert!(crate::repository::tasks::list_visible_by_cycle(&conn, &custom_cycle.id)
+            .unwrap()
+            .is_empty());
+        drop(conn);
+        assert_eq!(
+            crate::service::proposals::get_preview_summary(&db, &day_cycle.id)
+                .unwrap()
+                .count,
+            0
+        );
+        assert_eq!(
+            crate::service::proposals::get_preview_summary(&db, &custom_cycle.id)
+                .unwrap()
+                .count,
+            0
+        );
+
+        let conversation = get_conversation(&db).unwrap().unwrap();
+        let receipts: Vec<_> = conversation
+            .messages
+            .iter()
+            .filter(|message| message.message_type == "app_tool_result")
+            .collect();
+        assert_eq!(receipts.len(), 3);
+        assert!(receipts.iter().all(|message| {
+            message.payload["kind"] == "app_tool_result"
+                && message.payload["name"] == "approval_decision"
+                && message.payload["result"]["decision"] == "rejected"
+        }));
+    }
+
+    #[tokio::test]
+    async fn switching_days_changes_hidden_context_but_keeps_one_history() {
+        use crate::ai::agent::context::{PageContext, PageView};
+        let (db, _dir) = db();
+        let day = |date| {
+            crate::service::cycles::get_or_create_day(
+                &db,
+                crate::domain::calendar::parse_date(date).unwrap(),
+                now_ms(),
+            )
+            .unwrap()
+            .value
+        };
+        let first = day("2026-09-16");
+        let second = day("2026-09-23");
+        let provider = Arc::new(ContextRecorder::default());
+        let selection = |cycle: &crate::domain::cycle::Cycle| TurnContext {
+            cycle_id: Some(cycle.id.clone()),
+            focused_task_id: None,
+            page: Some(PageContext {
+                view: PageView::Workspace,
+                long_term_cycle_id: None,
+                week_cycle_id: cycle.parent_id.clone(),
+                day_cycle_id: Some(cycle.id.clone()),
+                week_starts_on: Some(
+                    if cycle.id == first.id {
+                        "2026-09-14"
+                    } else {
+                        "2026-09-21"
+                    }
+                    .into(),
+                ),
+                selected_date: cycle.starts_on.clone(),
+            }),
+        };
+        let a = run_turn(
+            &db,
+            provider.clone(),
+            fake_resolved(),
+            executor(),
+            &selection(&first),
+            "Remember this conversation",
+        )
+        .await
+        .unwrap();
+        let b = run_turn(
+            &db,
+            provider.clone(),
+            fake_resolved(),
+            executor(),
+            &selection(&second),
+            "Continue with the selected day",
+        )
+        .await
+        .unwrap();
+        assert_eq!(a.conversation_id, b.conversation_id);
+        assert_eq!(get_conversation(&db).unwrap().unwrap().messages.len(), 4);
+        let requests = provider.0.lock().unwrap();
+        assert!(requests[0]
+            .context_block
+            .contains(&format!("<active_cycle_id>{}</active_cycle_id>", first.id)));
+        assert!(requests[1]
+            .context_block
+            .contains(&format!("<active_cycle_id>{}</active_cycle_id>", second.id)));
+        assert!(requests[1].context_block.contains(&format!(
+            "<selected_week id=\"{}\"",
+            second.parent_id.as_ref().unwrap()
+        )));
+        assert!(requests[1]
+            .context_block
+            .contains("<selected_date>2026-09-23</selected_date>"));
+        assert!(requests[1]
+            .history
+            .iter()
+            .any(|m| m.content == "Remember this conversation"));
+        assert!(requests[1]
+            .history
+            .iter()
+            .any(|m| m.content == "Kept in Coach"));
+        assert!(requests[1]
+            .history
+            .iter()
+            .all(|m| !m.content.contains("<page_state>")));
+        assert_eq!(requests[1].user_message, "Continue with the selected day");
+    }
+
+    #[tokio::test]
+    async fn global_chat_works_without_a_plan_and_does_not_create_one() {
+        let (db, _dir) = db();
+        let provider = Arc::new(ContextRecorder::default());
+        run_turn(
+            &db,
+            provider.clone(),
+            fake_resolved(),
+            executor(),
+            &TurnContext::default(),
+            "Hello",
+        )
+        .await
+        .unwrap();
+        let requests = provider.0.lock().unwrap();
+        assert!(requests[0]
+            .context_block
+            .contains("<active_cycle_id>null</active_cycle_id>"));
+        assert!(!requests[0].context_block.contains("<cycle>"));
+        let conn = db.pool().get().unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM cycles WHERE id <> 'later'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(get_conversation(&db).unwrap().unwrap().messages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn in_flight_global_turn_rejects_send_from_another_plan() {
+        struct Delayed {
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+        impl LlmProvider for Delayed {
+            fn generate_agent(
+                &self,
+                _: AgentRequest,
+            ) -> crate::ai::llm::BoxFuture<'_, Result<crate::ai::llm::AgentResponse, AgentError>>
+            {
+                Box::pin(async {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                    Ok(crate::ai::llm::AgentResponse {
+                        text: "Original reply".into(),
+                        tool_calls: vec![],
+                        usage: None,
+                    })
+                })
+            }
+            fn generate_json(
+                &self,
+                _: crate::ai::llm::LlmRequest,
+            ) -> crate::ai::llm::BoxFuture<'_, Result<serde_json::Value, AgentError>> {
+                unreachable!()
+            }
+        }
+        let (db, _dir) = db();
+        let first = month_cycle(&db);
+        let second = crate::service::cycles::get_or_create_day(
+            &db,
+            crate::domain::calendar::parse_date("2026-09-23").unwrap(),
+            now_ms(),
+        )
+        .unwrap()
+        .value
+        .id;
+        let provider = Arc::new(Delayed {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let running = {
+            let db = db.clone();
+            let provider = provider.clone();
+            tokio::spawn(async move {
+                run_turn(
+                    &db,
+                    provider,
+                    fake_resolved(),
+                    executor(),
+                    &turn_context(&first),
+                    "Keep running",
+                )
+                .await
+            })
+        };
+        provider.entered.notified().await;
+        assert!(get_conversation(&db)
+            .unwrap()
+            .unwrap()
+            .active_turn_id
+            .is_some());
+        let rejected = run_turn(
+            &db,
+            Arc::new(ContextRecorder::default()),
+            fake_resolved(),
+            executor(),
+            &turn_context(&second),
+            "Another page",
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(rejected, AppError::Conflict { ref code, .. } if code == "turn_in_progress")
+        );
+        provider.release.notify_one();
+        running.await.unwrap().unwrap();
+        let view = get_conversation(&db).unwrap().unwrap();
+        assert!(view.active_turn_id.is_none());
+        assert_eq!(view.messages.len(), 2);
+        assert_eq!(view.messages[1].payload["text"], "Original reply");
     }
 
     #[tokio::test]
@@ -729,9 +1445,8 @@ mod tests {
                 provider.clone(),
                 fake_resolved(),
                 executor(),
-                &cycle,
+                &turn_context(&cycle),
                 "设计 review",
-                None,
             )
             .await
             .unwrap();
@@ -767,9 +1482,8 @@ mod tests {
             provider,
             fake_resolved(),
             executor(),
-            &cycle,
+            &turn_context(&cycle),
             "hi",
-            None,
         )
         .await
         .unwrap();
@@ -778,7 +1492,7 @@ mod tests {
         assert_eq!(result.messages[0].message_type, "user");
         assert_eq!(result.messages[1].message_type, "model_text");
         // Second read path agrees.
-        let view = get_conversation(&db, &cycle).unwrap().unwrap();
+        let view = get_conversation(&db).unwrap().unwrap();
         assert_eq!(view.messages.len(), 2);
         assert_eq!(view.revision, 1);
     }
@@ -798,13 +1512,12 @@ mod tests {
             )])),
             fake_resolved(),
             executor(),
-            &cycle,
+            &turn_context(&cycle),
             "one",
-            None,
         )
         .await
         .unwrap();
-        let view = get_conversation(&db, &cycle).unwrap().unwrap();
+        let view = get_conversation(&db).unwrap().unwrap();
         assert_eq!(view.messages.len(), 2);
     }
 
@@ -826,9 +1539,8 @@ mod tests {
             provider,
             fake_resolved(),
             executor(),
-            &cycle,
+            &turn_context(&cycle),
             "use tools",
-            None,
         )
         .await
         .unwrap();
@@ -855,7 +1567,7 @@ mod tests {
         let (db, _dir) = db();
         let cycle = month_cycle(&db);
         let conn = db.pool().get().unwrap();
-        let conversation = repo::get_or_create_conversation(&conn, &cycle, 1).unwrap();
+        let conversation = repo::get_or_create_conversation(&conn, 1).unwrap();
         assert!(repo::claim_turn(&conn, &conversation.id, "foreign").unwrap());
         drop(conn);
 
@@ -865,9 +1577,8 @@ mod tests {
             provider,
             fake_resolved(),
             executor(),
-            &cycle,
+            &turn_context(&cycle),
             "hi",
-            None,
         )
         .await
         .unwrap_err();
@@ -890,9 +1601,8 @@ mod tests {
             provider,
             fake_resolved(),
             executor(),
-            &cycle,
+            &turn_context(&cycle),
             "hi",
-            None,
         )
         .await
         .unwrap_err();
@@ -901,9 +1611,7 @@ mod tests {
             "no_active_provider"
         });
         let conn = db.pool().get().unwrap();
-        let conversation = repo::conversation_for_cycle(&conn, &cycle)
-            .unwrap()
-            .unwrap();
+        let conversation = repo::conversation(&conn).unwrap().unwrap();
         assert!(conversation.active_turn_id.is_none(), "turn released");
         assert!(conversation.last_error.is_some(), "error persisted");
         assert!(
@@ -974,9 +1682,8 @@ mod tests {
             Arc::new(Recorder(std::sync::atomic::AtomicUsize::new(0))),
             fake_resolved(),
             Arc::new(crate::ai::tools::ToolRegistry),
-            &cycle,
+            &turn_context(&cycle),
             "Plan this cycle",
-            None,
         )
         .await
         .unwrap();
@@ -1058,9 +1765,8 @@ mod tests {
             )])),
             fake_resolved(),
             executor(),
-            &cycle,
+            &turn_context(&cycle),
             "Show a table",
-            None,
         )
         .await
         .unwrap();
@@ -1069,9 +1775,8 @@ mod tests {
             Arc::new(Planner(std::sync::atomic::AtomicUsize::new(0))),
             fake_resolved(),
             Arc::new(crate::ai::tools::ToolRegistry),
-            &cycle,
+            &turn_context(&cycle),
             INSTRUCTION,
-            None,
         )
         .await
         .unwrap();
@@ -1113,9 +1818,8 @@ mod tests {
             ])),
             fake_resolved(),
             Arc::new(crate::ai::tools::ToolRegistry),
-            &cycle,
+            &turn_context(&cycle),
             "Revise it",
-            None,
         )
         .await
         .unwrap();
@@ -1146,9 +1850,8 @@ mod tests {
             ])),
             fake_resolved(),
             Arc::new(crate::ai::tools::ToolRegistry),
-            &cycle,
+            &turn_context(&cycle),
             "Remove it",
-            None,
         )
         .await
         .unwrap();
@@ -1199,9 +1902,7 @@ mod tests {
         assert_eq!(result.active_skill.as_deref(), Some("long_term_planning"));
         // The persisted row carries the skill for the next turn.
         let conn = db.pool().get().unwrap();
-        let conversation = repo::conversation_for_cycle(&conn, &cycle)
-            .unwrap()
-            .unwrap();
+        let conversation = repo::conversation(&conn).unwrap().unwrap();
         assert_eq!(
             conversation.active_skill.as_deref(),
             Some("long_term_planning")

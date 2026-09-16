@@ -1,8 +1,7 @@
-//! SQL for the agent conversation aggregate: one conversation per planning
-//! cycle, ordered messages, skill and error state
-//! (add-ai-planning-core §2; schema in migration 0001).
+//! SQL for the global Coach conversation aggregate: ordered messages, skill
+//! and error state (schema migration 0014).
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::error::{from_rusqlite, AppError, AppResult};
 
@@ -10,7 +9,6 @@ use crate::error::{from_rusqlite, AppError, AppResult};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Conversation {
     pub id: String,
-    pub cycle_id: String,
     /// Set while a turn is in flight; the concurrency guard reads it.
     pub active_turn_id: Option<String>,
     pub revision: i64,
@@ -37,18 +35,17 @@ pub struct Message {
 }
 
 const CONVERSATION_COLUMNS: &str =
-    "id, cycle_id, active_turn_id, revision, active_skill, last_error, created_at, updated_at";
+    "id, active_turn_id, revision, active_skill, last_error, created_at, updated_at";
 
 fn row_to_conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
     Ok(Conversation {
         id: row.get(0)?,
-        cycle_id: row.get(1)?,
-        active_turn_id: row.get(2)?,
-        revision: row.get(3)?,
-        active_skill: row.get(4)?,
-        last_error: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        active_turn_id: row.get(1)?,
+        revision: row.get(2)?,
+        active_skill: row.get(3)?,
+        last_error: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 
@@ -67,15 +64,11 @@ fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<Message> {
     })
 }
 
-/// The cycle's conversation, or `None` before the first use (spec: 每周期一条
-/// 会话 — creation happens on demand).
-pub fn conversation_for_cycle(
-    conn: &Connection,
-    cycle_id: &str,
-) -> AppResult<Option<Conversation>> {
+/// The global Coach conversation, or `None` before the first use.
+pub fn conversation(conn: &Connection) -> AppResult<Option<Conversation>> {
     conn.query_row(
-        &format!("SELECT {CONVERSATION_COLUMNS} FROM agent_conversations WHERE cycle_id = ?1"),
-        params![cycle_id],
+        &format!("SELECT {CONVERSATION_COLUMNS} FROM agent_conversations WHERE id = 'coach'"),
+        [],
         row_to_conversation,
     )
     .optional()
@@ -112,7 +105,8 @@ pub fn expire_idle(conn: &Connection, now_ms: i64) -> AppResult<()> {
     if !conn.is_autocommit() {
         return expire_idle_in_transaction(conn, now_ms);
     }
-    let tx = conn.unchecked_transaction().map_err(from_rusqlite)?;
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+        .map_err(from_rusqlite)?;
     expire_idle_in_transaction(&tx, now_ms)?;
     tx.commit().map_err(from_rusqlite)
 }
@@ -130,24 +124,38 @@ fn expire_idle_in_transaction(conn: &Connection, now_ms: i64) -> AppResult<()> {
     Ok(())
 }
 
-/// Insert-or-get for the cycle's single conversation.
-pub fn get_or_create_conversation(
+/// Insert-or-get for the single global Coach conversation.
+pub fn get_or_create_conversation(conn: &Connection, now_ms: i64) -> AppResult<Conversation> {
+    // The expiration pass reads settings before it may write the conversation
+    // row.  A deferred transaction can take a WAL snapshot for that read and
+    // then fail with SQLITE_BUSY_SNAPSHOT when several fresh pools initialize
+    // Coach at once.  Initialization is a short, single-writer operation, so
+    // begin it as IMMEDIATE and let SQLite's configured busy timeout serialize
+    // independent connections.  Callers already inside a transaction keep
+    // that transaction boundary and must not attempt a nested BEGIN.
+    if conn.is_autocommit() {
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+            .map_err(from_rusqlite)?;
+        let conversation = get_or_create_conversation_in_transaction(&tx, now_ms)?;
+        tx.commit().map_err(from_rusqlite)?;
+        return Ok(conversation);
+    }
+
+    get_or_create_conversation_in_transaction(conn, now_ms)
+}
+
+fn get_or_create_conversation_in_transaction(
     conn: &Connection,
-    cycle_id: &str,
     now_ms: i64,
 ) -> AppResult<Conversation> {
     expire_idle(conn, now_ms)?;
-    if let Some(existing) = conversation_for_cycle(conn, cycle_id)? {
-        return Ok(existing);
-    }
-    let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO agent_conversations (id, cycle_id, revision, created_at, updated_at) \
-         VALUES (?1, ?2, 0, ?3, ?3)",
-        params![id, cycle_id, now_ms],
+        "INSERT INTO agent_conversations (id, revision, created_at, updated_at) \
+         VALUES ('coach', 0, ?1, ?1) ON CONFLICT(id) DO NOTHING",
+        params![now_ms],
     )
     .map_err(from_rusqlite)?;
-    conversation_for_cycle(conn, cycle_id)?
+    conversation(conn)?
         .ok_or_else(|| AppError::Internal("conversation vanished right after insert".to_string()))
 }
 
@@ -271,15 +279,11 @@ pub fn finish_turn(
     .map_err(from_rusqlite)
 }
 
-/// The latest conversation across cycles, for "previous conversation" reads.
-pub fn latest_for_cycle(conn: &Connection, cycle_id: &str) -> AppResult<Option<Conversation>> {
-    conversation_for_cycle(conn, cycle_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::Db;
+    use std::sync::{Arc, Barrier};
 
     fn db() -> (Db, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -302,7 +306,7 @@ mod tests {
         }
         crate::service::settings::set_app_flag(&db, CONTEXT_IDLE_SETTING.into(), "1".into())
             .unwrap();
-        let c = get_or_create_conversation(&conn, "later", 1000).unwrap();
+        let c = get_or_create_conversation(&conn, 1000).unwrap();
         conn.execute(
             "UPDATE agent_conversations SET active_skill='daily_planning' WHERE id=?1",
             [&c.id],
@@ -313,40 +317,30 @@ mod tests {
             Some(61_000)
         );
         expire_idle(&conn, 61_000).unwrap();
-        assert!(conversation_for_cycle(&conn, "later")
-            .unwrap()
-            .unwrap()
-            .active_skill
-            .is_none());
+        assert!(conversation(&conn).unwrap().unwrap().active_skill.is_none());
     }
 
     #[test]
     fn expiry_clears_only_idle_context_at_fifteen_minutes_and_never_extends_on_read() {
         let (db, _dir) = db();
         let conn = db.pool().get().unwrap();
-        let c = get_or_create_conversation(&conn, "later", 1000).unwrap();
+        let c = get_or_create_conversation(&conn, 1000).unwrap();
         conn.execute(
             "UPDATE agent_conversations SET active_skill='daily_planning' WHERE id=?1",
             [&c.id],
         )
         .unwrap();
         conn.execute("INSERT INTO agent_messages (id,conversation_id,turn_id,sequence_number,message_type,payload_json) VALUES ('m',?1,'t',1,'user','{}')", [&c.id]).unwrap();
-        get_or_create_conversation(&conn, "later", 1000 + CONTEXT_IDLE_TTL_MS - 1).unwrap();
+        get_or_create_conversation(&conn, 1000 + CONTEXT_IDLE_TTL_MS - 1).unwrap();
         assert_eq!(list_messages(&conn, &c.id, 0).unwrap().len(), 1);
-        assert_eq!(
-            conversation_for_cycle(&conn, "later")
-                .unwrap()
-                .unwrap()
-                .updated_at,
-            "1000"
-        );
+        assert_eq!(conversation(&conn).unwrap().unwrap().updated_at, "1000");
         claim_turn(&conn, &c.id, "running").unwrap();
         expire_idle(&conn, 1000 + CONTEXT_IDLE_TTL_MS).unwrap();
         assert_eq!(list_messages(&conn, &c.id, 0).unwrap().len(), 1);
         release_turn(&conn, &c.id).unwrap();
         expire_idle(&conn, 1000 + CONTEXT_IDLE_TTL_MS).unwrap();
         assert!(list_messages(&conn, &c.id, 0).unwrap().is_empty());
-        let cleared = conversation_for_cycle(&conn, "later").unwrap().unwrap();
+        let cleared = conversation(&conn).unwrap().unwrap();
         assert!(cleared.active_skill.is_none());
         assert_eq!(cleared.revision, 1);
         assert!(crate::repository::cycles::get(&conn, "later")
@@ -355,56 +349,82 @@ mod tests {
     }
 
     #[test]
-    fn get_or_create_is_one_per_cycle() {
+    fn get_or_create_is_one_global_and_idempotent() {
         let (db, _dir) = db();
         let conn = db.pool().get().unwrap();
-        let first = get_or_create_conversation(&conn, "later", 1).unwrap();
-        let second = get_or_create_conversation(&conn, "later", 2).unwrap();
+        let first = get_or_create_conversation(&conn, 1).unwrap();
+        let second = get_or_create_conversation(&conn, 2).unwrap();
         assert_eq!(first.id, second.id);
         assert_eq!(first.revision, 0);
         assert!(first.active_skill.is_none());
     }
 
     #[test]
-    fn messages_are_sequential_and_isolated_per_conversation() {
+    fn concurrent_initialization_is_one_global_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("concurrent-coach.db");
+        let db = crate::db::open_at(&path).unwrap();
+        let workers = 8;
+        let barrier = Arc::new(Barrier::new(workers));
+        let mut handles = Vec::with_capacity(workers);
+        let worker_dbs: Vec<Db> = (0..workers)
+            .map(|_| crate::db::open_at(&path).unwrap())
+            .collect();
+
+        for worker_db in worker_dbs {
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                let conn = worker_db.pool().get().unwrap();
+                barrier.wait();
+                get_or_create_conversation(&conn, 42).unwrap().id
+            }));
+        }
+
+        let ids: Vec<String> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert!(ids.iter().all(|id| id == "coach"));
+
+        let conn = db.pool().get().unwrap();
+        let row_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_conversations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(row_count, 1);
+        assert_eq!(conversation(&conn).unwrap().unwrap().id, "coach");
+    }
+
+    #[test]
+    fn messages_are_sequential_in_the_global_conversation() {
         let (db, _dir) = db();
         let conn = db.pool().get().unwrap();
-        // Conversations must reference real cycles (FK + invariant trigger).
-        let month = crate::service::cycles::create_planning_cycle(
-            &db,
-            &crate::service::cycles::CreateCycleArgs {
-                cycle_type: "month".into(),
-                duration_months: Some(1),
-                ..Default::default()
-            },
-            crate::domain::calendar::today_local(),
-            1,
-        )
-        .unwrap()
-        .value;
-        let conversation = get_or_create_conversation(&conn, "later", 1).unwrap();
-        let other = get_or_create_conversation(&conn, &month.id, 1).unwrap();
-        for (index, conversation_id) in [&conversation.id, &other.id].into_iter().enumerate() {
-            let message = Message {
-                id: uuid::Uuid::new_v4().to_string(),
-                conversation_id: conversation_id.to_string(),
-                turn_id: "t1".into(),
-                sequence_number: index as i64 + 1,
-                message_type: "user".into(),
-                payload_json: "{\"text\":\"hi\"}".into(),
-                created_at: "now".into(),
-            };
-            insert_message(&conn, &message).unwrap();
+        let conversation = get_or_create_conversation(&conn, 1).unwrap();
+        for (index, turn_id) in ["t1", "t2"].into_iter().enumerate() {
+            insert_message(
+                &conn,
+                &Message {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    conversation_id: conversation.id.clone(),
+                    turn_id: turn_id.into(),
+                    sequence_number: index as i64 + 1,
+                    message_type: "user".into(),
+                    payload_json: "{\"text\":\"hi\"}".into(),
+                    created_at: "now".into(),
+                },
+            )
+            .unwrap();
         }
-        assert_eq!(list_messages(&conn, &conversation.id, 0).unwrap().len(), 1);
-        assert_eq!(max_sequence(&conn, &conversation.id).unwrap(), 1);
+        assert_eq!(list_messages(&conn, &conversation.id, 0).unwrap().len(), 2);
+        assert_eq!(max_sequence(&conn, &conversation.id).unwrap(), 2);
     }
 
     #[test]
     fn message_type_check_rejects_unknown_types() {
         let (db, _dir) = db();
         let conn = db.pool().get().unwrap();
-        let conversation = get_or_create_conversation(&conn, "later", 1).unwrap();
+        let conversation = get_or_create_conversation(&conn, 1).unwrap();
         let bad = Message {
             id: uuid::Uuid::new_v4().to_string(),
             conversation_id: conversation.id.clone(),
@@ -421,7 +441,7 @@ mod tests {
     fn finish_turn_bumps_revision_and_persists_skill() {
         let (db, _dir) = db();
         let conn = db.pool().get().unwrap();
-        let conversation = get_or_create_conversation(&conn, "later", 1).unwrap();
+        let conversation = get_or_create_conversation(&conn, 1).unwrap();
         assert!(claim_turn(&conn, &conversation.id, "t1").unwrap());
         assert!(
             !claim_turn(&conn, &conversation.id, "t2").unwrap(),
@@ -439,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn cycle_delete_cascades_conversation_and_messages() {
+    fn cycle_delete_preserves_conversation_and_messages() {
         let (db, _dir) = db();
         let conn = db.pool().get().unwrap();
         // Create a real planning cycle to host the conversation.
@@ -455,12 +475,12 @@ mod tests {
         )
         .unwrap()
         .value;
-        let conversation = get_or_create_conversation(&conn, &month.id, 1).unwrap();
+        let coach = get_or_create_conversation(&conn, 1).unwrap();
         insert_message(
             &conn,
             &Message {
                 id: uuid::Uuid::new_v4().to_string(),
-                conversation_id: conversation.id.clone(),
+                conversation_id: coach.id.clone(),
                 turn_id: "t1".into(),
                 sequence_number: 1,
                 message_type: "user".into(),
@@ -470,9 +490,7 @@ mod tests {
         )
         .unwrap();
         crate::service::cycles::delete_cycle(&db, &month.id).unwrap();
-        assert!(conversation_for_cycle(&conn, &month.id).unwrap().is_none());
-        assert!(list_messages(&conn, &conversation.id, 0)
-            .unwrap()
-            .is_empty());
+        assert!(conversation(&conn).unwrap().is_some());
+        assert_eq!(list_messages(&conn, &coach.id, 0).unwrap().len(), 1);
     }
 }

@@ -180,11 +180,10 @@ repeats(
 );
 
 agent_conversations(
-  id TEXT PRIMARY KEY,
-  cycle_id TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY NOT NULL CHECK (id = 'coach'),
   active_turn_id TEXT, revision INTEGER NOT NULL DEFAULT 0,
   active_skill TEXT CHECK (active_skill IS NULL OR active_skill IN
-    ('goal_setting','long_term_planning','short_term_planning','prioritization')),
+    ('goal_setting','long_term_planning','short_term_planning','weekly_planning','daily_planning','prioritization','review','period_analysis','planning_issues')),
   last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 
@@ -203,7 +202,7 @@ agent_messages(
 app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);  -- 见"设置"
 ```
 
-`agent_conversations` / `agent_messages` 表可以先建表但不由当前业务写入；具体写入由 agent conversation 能力负责，避免为将来重做迁移。
+`agent_conversations` 只有 id 为 `coach` 的全局会话；`agent_messages` 的序号在该会话内全局递增。迁移 14 从旧周期会话暂存消息，按 `turn_created_at`、旧会话 id、回合首序号、`turn_id`、旧消息序号排序后重新编号，移除会话到 `cycles` 的外键；技能和错误取 `updated_at` 最近的旧会话行，无法在重启后续用的 `active_turn_id` 清空。删除周期不再级联 Coach 历史。
 
 ### 数据库级不变量
 
@@ -233,6 +232,9 @@ app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);  -- 见"设置"
 3. `session` 与 Do Later **没有日历键**（同一天可有多个专注块）。
 
 Do Later 容器固定 `id = 'later'`，`type='month'`，`duration = 0`，无日期。**注意 `duration` 是 `0` 而不是 `NULL`**——上游的种子数据就是这么写的（迁移 25 的 insert 里 duration 位是 `0`）；`NULL` 虽然在迁移 45 之后被允许，但 `later` 实例用的是 0。所有任务都必须属于某条周期（不引入"无周期任务"这个平行状态）。
+
+Later 中的任务使用 `tasks.later_plan_type` 保存移入前的 `month/week/day` 层级。字段只在 Later 内允许非空（迁移 13 的 CHECK），新建收纳项写入 `month`；旧 `NULL` 按长期处理，不猜测来源。编辑树和同层移动子树在 Later 内按此类型分界，避免已关联的周项与长期目标因进入同一容器而被合并。`promote_later_goal` 的目标 id 可省略：周项在 Rust 中按本地今天与 `week_start_day` 解析本周，日项解析今天；长期项仍由前端选择周期。目标创建、同层子树移动、类型清空及失效外部父关联清理在同一事务内完成，成功后通过既有周期/任务事件失效缓存。
+
 
 ### 时间表示
 
@@ -297,7 +299,7 @@ Tauri 命令的顶层参数使用默认 `camelCase`，例如 `get_editor_workspa
 | `cycles:changed` | `{ cycle_ids: string[] }` | 失效周期相关查询 |
 | `tasks:changed` | `{ cycle_ids: string[] }` | 失效任务相关查询 |
 | `proposals:changed` | `{ cycle_id: string }` | 失效待确认摘要 |
-| `agent:conversation_updated` | `{ conversation_id, cycle_id, revision }` | 失效该周期的会话 |
+| `agent:conversation_updated` | `{ conversation_id, revision }` | 失效全局 Coach 会话 |
 
 事件只做"失效通知"，载荷不带业务数据——避免出现第二份真相。
 
@@ -395,9 +397,11 @@ react-query 缓存 ←────────── 失效并重取 ←──�
 
 `ai/period_analysis.rs` 负责校验自然日期范围和构造一致快照，复用现有任务、周期、Work mix，不新增“季度计划”容器。范围与周期区间求交（周期 ends_on 为排他边界），包含归档，排除 Later、Focus Block 容器与无日期计划，并报告数据限制。Coach 在时段技能下调用 `get_period_context` 读取；另有只读 `analyze_planning_period` IPC 可供独立报表入口复用。数量按层级展示，不把周目标与其日步骤相加。超过上下文上限显式失败。
 
-会话超时配置复用 app_settings 的 `ai.context-idle-minutes`。默认 15，后端验证 1–1440 整数。最后完成回合的 updated_at 决定到期时间；查询不续期。读取和新回合前事务清除空闲过期消息/技能/错误，前端依据服务端 expires_at 定时重取，并在设置更新后失效查询。进行中的回合受租约保护，完成后重新计时。应用关闭期间无需运行清理进程，恢复后的首次读取即执行失效，不会向模型重放过期历史。
+会话超时配置复用 app_settings 的 `ai.context-idle-minutes`。默认 15，后端验证 1–1440 整数。全局 Coach 最后完成回合的 updated_at 决定到期时间；查询不续期。读取和新回合前事务清除空闲过期消息/技能/错误，前端依据服务端 expires_at 定时重取，并在设置更新后失效查询。进行中的回合由 `active_turn_id` 保护，完成后重新计时。应用关闭期间无需运行清理进程，恢复后的首次读取即执行失效，不会向模型重放过期历史。
 
-迁移 9 扩展已有 active_skill 约束；重建会话表前暂存消息，避免外键级联误删历史，随后恢复并测试外键一致性。
+迁移 9 扩展已有 active_skill 约束；迁移 14 重建会话表前暂存消息，避免外键级联误删历史，随后把旧周期会话合并为 `coach` 单例。
+
+Coach 使用固定的 `coach` 会话身份；Rust repository 通过 `get_or_create_conversation` 读写这一行，AgentPanel 在应用 shell 中稳定挂载，消息、草稿和滚动位置仍由现有 React state/ref 管理。发送命令捕获 `pageContext`（`long_term_cycle_id`、`week_cycle_id`、`day_cycle_id`、`view`、`week_starts_on`、`selected_date`），`load_turn_context` 仅在回合开始加载一次事实并生成 `<page_state>`；后续工具沿用这份快照，切换页面不会追加消息或重读浏览 scope。无计划时 `active_cycle_id` 为 null，Coach 可直接聊天，计划专用入口仍需目标周期。
 
 后续独立处理：周期末历史归属/完成事件账本、按日期归因的实际专注时长、范围分析缓存与分层汇总。当前范围分析明确提供“目前数据库中的计划快照”，不伪造过去状态。原 App 专注块内部行动清单仍是单独功能差距。
 
@@ -414,11 +418,13 @@ Halaska 仅适配等待指示器和相关视觉/动效模式，MIT 声明保留�
 
 工具目录收敛为 24 项、按技能提供 6–19 项，详见 [工具目录](coach-tools.md)。`ai/tools.rs` 保留目标内容预览与技能路由；`ai/tool_catalog.rs` 定义封闭参数和按技能提供的工具；`ai/actions.rs` 保存及执行 GUI 确认后的非任务行操作。只新增一张通用 `agent_actions` 表（迁移 10），没有为每种工具建立实体。设置按单项确认；provider/model 只暴露白名单元数据，模型不能接触凭据。
 
-工具创建提案与 GUI 确认是不同入口，模型目录没有批准命令。移动事务复用 service::tasks::move_task，原 ID 与同周期子任务保留，跨层关联的周/日事务保留在原周期；替代此前复制和删除分开确认的移动工具。任务内容预览沿用原始快照。Coach 的单条确认把任务提交和 app_tool_result 回执写入同一事务；会话过期清理可复用调用方事务。回执进入聊天历史，可供后续模型读取。
+工具创建提案与 GUI 确认是不同入口，模型目录没有批准命令。移动事务复用 service::tasks::move_task，原 ID 与同周期子任务保留，跨层关联的周/日事务保留在原周期；替代此前复制和删除分开确认的移动工具。任务内容预览沿用原始快照。任务预览按 `task_id` 与 approve/reject 处理；非任务 `agent_actions` 通过 `cycle_id`、`action_id` 与 approve 处理，并保留动作的 `source_cycle_id` 供原目标校验。提交和 `app_tool_result` 回执写入同一事务。同步和异步确认都在代码作用域内取得全局回合 guard，直到 claim/动作/回执/finish 完成；忙时先拒绝且不改计划，失败由 owner token 释放，不新增数据库实体。确认入口跨页面可见，不按当前浏览 scope 重定向；会话过期清理可复用调用方事务。回执进入全局聊天历史，可供后续模型读取。
 
 工具回合及确认后统一失效 workspace、calendar、任务、设置、提醒、模型选择等查询。包括工具成功后模型最终回复失败的情形，界面仍重新读取已保存的提案。
 
 `ai/persona.rs` 首次补齐 `~/.goal/persona.md`，不覆盖已有文件；每次生成重新读取。Persona 管表达方式，SKILL 管工作流，代码管可用工具、确认和数据契约。Coach 与时段分析共用 persona。
+
+架构债务：旧进程若在回合中崩溃，持久化的 `active_turn_id` 没有启动恢复机制；迁移 14 只清理迁移时无法续用的旧标记，本次不扩大为进程恢复设计。
 
 
 ## 任务预览投影与写入锁（2026-09-15）

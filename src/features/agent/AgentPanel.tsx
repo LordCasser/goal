@@ -3,28 +3,29 @@
  * 「会话消息的角色区分」「候选回答由模型内联给出」，design.md §8.2）。
  *
  * 外壳：标题栏（Coach + 当前技能小字 + 关闭）、可滚动消息区、固定底部
- * 输入区；挂载即 startAgentConversation 拿会话壳，查询键带 cycleId，切换
- * 周期自动取该周期自己的会话（spec: agent-conversation「每周期一条会话」，
- * 历史互不串台）。消息按角色区分：用户靠右带浅底，模型文本靠左无底，
+ * 输入区；挂载即 startAgentConversation 拿全局会话壳，切换周期只更新每次
+ * turn 的页面上下文，不重建历史。消息按角色区分：用户靠右带浅底，模型文本靠左无底，
  * 工具/技能事件收敛为小号状态行——工具结果的 JSON 不裸露，只提炼状态
  * 短语。模型内联的 <next_steps> 剥离为可点快捷回复并附平台快捷键（有候选才
  * 拦截按键）。发送失败保留输入与历史，接入类错误给设置路径（8.2「失败」）。
  */
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type * as React from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { invalidateAgentEffects, qk } from "../../lib/events";
+import { completeAgentTurn, invalidateAgentEffects, qk } from "../../lib/events";
 import {
   isAppError,
   sendAgentMessage,
   startAgentConversation,
   startPlanning,
+  type AgentPageContext,
   type MessageView,
 } from "../../lib/ipc";
 import { errorMessage, formatMessage, t, useTranslation } from "../../lib/i18n";
 import { matchesPrimaryShortcut, primaryShortcut } from "../../lib/platform";
 import { Button, ProgressDot, cn } from "../../ui";
+import { ChatMessage, ChatScrollArea, PromptInput } from "../../ui/ai";
 import { PanelShell } from "./PanelShell";
 import { parseNextSteps } from "./nextSteps";
 import { AI_TURN_MUTATION_KEY } from "./PlanWithAI";
@@ -34,7 +35,8 @@ import { PlanApprovalCard } from "../proposals/PlanApprovalCard";
 import { ActionApprovalCard } from "../proposals/ActionApprovalCard";
 
 export type AgentPanelProps = {
-  cycleId: string;
+  cycleId: string | null;
+  pageContext?: AgentPageContext | null;
   onClose: () => void;
   externalPlanning?: boolean;
   planningError?: unknown;
@@ -84,44 +86,47 @@ const SKILL_LABEL_KEYS: Record<string, string> = {
 /** 这些错误码意味着没接供应商：文案给设置路径，而不是当作临时失败（8.2）。 */
 const PROVIDER_SETUP_CODES = new Set(["no_active_provider", "credentials_missing", "provider_not_verified"]);
 
-/** 输入框自动增高的上限；超过后内部滚动，不挤走消息区（8.2「输入中」）。 */
-const INPUT_MAX_HEIGHT_PX = 120;
-
 /** 快捷回复的上限（主修饰键 + 1…9）。 */
 const MAX_QUICK_REPLIES = 9;
 
-export function AgentPanel({ cycleId, onClose, externalPlanning = false, planningError, initialDraft = "", focusedTaskId }: AgentPanelProps): React.JSX.Element {
+export function AgentPanel({ cycleId, pageContext = null, onClose, externalPlanning = false, planningError, initialDraft = "", focusedTaskId }: AgentPanelProps): React.JSX.Element {
   const { t: translate } = useTranslation("ai");
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState(initialDraft);
+  const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const followLatest = useRef(true);
   const [showLatest, setShowLatest] = useState(false);
+  useEffect(() => {
+    // Issue discussions seed an empty composer once; never overwrite ordinary
+    // user text when the active planning surface changes.
+    if (initialDraft.trim() !== "") setDraft((current) => current.trim() === "" ? initialDraft : current);
+  }, [initialDraft]);
 
-  // 会话壳：find-or-create，同一周期复用同一条会话；查询键含 cycleId，
-  // 切换周期时 react-query 自动取该周期自己的会话。
+  // One global conversation survives cycle/view changes. The page context is
+  // attached to each turn, so changing selection never forks or resets history.
   const conversation = useQuery({
-    queryKey: qk.agentConversation(cycleId),
-    queryFn: () => startAgentConversation(cycleId),
-    enabled: cycleId !== "",
+    queryKey: qk.agentConversation(),
+    queryFn: startAgentConversation,
     refetchIntervalInBackground: true,
-    refetchInterval: (query) => query.state.data?.expires_at
-      ? Math.max(1000, query.state.data.expires_at - Date.now()) : false,
+    refetchInterval: (query) => query.state.data?.active_turn_id
+      ? 1000
+      : query.state.data?.expires_at
+        ? Math.max(1000, query.state.data.expires_at - Date.now())
+        : false,
   });
 
   const invalidateConversation = () => {
     invalidateAgentEffects(queryClient);
-    void queryClient.invalidateQueries({ queryKey: qk.agentConversation(cycleId) });
   };
 
   // 发送失败保留输入与历史：只有成功才清空草稿、失效会话查询。
   const send = useMutation({
     mutationKey: AI_TURN_MUTATION_KEY,
-    mutationFn: (input: { text: string; clearDraft: boolean }) =>
-      sendAgentMessage(cycleId, input.text, focusedTaskId),
-    onSuccess: (_result, input) => {
-      if (input.clearDraft) setDraft("");
+    mutationFn: (input: { cycleId: string | null; text: string; focusedTaskId: string | null; pageContext: AgentPageContext | null; clearDraft: boolean }) =>
+      sendAgentMessage(input.cycleId, input.text, input.focusedTaskId, input.pageContext),
+    onSuccess: (result, input) => {
+      completeAgentTurn(queryClient, result);
+      if (input.clearDraft) setDraft((current) => current.trim() === input.text ? "" : current);
     },
     onSettled: invalidateConversation,
   });
@@ -129,10 +134,13 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
   // 空会话的唯一起始入口：结果作为 app_tool_result 出现在会话里。
   const startPlan = useMutation({
     mutationKey: AI_TURN_MUTATION_KEY,
-    mutationFn: () => startPlanning(cycleId),
+    mutationFn: (input: { cycleId: string; pageContext: AgentPageContext | null }) => startPlanning(input.cycleId, input.pageContext),
+    onSuccess: (result) => completeAgentTurn(queryClient, result),
     onSettled: invalidateConversation,
   });
-  const busy = send.isPending || startPlan.isPending || externalPlanning;
+  const deciding = useIsMutating({ mutationKey: qk.agentDecision() }) > 0;
+  const globallyBusy = useIsMutating({ mutationKey: AI_TURN_MUTATION_KEY }) > 0;
+  const busy = globallyBusy || externalPlanning || Boolean(conversation.data?.active_turn_id);
 
   // 历史按序号排序渲染（spec: agent-conversation「消息模型」）。
   const messages = [...(conversation.data?.messages ?? [])].sort(
@@ -157,17 +165,10 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
 
   const submitMessage = (text: string, clearDraft: boolean) => {
     const trimmed = text.trim();
-    if (trimmed === "" || cycleId === "" || busy) return;
+    if (trimmed === "" || busy || deciding) return;
     followLatest.current = true;
     setShowLatest(false);
-    send.mutate({ text: trimmed, clearDraft });
-  };
-
-  const onInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter 发送、Shift+Enter 换行；输入法组合中的 Enter 不发送。
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    submitMessage(draft, true);
+    send.mutate({ cycleId, text: trimmed, focusedTaskId: focusedTaskId ?? null, pageContext, clearDraft });
   };
 
   // 面板内平台快捷键选中候选；有候选时才拦截对应组合（design.md 10）。
@@ -193,25 +194,12 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
     submitMessage(option, false);
   };
 
-  // 输入框自动增高：上限内随内容长高，之后内部滚动（8.2「输入中」）。
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const next = Math.min(el.scrollHeight, INPUT_MAX_HEIGHT_PX);
-    el.style.height = next > 0 ? `${next}px` : "";
-  }, [draft]);
-
   // Follow replies only while reading the latest message; scrolling up keeps position.
   const messageCount = messages.length;
   useEffect(() => {
-    followLatest.current = true;
-    setShowLatest(false);
-  }, [cycleId]);
-  useEffect(() => {
     const el = scrollRef.current;
     if (el && followLatest.current) el.scrollTop = el.scrollHeight;
-  }, [cycleId, messageCount, conversation.data?.revision, send.isPending]);
+  }, [messageCount, conversation.data?.revision, send.isPending]);
 
   const activeSkill = conversation.data?.active_skill ?? null;
   const skillLabel = activeSkill !== null && activeSkill !== "none"
@@ -235,7 +223,7 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
     >
       {/* 消息区独立滚动；输入区固定在底部（spec: Agent 侧栏外壳）。 */}
       <div className="relative min-h-0 flex-1">
-      <div ref={scrollRef} data-testid="coach-messages" className="h-full overflow-x-hidden overflow-y-auto px-4 pb-4"
+      <ChatScrollArea ref={scrollRef} data-testid="coach-messages" className="h-full px-4 pb-4"
         onScroll={(event) => {
           const el = event.currentTarget;
           followLatest.current = el.scrollHeight - el.clientHeight - el.scrollTop < 40;
@@ -276,8 +264,8 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
                 variant="secondary"
                 size="compact"
                 loading={startPlan.isPending}
-                disabled={busy}
-                onClick={() => startPlan.mutate()}
+                disabled={busy || deciding || cycleId === null}
+                onClick={() => { if (cycleId !== null) startPlan.mutate({ cycleId, pageContext }); }}
               >
                 {translate("agent.startPlanning")}
               </Button>
@@ -287,7 +275,7 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
             </div>
           )}
         </div>
-      </div>
+      </ChatScrollArea>
       {showLatest && <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
         <Button size="icon" variant="secondary" className="pointer-events-auto h-8 w-8 rounded-full bg-content shadow-sm" aria-label={translate("agent.latestMessage")} title={translate("agent.latestMessage")} onClick={() => {
           const el = scrollRef.current;
@@ -298,10 +286,10 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
       </div>}
       </div>
       <footer className="shrink-0 border-t border-light px-4 py-3">
-        <div className="max-h-[38vh] overflow-y-auto">
-          <PlanApprovalCard cycleId={cycleId} disabled={busy} />
-          <ActionApprovalCard cycleId={cycleId} disabled={busy} />
-        </div>
+        <ChatScrollArea className="max-h-[38vh] space-y-3 empty:hidden [&:not(:empty)]:mb-3">
+          <PlanApprovalCard disabled={busy} />
+          <ActionApprovalCard disabled={busy} />
+        </ChatScrollArea>
         {send.isError && (
           <div className="mb-2 flex flex-col gap-0.5">
             <p className="text-caption text-danger">{errorText(send.error)}</p>
@@ -310,29 +298,9 @@ export function AgentPanel({ cycleId, onClose, externalPlanning = false, plannin
             )}
           </div>
         )}
-        <div className="coach-composer flex items-end gap-2 rounded-xl border border-light bg-subtle p-2 transition-colors focus-within:border-control focus-within:bg-content">
-        <textarea
-          ref={inputRef}
-          aria-label={translate("agent.messageLabel")}
-          value={draft}
-          rows={1}
-          disabled={busy}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onInputKeyDown}
-          placeholder={translate("agent.messagePlaceholder")}
-          className={cn(
-            "max-h-[120px] min-w-0 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1.5 py-1.5 outline-none focus-visible:outline-none",
-            "text-body text-primary placeholder:text-hint",
-            "transition-colors duration-100",
-            "disabled:cursor-not-allowed disabled:text-hint",
-          )}
-        />
-        <Button variant="primary" size="icon" className="h-8 w-8 rounded-full" aria-label={translate("agent.sendMessage")} title={translate("agent.sendMessageTitle")}
-          disabled={busy || !draft.trim() || !cycleId} onClick={() => submitMessage(draft, true)}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>
-        </Button>
-        </div>
-        <p className="mt-1.5 px-1 text-[11px] text-hint">{translate("agent.enterHint")}</p>
+        <PromptInput value={draft} onValueChange={setDraft} onSubmit={() => submitMessage(draft, true)}
+          disabled={busy || deciding} label={translate("agent.messageLabel")} placeholder={translate("agent.messagePlaceholder")}
+          sendLabel={translate("agent.sendMessage")} hint={translate("agent.enterHint")} />
       </footer>
     </PanelShell>
   );
@@ -356,11 +324,7 @@ function MessageRow({
   switch (payload.kind) {
     case "text":
       return (
-        <div className="coach-message flex justify-end">
-          <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-xl rounded-br-sm bg-subtle px-3.5 py-2.5 text-body text-primary">
-            {payload.text}
-          </p>
-        </div>
+        <ChatMessage role="user">{payload.text}</ChatMessage>
       );
     case "model_text": {
       const parsed = parseNextSteps(payload.text);
@@ -369,7 +333,7 @@ function MessageRow({
         quickOptions.length > 0 &&
         onPickOption !== undefined;
       return (
-        <div className="coach-message flex min-w-0 flex-col items-start gap-3">
+        <ChatMessage role="assistant">
           {parsed.body !== "" && (
             <ChatMarkdown>{parsed.body}</ChatMarkdown>
           )}
@@ -392,7 +356,7 @@ function MessageRow({
               ))}
             </div>
           )}
-        </div>
+        </ChatMessage>
       );
     }
     case "app_tool_result": {
@@ -400,7 +364,7 @@ function MessageRow({
         ? formatApprovalReceipt(payload.result)
         : null;
       return receipt
-        ? <p role="status" className="coach-message flex items-start gap-2 text-body text-primary"><span aria-hidden="true" className="text-secondary">✓</span><span>{receipt}</span></p>
+        ? <p role="status" className="coach-message flex items-start gap-2 text-body text-primary"><span aria-hidden="true" className="text-secondary">✓</span><span className="min-w-0 break-words [overflow-wrap:anywhere]">{receipt}</span></p>
         : null;
     }
     case "function_call":
@@ -546,7 +510,9 @@ function formatApprovalReceipt(result: Record<string, unknown>): string | null {
     const title = titleDetail && isRecord(titleDetail.args) && typeof titleDetail.args.title === "string"
       ? titleDetail.args.title
       : detailMessages.map((detail) => formatMessage(detail)).join(" · ");
-    return formatMessage({ key: "backend-actions:receipt.task", args: { status, summary, title } });
+    const receipt = formatMessage({ key: "backend-actions:receipt.task", args: { status, summary, title } });
+    const destination = detailMessages.find((detail) => typeof detail !== "string" && detail.key === "backend-actions:task.destination");
+    return destination ? `${receipt} ${formatMessage(destination)}` : receipt;
   }
   return formatMessage({ key: "backend-actions:receipt.action", args: { status, summary, details: detailMessages } });
 }

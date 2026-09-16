@@ -37,6 +37,7 @@ function task(id: string, title: string, cycle_id: string, over: Partial<TaskNod
     children: [],
     subtasks_markdown: "",
     ...over,
+    later_plan_type: over.later_plan_type ?? null,
     focused_time: over.focused_time ?? 0,
   };
 }

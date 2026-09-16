@@ -129,7 +129,6 @@ pub fn run() {
             commands::agent::start_agent_conversation,
             commands::agent::send_agent_message,
             commands::agent::get_agent_conversation,
-            commands::agent::get_previous_agent_conversation,
             commands::agent::start_planning,
             commands::agent::analyze_planning_period,
             commands::agent::start_goal_setting,

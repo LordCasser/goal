@@ -27,7 +27,7 @@ export function WindowBar({
   issuesActive: boolean;
   onToggleLater: () => void;
   onToggleAgent: () => void;
-  onReviewChanges: (cycleId:string) => void;
+  onReviewChanges: (cycleId:string|null) => void;
   onToggleIssues: () => void;
   onOpenSettings: () => void;
   view: "workspace" | "calendar";
@@ -77,9 +77,9 @@ export function WindowBar({
       </div>
       <div className="mx-3 h-5 w-px bg-light" aria-hidden="true" />
       <div role="group" aria-label={t("desktop.planningTools")} className="flex items-center gap-1">
-        <button type="button" aria-expanded={agentActive} disabled={!hasCycle}
+        <button type="button" aria-expanded={agentActive}
           aria-label={t("desktop.coach")}
-          title={hasCycle ? t("desktop.openCoach") : t("desktop.createPlanCoach")}
+          title={t("desktop.openCoach")}
           className={`${buttonBase} ${agentActive ? active : hover}`} onClick={onToggleAgent}>
           <CoachIcon /><span className="window-tool-label">{t("desktop.coach")}</span>
         </button>

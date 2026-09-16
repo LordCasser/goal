@@ -22,11 +22,11 @@ fn temporary_database_reopens_with_committed_and_coach_preview_state() {
     let committed = add_task(&db, &month.id, "Saved commitment", NOW);
     let preview_target = add_task(&db, &month.id, "Original Coach title", NOW + 1);
 
-    // Coach state is stored independently from the task preview, but both
-    // belong to the same cycle and must survive a process restart.
+    // Coach state is stored independently from the task preview and must
+    // survive a process restart.
     let conversation = {
         let conn = db.pool().get().expect("database connection");
-        agent::get_or_create_conversation(&conn, &month.id, NOW).expect("Coach conversation")
+        agent::get_or_create_conversation(&conn, NOW).expect("Coach conversation")
     };
     let preview_input = TaskInput {
         title: "Coach proposed title".into(),
@@ -48,7 +48,7 @@ fn temporary_database_reopens_with_committed_and_coach_preview_state() {
     let reopened = planner_lib::db::open_at(&path).expect("reopen temporary database");
     let conn = reopened.pool().get().expect("reopened database connection");
 
-    let reopened_conversation = agent::conversation_for_cycle(&conn, &month.id)
+    let reopened_conversation = agent::conversation(&conn)
         .expect("read Coach conversation")
         .expect("Coach conversation persisted");
     assert_eq!(reopened_conversation.id, conversation.id);

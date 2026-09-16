@@ -43,7 +43,7 @@ describe("HintCard", () => {
     renderCard();
     expect(await screen.findByText("Park now, plan later")).toBeTruthy();
     expect(
-      screen.getByText(/Capture a goal the moment it shows up/),
+      screen.getByText(/Capture ideas or park plans/),
     ).toBeTruthy();
   });
 

@@ -20,9 +20,10 @@ import {
   type PlannerState,
   type TaskNode,
 } from "../../lib/ipc";
+import { qk } from "../../lib/events";
 import { LATER_HINT_KEY, LaterPanel } from "./LaterPanel";
 
-function cycleFixture(id: string, title: string): Cycle {
+function cycleFixture(id: string, title: string, over: Partial<Cycle> = {}): Cycle {
   return {
     id,
     title,
@@ -42,6 +43,7 @@ function cycleFixture(id: string, title: string): Cycle {
     calendar_key: null,
     repeat_id: null,
     created_at: 0,
+    ...over,
   };
 }
 
@@ -64,13 +66,21 @@ function taskFixture(id: string, title: string, over: Partial<TaskNode> = {}): T
     children: [],
     subtasks_markdown: "",
     ...over,
+    later_plan_type: over.later_plan_type ?? null,
     focused_time: over.focused_time ?? 0,
   };
 }
 
 /** 按命令名分发固定返回值；未覆盖的命令一律返回 null。 */
 function mockBackend(
-  over: { hintFlag?: string | null; tasks?: TaskNode[]; plannerCycles?: Cycle[] } = {},
+  over: {
+    hintFlag?: string | null;
+    tasks?: TaskNode[];
+    plannerCycles?: Cycle[];
+    promoteResult?: TaskNode;
+    promoteReject?: unknown;
+    promotePending?: boolean;
+  } = {},
 ): void {
   const planner: PlannerState = {
     cycles: over.plannerCycles ?? [cycleFixture("lt-1", "Long-term 1")],
@@ -84,6 +94,10 @@ function mockBackend(
         return Promise.resolve(planner);
       case commands.getTaskDeletionPreview:
         return Promise.resolve({ task_id: "t1", descendant_tasks: 0, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "impact-1" });
+      case commands.promoteLaterGoal:
+        if (over.promotePending) return new Promise<TaskNode>(() => undefined);
+        if (over.promoteReject !== undefined) return Promise.reject(over.promoteReject);
+        return Promise.resolve(over.promoteResult ?? taskFixture("t1", "Read a book", { cycle_id: "lt-1" }));
       case commands.getEditorWorkspace:
         return Promise.resolve<EditorWorkspace>({
           work_mix: null,
@@ -178,7 +192,7 @@ describe("LaterPanel", () => {
       expect(client.getQueryData(["app-flag", LATER_HINT_KEY])).toBe("dismissed"),
     );
     expect(screen.queryByRole("button", { name: "Dismiss hint" })).toBeNull();
-    expect(screen.queryByText(/Capture a goal/i)).toBeNull();
+    expect(screen.queryByText(/Capture ideas or park plans/i)).toBeNull();
   });
 
   it("closes the panel on Escape from anywhere inside", () => {
@@ -228,6 +242,33 @@ describe("LaterPanel", () => {
     );
   });
 
+  it("preserves the parent for Enter on a nested Later row", async () => {
+    mockBackend({
+      tasks: [
+        taskFixture("root", "Root", {
+          children: [taskFixture("child", "Child", { parent_id: "root", position: 1 })],
+        }),
+      ],
+    });
+    renderPanel();
+    const child = (await screen.findAllByLabelText("Task title")).find(
+      (input) => (input as HTMLInputElement).value === "Child",
+    );
+    expect(child).toBeTruthy();
+    fireEvent.keyDown(child!, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(commands.addTask, {
+        args: {
+          cycle_id: LATER_CYCLE_ID,
+          title: "",
+          parent_id: "root",
+          position: 2,
+        },
+      }),
+    );
+  });
+
   it("promotes directly when exactly one long-term cycle exists", async () => {
     mockBackend({
       tasks: [taskFixture("t1", "Read a book")],
@@ -244,6 +285,115 @@ describe("LaterPanel", () => {
         targetCycleId: "lt-1",
       }),
     );
+  });
+
+  it("shows the retained Later plan type beside each row", async () => {
+    mockBackend({
+      tasks: [
+        taskFixture("month", "Long-term idea"),
+        taskFixture("week", "Weekly idea", { later_plan_type: "week", position: 1 }),
+        taskFixture("day", "Daily idea", { later_plan_type: "day", position: 2 }),
+      ],
+    });
+    renderPanel();
+
+    expect(await screen.findByText("Long-term goal")).toBeTruthy();
+    expect(screen.getByText("Week plan")).toBeTruthy();
+    expect(screen.getByText("Day plan")).toBeTruthy();
+  });
+
+  it("schedules week and day Later items through the backend default targets", async () => {
+    mockBackend({
+      plannerCycles: [],
+      tasks: [
+        taskFixture("week", "Weekly idea", { later_plan_type: "week" }),
+        taskFixture("day", "Daily idea", { later_plan_type: "day", position: 1 }),
+      ],
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Schedule for this week" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Schedule for today" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(commands.promoteLaterGoal, {
+        taskId: "week",
+        targetCycleId: null,
+      });
+      expect(invokeMock).toHaveBeenCalledWith(commands.promoteLaterGoal, {
+        taskId: "day",
+        targetCycleId: null,
+      });
+    });
+  });
+
+  it("locks the row while a promote request is pending", async () => {
+    mockBackend({
+      promotePending: true,
+      tasks: [taskFixture("week", "Weekly idea", { later_plan_type: "week" })],
+    });
+    renderPanel();
+    const promote = await screen.findByRole("button", { name: "Schedule for this week" });
+    const title = screen.getByDisplayValue("Weekly idea") as HTMLInputElement;
+    const checkbox = screen.getByRole("checkbox");
+    const deleteButton = screen.getByRole("button", { name: "Delete parked goal" });
+
+    fireEvent.click(promote);
+    await waitFor(() => {
+      expect(title.readOnly).toBe(true);
+      expect(checkbox).toHaveProperty("disabled", true);
+      expect(deleteButton).toHaveProperty("disabled", true);
+    });
+    fireEvent.keyDown(title, { key: "Enter" });
+    expect(invokeMock).not.toHaveBeenCalledWith(commands.addTask, expect.anything());
+  });
+
+  it("keeps the row and shows a localized error when scheduling fails", async () => {
+    mockBackend({
+      promoteReject: { code: "db_error", message: "database unavailable" },
+      tasks: [taskFixture("week", "Weekly idea", { later_plan_type: "week" })],
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "Schedule for this week" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not access local data");
+    expect(alert.parentElement?.classList.contains("group")).toBe(true);
+    expect(alert.parentElement?.classList.contains("flex")).toBe(false);
+    expect(screen.getByDisplayValue("Weekly idea")).toBeTruthy();
+  });
+
+  it("filters archived and finished long-term cycles from the target menu", async () => {
+    mockBackend({
+      plannerCycles: [
+        cycleFixture("active", "Active"),
+        cycleFixture("active-2", "Active 2"),
+        cycleFixture("archived", "Archived", { archived: true }),
+        cycleFixture("finished", "Finished", { finished: true }),
+      ],
+      tasks: [taskFixture("month", "Long-term idea")],
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "Promote to a long-term cycle" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Active" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Archived" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Finished" })).toBeNull();
+  });
+
+  it("invalidates Later, the moved workspace, and planner state after scheduling", async () => {
+    mockBackend({
+      plannerCycles: [cycleFixture("active", "Active")],
+      tasks: [taskFixture("month", "Long-term idea")],
+      promoteResult: taskFixture("month", "Long-term idea", { cycle_id: "active" }),
+    });
+    const { client } = renderPanel();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    fireEvent.click(await screen.findByRole("button", { name: "Promote to a long-term cycle" }));
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.editorWorkspace(LATER_CYCLE_ID) }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.editorWorkspace("active") });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.plannerState() });
   });
 
   it("asks for a target cycle when several long-term cycles exist", async () => {

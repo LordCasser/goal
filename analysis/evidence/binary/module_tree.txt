@@ -1,0 +1,182 @@
+== MODULES (crate::module::submodule) with item counts ==
+  hyperfocus::                                                                2
+  hyperfocus::ai::agent::conversation::lifecycle                              1
+  hyperfocus::ai::agent::conversation::snapshot                               2
+  hyperfocus::ai::agent::conversation::storage                                3
+  hyperfocus::ai::agent::cycle_labels                                         2
+  hyperfocus::ai::agent::prioritization::repository                           4
+  hyperfocus::ai::agent::prioritization::workflow                             3
+  hyperfocus::ai::agent::prompt                                               2
+  hyperfocus::ai::agent::prompt::ActiveAgentSkill                             1
+  hyperfocus::ai::agent::service::parsing                                     2
+  hyperfocus::ai::agent::service::turn                                        4
+  hyperfocus::ai::agent::tools                                                1
+  hyperfocus::ai::agent::tools::create_goal                                   1
+  hyperfocus::ai::agent::tools::delete_goal                                   1
+  hyperfocus::ai::agent::tools::get_cycle_context::schema                     1
+  hyperfocus::ai::agent::tools::shared::activation                            1
+  hyperfocus::ai::agent::tools::shared::cycle_context                         2
+  hyperfocus::ai::agent::tools::shared::cycle_metadata                        4
+  hyperfocus::ai::agent::tools::shared::cycle_mutability                      2
+  hyperfocus::ai::agent::tools::shared::cycle_resolution                      1
+  hyperfocus::ai::agent::tools::shared::preview_execution                     5
+  hyperfocus::ai::agent::tools::shared::task_context                          4
+  hyperfocus::ai::agent::tools::start_planning                                1
+  hyperfocus::ai::agent::tools::start_prioritization                          1
+  hyperfocus::ai::agent::tools::update_goal                                   2
+  hyperfocus::ai::agent::tools::update_goal_breakdown::args                   4
+  hyperfocus::ai::agent::tools::update_goal_breakdown::execute                1
+  hyperfocus::ai::agent::tools::update_goal_breakdown::merge                  1
+  hyperfocus::ai::agent::tools::update_prioritization_breakdown               3
+  hyperfocus::ai::agent::types                                                3
+  hyperfocus::ai::goal_breakdown::gathering_plan                              7
+  hyperfocus::ai::goal_breakdown::prompt::extraction                          3
+  hyperfocus::ai::goal_breakdown::prompt::parent_matching                     2
+  hyperfocus::ai::goal_breakdown::prompt::shared                              4
+  hyperfocus::ai::goal_breakdown::service                                     1
+  hyperfocus::ai::goal_breakdown::types::breakdown::GoalBreakdown             2
+  hyperfocus::ai::llm::gemini_mapping::content                                2
+  hyperfocus::ai::llm::gemini_mapping::requests                               3
+  hyperfocus::ai::llm::gemini_mapping::responses                              2
+  hyperfocus::ai::llm::openrouter_client::OpenRouterClient                    1
+  hyperfocus::ai::llm::openrouter_mapping                                    11
+  hyperfocus::ai::llm::resolved_client                                        2
+  hyperfocus::ai::llm::schema_mapping                                         1
+  hyperfocus::ai::llm::traits::LLMProvider                                    1
+  hyperfocus::ai::llm::types::agent_request::AgentRequest                     1
+  hyperfocus::ai::llm::types::agent_request::AgentRequestBuilder              2
+  hyperfocus::ai::llm::types::agent_response::AgentResponse                   1
+  hyperfocus::ai::llm::types::request::LLMRequest                             1
+  hyperfocus::ai::llm::types::request::LLMRequestBuilder                      2
+  hyperfocus::ai::llm::worker_client                                          1
+  hyperfocus::ai::llm::worker_client::WorkerLlmClient                         2
+  hyperfocus::analytics                                                       1
+  hyperfocus::analytics::AnalyticsService                                     1
+  hyperfocus::commands::cycles::calendar                                      6
+  hyperfocus::commands::cycles::copy_previous                                 3
+  hyperfocus::commands::cycles::create                                        3
+  hyperfocus::commands::cycles::deletion::evaluator                           1
+  hyperfocus::commands::cycles::lifecycle                                     1
+  hyperfocus::commands::cycles::queries                                       2
+  hyperfocus::commands::cycles::sessions                                      1
+  hyperfocus::commands::exit_poll                                             6
+  hyperfocus::commands::feedback                                              5
+  hyperfocus::commands::getting_started_guide                                 3
+  hyperfocus::commands::settings                                              2
+  hyperfocus::commands::settings::ai                                          3
+  hyperfocus::commands::talk_to_founder                                       1
+  hyperfocus::commands::tasks                                                 3
+  hyperfocus::commands::tasks::clarity                                        1
+  hyperfocus::commands::tasks::link_colors                                    3
+  hyperfocus::commands::tasks::metrics                                        1
+  hyperfocus::commands::tasks::move_task                                      1
+  hyperfocus::commands::tasks::parent_links                                   2
+  hyperfocus::commands::tasks::patch                                          2
+  hyperfocus::commands::tasks::planning_issue_dismissals                      2
+  hyperfocus::commands::tasks::planning_issues::PlanningIssueTaskRow          1
+  hyperfocus::commands::tasks::preview::resolve                               2
+  hyperfocus::commands::tasks::preview::types                                 2
+  hyperfocus::commands::tasks::queries                                        2
+  hyperfocus::commands::utils                                                 6
+  hyperfocus::credentials::openrouter                                         1
+  hyperfocus::database::backup                                                2
+  hyperfocus::database::dialog                                                1
+  hyperfocus::entitlement::device                                             2
+  hyperfocus::entitlement::service                                            2
+  hyperfocus::entitlement::service::EntitlementService                        2
+  hyperfocus::entitlement::verification                                       2
+  hyperfocus::events::agent                                                   1
+  hyperfocus::events::cycles                                                  1
+  hyperfocus::events::tasks                                                   3
+  hyperfocus::exit_poll::eligibility                                          1
+  hyperfocus::exit_poll::lifecycle                                            2
+  hyperfocus::exit_poll::lifecycle::ExitPollCoordinator                       4
+  hyperfocus::exit_poll::macos_menu                                           1
+  hyperfocus::openrouter_oauth                                                5
+  hyperfocus::openrouter_oauth::OpenRouterOAuthCoordinator                    3
+  hyperfocus::session_expiry_worker                                           1
+  hyperfocus::settings::Settings                                              5
+
+== DIRECT CHILDREN TREE ==
+  hyperfocus
+      -> ai, analytics, commands, credentials, database, entitlement, events, exit_poll, openrouter_oauth, session_expiry_worker, settings
+  hyperfocus::ai
+      -> agent, goal_breakdown, llm
+  hyperfocus::ai::agent
+      -> conversation, cycle_labels, prioritization, prompt, service, tools, types
+  hyperfocus::ai::agent::conversation
+      -> lifecycle, snapshot, storage
+  hyperfocus::ai::agent::prioritization
+      -> repository, workflow
+  hyperfocus::ai::agent::prompt
+      -> ActiveAgentSkill
+  hyperfocus::ai::agent::service
+      -> parsing, turn
+  hyperfocus::ai::agent::tools
+      -> create_goal, delete_goal, get_cycle_context, shared, start_planning, start_prioritization, update_goal, update_goal_breakdown, update_prioritization_breakdown
+  hyperfocus::ai::agent::tools::get_cycle_context
+      -> schema
+  hyperfocus::ai::agent::tools::shared
+      -> activation, cycle_context, cycle_metadata, cycle_mutability, cycle_resolution, preview_execution, task_context
+  hyperfocus::ai::agent::tools::update_goal_breakdown
+      -> args, execute, merge
+  hyperfocus::ai::goal_breakdown
+      -> gathering_plan, prompt, service, types
+  hyperfocus::ai::goal_breakdown::prompt
+      -> extraction, parent_matching, shared
+  hyperfocus::ai::goal_breakdown::types
+      -> breakdown
+  hyperfocus::ai::goal_breakdown::types::breakdown
+      -> GoalBreakdown
+  hyperfocus::ai::llm
+      -> gemini_mapping, openrouter_client, openrouter_mapping, resolved_client, schema_mapping, traits, types, worker_client
+  hyperfocus::ai::llm::gemini_mapping
+      -> content, requests, responses
+  hyperfocus::ai::llm::openrouter_client
+      -> OpenRouterClient
+  hyperfocus::ai::llm::traits
+      -> LLMProvider
+  hyperfocus::ai::llm::types
+      -> agent_request, agent_response, request
+  hyperfocus::ai::llm::types::agent_request
+      -> AgentRequest, AgentRequestBuilder
+  hyperfocus::ai::llm::types::agent_response
+      -> AgentResponse
+  hyperfocus::ai::llm::types::request
+      -> LLMRequest, LLMRequestBuilder
+  hyperfocus::ai::llm::worker_client
+      -> WorkerLlmClient
+  hyperfocus::analytics
+      -> AnalyticsService
+  hyperfocus::commands
+      -> cycles, exit_poll, feedback, getting_started_guide, settings, talk_to_founder, tasks, utils
+  hyperfocus::commands::cycles
+      -> calendar, copy_previous, create, deletion, lifecycle, queries, sessions
+  hyperfocus::commands::cycles::deletion
+      -> evaluator
+  hyperfocus::commands::settings
+      -> ai
+  hyperfocus::commands::tasks
+      -> clarity, link_colors, metrics, move_task, parent_links, patch, planning_issue_dismissals, planning_issues, preview, queries
+  hyperfocus::commands::tasks::planning_issues
+      -> PlanningIssueTaskRow
+  hyperfocus::commands::tasks::preview
+      -> resolve, types
+  hyperfocus::credentials
+      -> openrouter
+  hyperfocus::database
+      -> backup, dialog
+  hyperfocus::entitlement
+      -> device, service, verification
+  hyperfocus::entitlement::service
+      -> EntitlementService
+  hyperfocus::events
+      -> agent, cycles, tasks
+  hyperfocus::exit_poll
+      -> eligibility, lifecycle, macos_menu
+  hyperfocus::exit_poll::lifecycle
+      -> ExitPollCoordinator
+  hyperfocus::openrouter_oauth
+      -> OpenRouterOAuthCoordinator
+  hyperfocus::settings
+      -> Settings

@@ -1,0 +1,24 @@
+{
+  "validated_at": "2026-09-14T07:34:59.306050+00:00",
+  "requirements": 35,
+  "scenarios": 70,
+  "website_evidence_ids": [
+    "W01",
+    "W02",
+    "W03",
+    "W04",
+    "W05",
+    "W06",
+    "W07",
+    "W08"
+  ],
+  "local_links_checked": 34,
+  "broken_links": [],
+  "source_assets_hash_verified": 13,
+  "html_hash_verified": true,
+  "browser_jpegs": 5,
+  "user_confirmed_requirement": "UXR-033",
+  "specs_and_source_unchanged": true,
+  "json_valid": true,
+  "ax_unrelated_browser_context_removed": true
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,9 +11,10 @@ vi.mock("./lib/ipc", () => ({
   startPlanning: planning,
 }));
 vi.mock("./lib/events", () => ({
-  qk: { plannerState: () => ["planner"], settings: () => ["settings"], agentConversation: (id: string) => ["conversation", id] },
+  qk: { plannerState: () => ["planner"], settings: () => ["settings"], agentConversation: () => ["conversation"], agentDecision: () => ["agent-decision"] },
   initEventInvalidation: async () => () => {},
   invalidateAgentEffects: () => {},
+  completeAgentTurn: () => {},
 }));
 // App tests pin the desktop target explicitly; the host running Vitest must
 // not decide whether Later uses Command or Control.
@@ -53,7 +54,13 @@ vi.mock("./features/desktop/useDesktopWindow", () => ({
   }),
 }));
 vi.mock("./features/onboarding/api", () => ({ markExitPollListenerReady: async () => ({ show: false }) }));
-vi.mock("./features/agent/AgentPanel", () => ({ AgentPanel: ({ cycleId,initialDraft,focusedTaskId }: { cycleId:string;initialDraft?:string;focusedTaskId?:string }) => <section aria-label="Coach context"><span>{cycleId}</span>{initialDraft && <input aria-label="Issue discussion" value={initialDraft} data-task={focusedTaskId} readOnly/>}</section> }));
+let nextCoachInstance = 0;
+vi.mock("./features/agent/AgentPanel", () => ({ AgentPanel: ({ cycleId,initialDraft,focusedTaskId }: { cycleId:string|null;initialDraft?:string;focusedTaskId?:string }) => {
+  const instance = useRef(++nextCoachInstance).current;
+  const [draft, setDraft] = useState(initialDraft ?? "");
+  useEffect(() => { if (initialDraft !== undefined && draft === "") setDraft(initialDraft); }, [draft, initialDraft]);
+  return <section aria-label="Coach context" data-instance={instance}><span>{cycleId}</span><input aria-label="Coach draft" value={draft} onChange={(event) => setDraft(event.target.value)} />{initialDraft && <input aria-label="Issue discussion" value={initialDraft} data-task={focusedTaskId} readOnly/>}</section>;
+} }));
 vi.mock("./features/agent/IssuePanel", () => ({ IssuePanel: ({onDiscuss,onLocateTask}:{onDiscuss: (cycleId:string,prompt:string,taskId:string)=>void;onLocateTask:(cycleId:string,taskId:string)=>void}) => <><button onClick={()=>onDiscuss("day-plan","Check this issue","task-1")}>Discuss diagnostic</button><button onClick={()=>onLocateTask("day-plan","task-1")}>Locate diagnostic</button></> }));
 vi.mock("./features/later/LaterPanel", () => ({
   LaterPanel: () => <section role="region" aria-label="Later drawer" />,
@@ -65,8 +72,9 @@ vi.mock("./features/settings/SettingsDialog", () => ({
 }));
 vi.mock("./features/onboarding/ExitPollDialog", () => ({ ExitPollDialog: () => null }));
 vi.mock("./features/planner/PlannerWorkspace", () => ({
-  PlannerWorkspace: ({ active, onPlanWithAI }: { active: boolean; onPlanWithAI: (id: string) => void }) => {
+  PlannerWorkspace: ({ active, onPlanWithAI, onPageContextChange }: { active: boolean; onPlanWithAI: (id: string) => void; onPageContextChange?: (context: { view: "workspace"; long_term_cycle_id: string|null; week_cycle_id: string|null; day_cycle_id: string|null; week_starts_on: string|null; selected_date: string|null }) => void }) => {
     const [draft, setDraft] = useState("");
+    useEffect(() => { onPageContextChange?.({ view: "workspace", long_term_cycle_id: "month-plan", week_cycle_id: "week-plan", day_cycle_id: "day-plan", week_starts_on: null, selected_date: null }); }, [onPageContextChange]);
     return <><input aria-label="Plan draft" data-active={active} value={draft} onChange={(e) => setDraft(e.target.value)} />
       {["month", "week", "day"].map((type) => <button key={type} onClick={() => onPlanWithAI(`${type}-plan`)}>Plan {type}</button>)}</>;
   },
@@ -90,7 +98,7 @@ describe("workspace / calendar transitions", () => {
   it.each(["month", "week", "day"])("opens Coach for the exact %s plan and starts it once", async (type) => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: `Plan ${type}` }));
-    await waitFor(() => expect(planning).toHaveBeenCalledWith(`${type}-plan`, expect.anything()));
+    await waitFor(() => expect(planning).toHaveBeenCalledWith(`${type}-plan`, expect.objectContaining({ view: "workspace" })));
     expect(planning).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByRole("region", { name: "Coach context" }).textContent).toBe(`${type}-plan`));
   });
@@ -155,6 +163,20 @@ it("hands an issue to Coach as a draft and can locate it from Calendar",async()=
   expect((draft as HTMLInputElement).value).toBe("Check this issue");
   expect(draft.getAttribute("data-task")).toBe("task-1");
   expect(planning).not.toHaveBeenCalled();
+});
+
+it("keeps one Coach instance and its draft when the panel closes and reopens", async () => {
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "Coach" }));
+  const panel = await screen.findByRole("region", { name: "Coach context" });
+  const instance = panel.getAttribute("data-instance");
+  const draft = screen.getByRole("textbox", { name: "Coach draft" });
+  fireEvent.change(draft, { target: { value: "留住这段上下文" } });
+  fireEvent.click(screen.getByRole("button", { name: "Coach" }));
+  fireEvent.click(screen.getByRole("button", { name: "Coach" }));
+  expect(screen.getByRole("region", { name: "Coach context" })).toBe(panel);
+  expect(screen.getByRole("region", { name: "Coach context" }).getAttribute("data-instance")).toBe(instance);
+  expect((screen.getByRole("textbox", { name: "Coach draft" }) as HTMLInputElement).value).toBe("留住这段上下文");
 });
 
 describe("Do Later keyboard shortcut", () => {

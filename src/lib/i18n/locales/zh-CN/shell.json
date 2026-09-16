@@ -137,7 +137,7 @@
   "onboarding.guide.step.completeFocusBlock.title": "完成一个 30 分钟专注块",
   "onboarding.guide.step.completeFocusBlock.detail": "完成一个专注时间达到 30 分钟以上的专注块。",
   "onboarding.hint.later.title": "先暂存，稍后规划",
-  "onboarding.hint.later.body": "想到目标时马上记下来，不必立即填写日期或计划。准备好后，再把暂存内容提升到长期周期。",
+  "onboarding.hint.later.body": "先记下想法，或暂存还不准备做的计划。移入的项目会保留类型：周计划安排到本周，日计划安排到今天，长期目标可选择长期周期。",
   "onboarding.hint.sessionDuration.title": "时长让计时器工作",
   "onboarding.hint.sessionDuration.body": "设置时长的专注块会在结束时倒计时并通知你，专注时间也会汇总到日、周、月计划中。",
   "onboarding.hint.crossLink.title": "连接不同层级",

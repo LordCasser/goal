@@ -341,5 +341,7 @@
   "issue.pendingPreview_one": "{{count}} Coach preview item is unconfirmed and excluded from this check.",
   "issue.pendingPreview_other": "{{count}} Coach preview items are unconfirmed and excluded from this check.",
   "proposals.pendingBarTitle_one": "{{count}} change: view and confirm in Coach",
-  "proposals.pendingBarTitle_other": "{{count}} changes: view and confirm in Coach"
+  "proposals.pendingBarTitle_other": "{{count}} changes: view and confirm in Coach",
+  "proposals.waitForTurn": "Coach is preparing these changes. Confirm them when the response finishes.",
+  "proposals.confirmAdd": "Confirm addition"
 }

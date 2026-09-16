@@ -39,7 +39,7 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
     queryKey: qk.editorWorkspace(LATER_CYCLE_ID),
     queryFn: () => getEditorWorkspace(LATER_CYCLE_ID),
   });
-  // 规划状态只为 Promote 提供长期（month）周期候选。
+  // 规划状态只为长期（month）类型提供目标周期候选。
   const planner = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
   // 自定 key：qk 工厂没有 app-flag 形状，这个 key 只有本面板消费。
   const hintFlag = useQuery({
@@ -48,8 +48,13 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
   });
 
   // Later 容器自身在 Rust 侧以 month 类型播种，这里要从候选里排除。
+  // 已归档或已结束的周期不能再接收 Later 项。
   const monthCycles = (planner.data?.cycles ?? []).filter(
-    (cycle) => cycle.type === "month" && cycle.id !== LATER_CYCLE_ID,
+    (cycle) =>
+      cycle.type === "month" &&
+      cycle.id !== LATER_CYCLE_ID &&
+      !cycle.archived &&
+      !cycle.finished,
   );
 
   const addGoal = useMutation({

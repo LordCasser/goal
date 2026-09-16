@@ -17,6 +17,7 @@ import {
   createPlanningCycle,
   isAppError,
   moveTask,
+  promoteLaterGoal,
   reorderTasks,
   setLocale,
   saveProvider,
@@ -106,6 +107,15 @@ describe("argument key contract", () => {
       cycleId: "s1",
       title: "Deep work",
       durationMs: null,
+    });
+  });
+
+  it("uses a null target to let the backend choose the current week or day", async () => {
+    invokeMock.mockResolvedValue({});
+    await promoteLaterGoal("later-task", null);
+    expect(invokeMock).toHaveBeenCalledWith(commands.promoteLaterGoal, {
+      taskId: "later-task",
+      targetCycleId: null,
     });
   });
 

@@ -1,0 +1,39 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Coach interaction fixture</title><div id="fixture"></div><script type="module">
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AgentPanel } from '/src/features/agent/AgentPanel.tsx';
+import { applyLocale } from '/src/lib/i18n/index.ts';
+import '/src/index.css';
+applyLocale('zh-CN');
+let callbacks = new Map(), nextId = 0;
+let committed = [], rejected = [], pending = true;
+const task = (id, title) => ({id, title, cycle_id:'past-day', later_plan_type:null, parent_id:null, completed:false, subtasks:[], position:0, proposal:'upsert', goal_breakdown:null, needs_refinement:null, needs_breakdown:null, root_color_key:null, copied_from_task_id:null, created_at:1});
+let tasks = [task('record','整理项目记录'), task('draft','完成设计初稿')];
+let messages = [
+{id:'u1', sequence_number:1, message_type:'user', turn_id:'import', payload:{kind:'text',text:'请导入下面的记录：\n2026/09/13 整理项目记录 完成设计初稿\n2026/09/14-2026/09/16 核对接口 完成联调'}},
+{id:'m1', sequence_number:2, message_type:'model_text', turn_id:'import', payload:{kind:'model_text',text:'已整理成待确认的事务。请核对日期和内容，确认后会保存到对应计划。'}}];
+window.__TAURI_INTERNALS__ = {
+transformCallback: (fn) => { const id = ++nextId; callbacks.set(id,fn); return id; },
+unregisterCallback: (id) => callbacks.delete(id),
+invoke: async (cmd,args={}) => {
+if(cmd==='start_agent_conversation') return {id:'global',active_turn_id:null,revision:messages.length,active_skill:'daily_planning',last_error:null,messages:structuredClone(messages),expires_at:null,context_idle_minutes:15};
+if(cmd==='get_pending_task_cycles') return tasks.length ? ['past-day'] : [];
+if(cmd==='get_preview_summary') return {cycle_id:'past-day',count:tasks.length,tasks:structuredClone(tasks),originals:Object.fromEntries(tasks.map(t=>[t.id,{...t,original_exists:false}])),deletion_impacts:{}};
+if(cmd==='get_planner_state') return {cycles:[{id:'past-day',title:'2026-09-13',starts_on:'2026-09-13'}]};
+if(cmd==='get_agent_actions') return [];
+if(cmd==='resolve_coach_task_preview') {
+ const selected=tasks.find(t=>t.id===args.taskId); if(!selected) throw new Error('Already resolved');
+ if(args.approve) committed.push({...selected,proposal:null}); else rejected.push(selected.id);
+ tasks=tasks.filter(t=>t.id!==selected.id);
+ messages.push({id:'receipt-'+args.taskId,sequence_number:messages.length+1,message_type:'app_tool_result',turn_id:'decision',payload:{kind:'app_tool_result',name:'approval_decision',result:{text:args.approve?'已新增事务「'+selected.title+'」，保存到 2026/09/13。':'已放弃「'+selected.title+'」。'}}});
+ return null;
+}
+if(cmd==='send_agent_message') throw {code:'provider_not_verified',message:'请先在设置中选择并测试 AI 模型。'};
+if(cmd==='plugin:event|listen') return ++nextId;
+return null;
+}};
+window.fixtureState = () => ({committed,rejected,tasks,messages});
+const root=document.querySelector('#fixture'); root.style.cssText='height:100vh;width:424px;margin-left:auto;';
+ReactDOM.createRoot(root).render(React.createElement(QueryClientProvider,{client:new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})},React.createElement(AgentPanel,{cycleId:'today',onClose:()=>{}})));
+</script></html>

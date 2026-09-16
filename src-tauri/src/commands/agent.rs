@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, State};
 
+use crate::ai::agent::context::{PageContext, TurnContext};
 use crate::ai::agent::turn::{self, ConversationView, ToolExecutor, TurnResult};
 use crate::ai::llm::resolve;
 use crate::ai::llm::RealProvider;
@@ -69,11 +70,8 @@ fn executor(ai: Option<&AiSettingsState>) -> Arc<dyn ToolExecutor> {
 }
 
 #[tauri::command]
-pub fn get_agent_actions(
-    db: State<'_, Db>,
-    cycle_id: String,
-) -> AppResult<Vec<crate::ai::actions::PendingAction>> {
-    crate::ai::actions::list(&db, &cycle_id)
+pub fn get_agent_actions(db: State<'_, Db>) -> AppResult<Vec<crate::ai::actions::PendingAction>> {
+    crate::ai::actions::list_all(&db)
 }
 
 /// Deliberately not a model tool. Only the user's approval card calls this.
@@ -87,6 +85,7 @@ pub async fn resolve_agent_action(
     action_id: String,
     approve: bool,
 ) -> AppResult<()> {
+    let mut decision_guard = turn::DecisionGuard::begin(&db)?;
     let item = crate::ai::actions::claim(&db, &cycle_id, &action_id, approve)?;
     if approve {
         let result = crate::ai::actions::apply(&db, &ai, &item.action).await;
@@ -147,9 +146,7 @@ pub async fn resolve_agent_action(
         ),
     );
     let result = serde_json::json!({"summary_key":item.summary_key,"details":item.details,"decision":decision,"operation":operation});
-    turn::record_decision(
-        &*db.pool().get()?,
-        &cycle_id,
+    decision_guard.record(
         serde_json::json!({"text":receipt,"result":result,"target_kind":"action","target_id":action_id,"decision":decision}),
     )?;
     // Invalidation only; all data is reread from the authoritative stores.
@@ -177,37 +174,12 @@ fn build_provider(
 }
 
 #[tauri::command]
-pub async fn start_agent_conversation(
-    db: State<'_, Db>,
-    cycle_id: String,
-) -> AppResult<ConversationView> {
-    // Get-or-create without any round-trip: the sidebar needs a conversation
-    // shell before the first message (spec: 每周期一条会话).
+pub async fn start_agent_conversation(db: State<'_, Db>) -> AppResult<ConversationView> {
     let conn = db.pool().get()?;
-    let conversation = crate::repository::agent::get_or_create_conversation(
-        &conn,
-        &cycle_id,
-        crate::service::now_ms(),
-    )?;
-    let messages = crate::repository::agent::list_messages(&conn, &conversation.id, 0)?;
-    let context_idle_minutes = crate::repository::agent::context_idle_minutes(&conn)?;
-    Ok(ConversationView {
-        context_idle_minutes,
-        expires_at: if messages.is_empty()
-            && conversation.active_skill.is_none()
-            && conversation.last_error.is_none()
-        {
-            None
-        } else {
-            crate::repository::agent::expires_at(&conversation, context_idle_minutes)
-        },
-        id: conversation.id.clone(),
-        cycle_id: conversation.cycle_id,
-        revision: conversation.revision,
-        active_skill: conversation.active_skill,
-        last_error: conversation.last_error,
-        messages: messages.iter().map(|m| turn::message_view(m)).collect(),
-    })
+    crate::repository::agent::get_or_create_conversation(&conn, crate::service::now_ms())?;
+    drop(conn);
+    turn::get_conversation(&db)?
+        .ok_or_else(|| crate::error::AppError::Internal("Coach conversation missing".into()))
 }
 
 #[tauri::command]
@@ -215,9 +187,10 @@ pub async fn send_agent_message(
     app: AppHandle<tauri::Wry>,
     db: State<'_, Db>,
     ai: State<'_, AiSettingsState>,
-    cycle_id: String,
+    cycle_id: Option<String>,
     text: String,
     focused_task_id: Option<String>,
+    page_context: Option<PageContext>,
 ) -> AppResult<TurnResult> {
     if text.trim().is_empty() {
         return Err(crate::error::AppError::validation(
@@ -231,38 +204,21 @@ pub async fn send_agent_message(
         provider,
         resolved,
         executor(Some(&ai)),
-        &cycle_id,
+        &TurnContext {
+            cycle_id,
+            focused_task_id,
+            page: page_context,
+        },
         &text,
-        focused_task_id,
     )
     .await?;
-    emit_agent_conversation_updated(&app, &result.conversation_id, &cycle_id, result.revision);
+    emit_agent_conversation_updated(&app, &result.conversation_id, result.revision);
     Ok(result)
 }
 
 #[tauri::command]
-pub async fn get_agent_conversation(
-    db: State<'_, Db>,
-    cycle_id: String,
-) -> AppResult<Option<ConversationView>> {
-    turn::get_conversation(&db, &cycle_id)
-}
-
-/// The previous planning cycle's conversation, for "pick up where we left
-/// off" — previous means the previous dated sibling of the cycle.
-#[tauri::command]
-pub async fn get_previous_agent_conversation(
-    db: State<'_, Db>,
-    cycle_id: String,
-) -> AppResult<Option<ConversationView>> {
-    let conn = db.pool().get()?;
-    let cycle = crate::repository::cycles::get(&conn, &cycle_id)?
-        .ok_or_else(|| crate::error::AppError::not_found("cycle", &cycle_id))?;
-    let previous = crate::repository::cycles::previous_dated_sibling(&conn, &cycle)?;
-    match previous {
-        Some(previous) => turn::get_conversation(&db, &previous.id),
-        None => Ok(None),
-    }
+pub async fn get_agent_conversation(db: State<'_, Db>) -> AppResult<Option<ConversationView>> {
+    turn::get_conversation(&db)
 }
 
 /// Activate the cycle-specific planning skill, then ask the configured model
@@ -273,6 +229,7 @@ pub async fn start_planning(
     db: State<'_, Db>,
     ai: State<'_, AiSettingsState>,
     cycle_id: String,
+    page_context: Option<PageContext>,
 ) -> AppResult<TurnResult> {
     let (provider, resolved) = build_provider(&ai)?;
     if resolved.config.connection_verified_at.is_none() {
@@ -288,18 +245,21 @@ pub async fn start_planning(
         "start_planning",
         serde_json::json!({}),
     )?;
-    emit_agent_conversation_updated(&app, &result.conversation_id, &cycle_id, result.revision);
+    emit_agent_conversation_updated(&app, &result.conversation_id, result.revision);
     let result = turn::run_turn(
         &db,
         provider,
         resolved,
         executor(Some(&ai)),
-        &cycle_id,
+        &TurnContext {
+            cycle_id: Some(cycle_id.clone()),
+            focused_task_id: None,
+            page: page_context,
+        },
         &crate::i18n::text(crate::i18n::for_db(&db)?, "prompt.plan", &[]),
-        None,
     )
     .await?;
-    emit_agent_conversation_updated(&app, &result.conversation_id, &cycle_id, result.revision);
+    emit_agent_conversation_updated(&app, &result.conversation_id, result.revision);
     Ok(result)
 }
 
@@ -317,7 +277,7 @@ pub async fn start_goal_setting(
         "start_goal_setting",
         serde_json::json!({ "task_id": task_id }),
     )?;
-    emit_agent_conversation_updated(&app, &result.conversation_id, &cycle_id, result.revision);
+    emit_agent_conversation_updated(&app, &result.conversation_id, result.revision);
     Ok(result)
 }
 
@@ -334,7 +294,7 @@ pub async fn start_prioritization(
         "start_prioritization",
         serde_json::json!({}),
     )?;
-    emit_agent_conversation_updated(&app, &result.conversation_id, &cycle_id, result.revision);
+    emit_agent_conversation_updated(&app, &result.conversation_id, result.revision);
     Ok(result)
 }
 

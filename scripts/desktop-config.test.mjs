@@ -27,7 +27,7 @@ describe("Tauri JSON Merge Patch platform configs", () => {
     expect(config.identifier).toBe("dev.lordcasser.planner");
     expect(config.productName).toBe("Goal");
     expect(window.title).toBe("Goal");
-    expect(config.version).toBe("0.1.4");
+    expect(config.version).toBe("0.1.5");
   });
 
   it("keeps macOS-only window properties out of Windows and Linux", () => {

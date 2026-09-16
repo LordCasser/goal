@@ -40,6 +40,9 @@ export function PanelShell({
     const panel = panelRef.current;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     returnFocus.current = previous;
+    // Agent panels can stay mounted while hidden. An inert ancestor must not
+    // claim focus during initial mount.
+    if (panel?.closest("[inert]")) return;
     // Changing the contextual cycle while typing must leave the task cursor intact.
     const editingTask = previous instanceof HTMLTextAreaElement && previous.closest("[data-task-id]");
     if (!panel?.contains(previous) && !editingTask) panel?.focus({ preventScroll: true });

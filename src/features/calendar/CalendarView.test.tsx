@@ -42,6 +42,7 @@ vi.mock("./api", () => ({
 vi.mock("../../lib/ipc", () => ({
   LATER_CYCLE_ID: "later",
   getPlannerState: async () => ({ cycles: [] }),
+  getSettings: async () => ({ week_start_day: 1 }),
   getEditorWorkspacesByCycleIds: async () => ({}),
   ensureDay: ensureDayMock,
   // actions.ts 的 errorMessage 依赖 isAppError；给与实现一致的形状判断。

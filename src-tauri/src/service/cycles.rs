@@ -282,26 +282,7 @@ pub(crate) fn get_or_create_day_in_tx(
     }
     let week = match find_covering_cycle(conn, CycleType::Week, &date_str)? {
         Some(week) => week,
-        None => {
-            let (start, end) = dated_cycle_bounds(date, CycleType::Week, week_start_day, 0)
-                .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
-            let new = repo::NewCycle {
-                id: uuid::Uuid::new_v4().to_string(),
-                title: format_date(start),
-                cycle_type: CycleType::Week,
-                parent_id: None,
-                position: next_cycle_position(conn, None)?,
-                duration: Some(WEEK_DURATION_MS),
-                starts_on: Some(format_date(start)),
-                ends_on: Some(format_date(end)),
-                calendar_key: Some(week_key(start)),
-                repeat_id: None,
-                task_id: None,
-                created_at: now,
-            };
-            repo::insert(conn, &new)?;
-            repo::require(conn, &new.id)?
-        }
+        None => get_or_create_week_in_tx(conn, date, week_start_day, now)?,
     };
     let new = repo::NewCycle {
         id: uuid::Uuid::new_v4().to_string(),
@@ -313,6 +294,38 @@ pub(crate) fn get_or_create_day_in_tx(
         starts_on: Some(date_str),
         ends_on: Some(format_date(calendar::add_days(date, 1))),
         calendar_key: Some(day_key(date)),
+        repeat_id: None,
+        task_id: None,
+        created_at: now,
+    };
+    repo::insert(conn, &new)?;
+    repo::require(conn, &new.id)
+}
+
+/// Resolve the configured natural week without creating a day as a side effect.
+/// The caller owns the transaction so a failed task move also rolls this back.
+pub(crate) fn get_or_create_week_in_tx(
+    conn: &Connection,
+    date: NaiveDate,
+    week_start_day: u32,
+    now: i64,
+) -> AppResult<Cycle> {
+    let (start, end) = dated_cycle_bounds(date, CycleType::Week, week_start_day, 0)
+        .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
+    let key = week_key(start);
+    if let Some(week) = repo::get_by_calendar_key(conn, &key)? {
+        return Ok(week);
+    }
+    let new = repo::NewCycle {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: format_date(start),
+        cycle_type: CycleType::Week,
+        parent_id: None,
+        position: next_cycle_position(conn, None)?,
+        duration: Some(WEEK_DURATION_MS),
+        starts_on: Some(format_date(start)),
+        ends_on: Some(format_date(end)),
+        calendar_key: Some(key),
         repeat_id: None,
         task_id: None,
         created_at: now,

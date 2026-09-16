@@ -1,0 +1,10 @@
+The following is a diff from the previous accessibility tree for Window: "Hyperfocus – Goals-first planner" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 26-214
++					246 container Take a 2 minute tour of Hyperfocus
++						247 按钮 Close video
++						248 container
++							249 按钮 Play Video: Hyperfocus Walkthrough
++							250 container
++								251 container
++									252 container 无法播放媒体。
+The focused UI element is 246 container Take a 2 minute tour of Hyperfocus

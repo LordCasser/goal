@@ -153,6 +153,15 @@ pub fn add_task(db: &Db, args: &AddTaskArgs, now: i64) -> AppResult<Mutation<Tas
         created_at: now,
     };
     repo::insert(&tx, &new)?;
+    if args.cycle_id == LATER_CYCLE_ID {
+        let kind = match args.parent_id.as_deref() {
+            Some(id) => repo::require(&tx, id)?.later_plan_type.unwrap_or(CycleType::Month),
+            None => CycleType::Month,
+        };
+        let mut update = repo::TaskUpdate::empty();
+        update.later_plan_type = Some(Some(kind));
+        repo::update(&tx, &new.id, &update)?;
+    }
     let task = repo::require(&tx, &new.id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     Ok(Mutation::new(task).touching_tasks(args.cycle_id.clone()))
@@ -318,13 +327,22 @@ pub fn move_task(
     position: Option<i64>,
 ) -> AppResult<Mutation<Task>> {
     let mut conn = db.pool().get()?;
-    let tx = conn
-        .transaction()
-        .map_err(|e| AppError::Db(e.to_string()))?;
-    let existing = repo::require(&tx, task_id)?;
-    ensure_task_editable(&tx, task_id, true)?;
-    crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
-    let target = cycles_repo::require(&tx, target_cycle_id)?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let mutation = move_task_in_tx(&tx, task_id, target_cycle_id, position)?;
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    Ok(mutation)
+}
+
+fn move_task_in_tx(
+    conn: &Connection,
+    task_id: &str,
+    target_cycle_id: &str,
+    position: Option<i64>,
+) -> AppResult<Mutation<Task>> {
+    let existing = repo::require(conn, task_id)?;
+    ensure_task_editable(conn, task_id, true)?;
+    let source = crate::service::cycles::ensure_content_mutable(conn, &existing.cycle_id)?;
+    let target = cycles_repo::require(conn, target_cycle_id)?;
     if target.cycle_type == CycleType::Session {
         return Err(AppError::validation(
             "unsupported_cycle_type",
@@ -341,31 +359,48 @@ pub fn move_task(
         ));
     }
 
-    let parent_for_position = existing.parent_id.clone();
+    let mut parent_for_position = existing.parent_id.clone();
+    if existing.cycle_id == LATER_CYCLE_ID && target_cycle_id != LATER_CYCLE_ID {
+        if let Some(parent_id) = existing.parent_id.as_deref() {
+            let parent = repo::require(conn, parent_id)?;
+            let parent_cycle = cycles_repo::require(conn, &parent.cycle_id)?;
+            let valid = parent_cycle.id != LATER_CYCLE_ID
+                && (parent_cycle.id == target_cycle_id || matches!(
+                    (target.cycle_type, parent_cycle.cycle_type),
+                    (CycleType::Week, CycleType::Month) | (CycleType::Day, CycleType::Week)
+                ));
+            if !valid { parent_for_position = None; }
+        }
+    }
     let new_position = match position {
         Some(p) => p,
-        None => repo::max_position(&tx, target_cycle_id, parent_for_position.as_deref())? + 1,
+        None => repo::max_position(conn, target_cycle_id, parent_for_position.as_deref())? + 1,
     };
 
     // The move carries same-cycle descendant rows along so a goal keeps its
     // breakdown; cross-cycle links stay untouched.
-    let subtree = task_subtree_ids(&tx, task_id)?;
+    let subtree = task_subtree_ids(conn, task_id)?;
     let mut unlinked_sessions = Vec::new();
     for id in &subtree {
         if existing.cycle_id != target_cycle_id {
-            unlinked_sessions.extend(cycles_repo::unlink_task(&tx, id)?);
+            unlinked_sessions.extend(cycles_repo::unlink_task(conn, id)?);
         }
         let mut update = repo::TaskUpdate::empty();
         update.cycle_id = Some(target_cycle_id.to_string());
-        repo::update(&tx, id, &update)?;
+        if target_cycle_id != LATER_CYCLE_ID {
+            update.later_plan_type = Some(None);
+        } else if existing.cycle_id != LATER_CYCLE_ID {
+            update.later_plan_type = Some(Some(source.cycle_type));
+        }
+        repo::update(conn, id, &update)?;
     }
     let mut update = repo::TaskUpdate::empty();
     update.cycle_id = Some(target_cycle_id.to_string());
     update.position = Some(new_position);
-    repo::update(&tx, task_id, &update)?;
+    update.parent_id = Some(parent_for_position);
+    repo::update(conn, task_id, &update)?;
 
-    let task = repo::require(&tx, task_id)?;
-    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    let task = repo::require(conn, task_id)?;
     let mut mutation = Mutation::new(task).touching_tasks(target_cycle_id);
     if !unlinked_sessions.is_empty() {
         mutation.cycles.push(&existing.cycle_id);
@@ -377,7 +412,52 @@ pub fn move_task(
     Ok(mutation)
 }
 
-/// The task plus its descendant rows (same-cycle subtask tree).
+/// Arrange a parked task at its recorded level. Resolve calendar identities and
+/// move inside one transaction so a failed move cannot leave an empty plan.
+pub fn promote_later_task(
+    db: &Db,
+    task_id: &str,
+    target_cycle_id: Option<&str>,
+    today: chrono::NaiveDate,
+    now: i64,
+) -> AppResult<Mutation<Task>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let existing = repo::require(&tx, task_id)?;
+    if existing.cycle_id != LATER_CYCLE_ID {
+        return Err(AppError::conflict("later_source_required", "This item is no longer in Later."));
+    }
+    ensure_task_editable(&tx, task_id, true)?;
+    let kind = existing.later_plan_type.unwrap_or(CycleType::Month);
+    let target = if let Some(id) = target_cycle_id {
+        cycles_repo::require(&tx, id)?
+    } else {
+        let week_start = crate::service::settings::week_start_day_or_default(&tx)? as u32;
+        match kind {
+            CycleType::Week => crate::service::cycles::get_or_create_week_in_tx(&tx, today, week_start, now)?,
+            CycleType::Day => crate::service::cycles::get_or_create_day_in_tx(&tx, today, week_start, now)?,
+            _ => return Err(AppError::validation("later_target_required", "Choose a long-term cycle for this item.")),
+        }
+    };
+    if target.id == LATER_CYCLE_ID || target.cycle_type != kind {
+        return Err(AppError::validation("later_target_type_mismatch", "Choose a plan matching this item's planning level."));
+    }
+    if target.archived {
+        return Err(AppError::conflict("later_target_unavailable", "The target plan is archived. Restore it before arranging this item."));
+    }
+    let mut mutation = move_task_in_tx(&tx, task_id, &target.id, None)?;
+    mutation.cycles.push(&target.id);
+    if kind == CycleType::Day {
+        // Match opening a day: only explicitly enabled daily repeats generate.
+        crate::service::repeats::generate_for_day_in_tx(&tx, &target.id, now)?;
+        if let Some(parent) = target.parent_id { mutation.cycles.push(parent); }
+    }
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    Ok(mutation)
+}
+
+/// The task plus its same-level descendant rows. Later shares storage across
+/// levels, so cross-level links there must not turn into movable substeps.
 fn task_subtree_ids(conn: &Connection, task_id: &str) -> AppResult<Vec<String>> {
     let mut stmt = conn
         .prepare(
@@ -386,6 +466,8 @@ fn task_subtree_ids(conn: &Connection, task_id: &str) -> AppResult<Vec<String>> 
                  UNION ALL
                  SELECT t.id FROM tasks t JOIN sub s ON t.parent_id = s.id
                  WHERE t.cycle_id = (SELECT cycle_id FROM tasks WHERE id = ?1)
+                   AND (t.cycle_id != 'later' OR COALESCE(t.later_plan_type, 'month') =
+                        (SELECT COALESCE(later_plan_type, 'month') FROM tasks WHERE id = ?1))
              )
              SELECT id FROM sub",
         )

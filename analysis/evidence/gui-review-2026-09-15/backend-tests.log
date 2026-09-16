@@ -1,0 +1,144 @@
+warning: unused import: `NotificationExt`
+   --> src/commands/onboarding.rs:209:51
+    |
+209 |     use tauri_plugin_notification::{Notification, NotificationExt};
+    |                                                   ^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/ai/agent/context.rs:364:13
+    |
+364 |         let mut ctx = CycleContext {
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `ctx`
+   --> src/ai/agent/context.rs:363:13
+    |
+363 |         let ctx = empty_ctx(cycle_of(CycleType::Month));
+    |             ^^^ help: if this is intentional, prefix it with an underscore: `_ctx`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `reply` is never read
+   --> src/ai/agent/turn.rs:356:21
+    |
+356 |     let mut reply = String::new();
+    |                     ^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+376 |             reply = response.text.clone();
+    |             ----- `reply` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `provider`
+   --> src/ai/agent/turn.rs:602:13
+    |
+602 |         let provider: Arc<dyn LlmProvider> = Arc::new(FakeProvider::with_script(vec![
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_provider`
+
+warning: unused variable: `conn`
+    --> src/service/reviews.rs:1320:13
+     |
+1320 |         let conn = db.pool().get().unwrap();
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_conn`
+
+warning: struct `ScriptedProvider` is never constructed
+   --> src/ai/agent/turn.rs:557:12
+    |
+557 |     struct ScriptedProvider {
+    |            ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `add_task` is never used
+   --> src/commands/onboarding.rs:296:8
+    |
+296 |     fn add_task(db: &crate::db::Db, cycle_id: &str, title: &str) -> Task {
+    |        ^^^^^^^^
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:33:23
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<Result<AgentResponse, AgentError>>;
+   |                       ^^^^^                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                       |
+   |                       the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+   = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<'_, Result<AgentResponse, AgentError>>;
+   |                                                              +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:35:22
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<Result<serde_json::Value, AgentError>>;
+   |                      ^^^^^                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                      |
+   |                      the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<'_, Result<serde_json::Value, AgentError>>;
+   |                                                           +++
+
+warning: unused import: `ToolOutcome`
+  --> tests/ai_acceptance.rs:12:63
+   |
+12 | use planner_lib::ai::agent::turn::{NopExecutor, ToolExecutor, ToolOutcome};
+   |                                                               ^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+
+running 364 tests
+....................................................................................... 87/364
+.............................................i............i............................ 174/364
+...............................................................i.iii................... 261/364
+...........................i........................................................... 348/364
+................
+test result: ok. 357 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 19.87s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+
+
+running 13 tests
+.............
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.14s
+
+
+running 30 tests
+..............................
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.70s
+
+
+running 35 tests
+...................................
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.62s
+
+
+running 1 test
+i
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

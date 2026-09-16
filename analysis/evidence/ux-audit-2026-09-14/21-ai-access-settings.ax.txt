@@ -1,0 +1,35 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 standard window Hyperfocus, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: hyperfocus, URL: tauri://localhost
+			3 container
+				4 button Toggle Later sidebar
+				5 button (collapsed) Getting started, 3 of 5, Secondary Actions: Expand
+				6 container Header status
+					7 text AI included · 14 days left
+				8 pop up button Open application menu
+			9 container
+				10 button Back to Plan
+				11 heading SETTINGS, Value: 1
+					12 text SETTINGS
+				13 container AI ACCESS
+					14 heading AI ACCESS, Value: 2
+						15 text AI ACCESS
+					16 text Hyperfocus includes AI for your first 14 days. After that – you can connect your own AI provider.
+					17 container
+						18 radio button Hyperfocus AI Included for 14 days. No setup required., Value: 1
+						19 text Hyperfocus AI Included for 14 days. No setup required.
+						20 radio button OpenRouter Use OpenRouter account to pay for usage directly., Value: 0
+						21 text OpenRouter Use OpenRouter account to pay for usage directly.
+	22 close button
+	23 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	24 minimize button
+25 menu bar
+	26 hyperfocus
+	27 File
+	28 Edit
+	29 View
+	30 Window
+	31 Help
+
+The focused UI element is 2 HTML content Description: hyperfocus, URL: tauri://localhost

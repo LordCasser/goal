@@ -965,8 +965,17 @@ pub fn stage(db: &Db, source_cycle_id: &str, action: Action, rationale: &str) ->
 }
 
 pub fn list(db: &Db, source_cycle_id: &str) -> AppResult<Vec<PendingAction>> {
+    list_filtered(db, Some(source_cycle_id))
+}
+
+/// All pending actions belong to the global Coach; their source remains fixed.
+pub fn list_all(db: &Db) -> AppResult<Vec<PendingAction>> {
+    list_filtered(db, None)
+}
+
+fn list_filtered(db: &Db, source_cycle_id: Option<&str>) -> AppResult<Vec<PendingAction>> {
     let conn = db.pool().get()?;
-    let mut stmt = conn.prepare("SELECT id,source_cycle_id,action_json,rationale,summary,details_json,state FROM agent_actions WHERE source_cycle_id=?1 AND state IN ('pending','applying') ORDER BY created_at,id").map_err(db_error)?;
+    let mut stmt = conn.prepare("SELECT id,source_cycle_id,action_json,rationale,summary,details_json,state FROM agent_actions WHERE (?1 IS NULL OR source_cycle_id=?1) AND state IN ('pending','applying') ORDER BY created_at,id").map_err(db_error)?;
     let rows = stmt
         .query_map([source_cycle_id], |r| {
             Ok((
@@ -1349,14 +1358,13 @@ fn require_no_task_preview(db: &Db, task_id: &str) -> AppResult<()> {
 
 pub fn resolve_task_preview(
     db: &Db,
-    source_cycle_id: &str,
     task_id: &str,
     approve: bool,
 ) -> AppResult<service::Mutation<()>> {
     let locale = crate::i18n::for_db(db)?;
     let mut conn = db.pool().get()?;
     let tx = conn
-        .transaction()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| AppError::Db(e.to_string()))?;
     let task = repo::tasks::require(&tx, task_id)?;
     if task.proposal.is_none() {
@@ -1383,10 +1391,19 @@ pub fn resolve_task_preview(
         locale,
         &crate::i18n::LocalizedMessage::new(summary_key, json!({})),
     );
-    let details = vec![crate::i18n::LocalizedMessage::new(
+    let mut details = vec![crate::i18n::LocalizedMessage::new(
         "backend-actions:preview.title",
         json!({"title": task.title}),
     )];
+    let cycle = repo::cycles::require(&tx, &task.cycle_id)?;
+    let destination = match &cycle.starts_on {
+        Some(date) if cycle.title != *date => format!("{} · {}", cycle.title, date),
+        _ => cycle.title.clone(),
+    };
+    details.push(crate::i18n::LocalizedMessage::new(
+        "backend-actions:task.destination",
+        json!({"target": destination}),
+    ));
     let text = crate::i18n::render_message(
         locale,
         &crate::i18n::LocalizedMessage::new(
@@ -1394,9 +1411,9 @@ pub fn resolve_task_preview(
             json!({"status": crate::i18n::render_message(locale, &crate::i18n::LocalizedMessage::new(status_key, json!({}))), "summary": summary, "title": task.title}),
         ),
     );
+    let text = format!("{} {}", text, crate::i18n::render_message(locale, &details[1]));
     crate::ai::agent::turn::record_decision(
         &tx,
-        source_cycle_id,
         json!({"text":text,"result":{"summary_key":summary_key,"details":details,"decision":if approve {"applied"} else {"rejected"},"operation":"task_preview"},"target_kind":"task","target_id":task_id,"decision":if approve {"applied"} else {"rejected"}}),
     )?;
     let mut mutation = service::Mutation::new(())
@@ -1457,6 +1474,45 @@ mod tests {
         approve(&db, &ai, &cycle, action).await;
         assert_eq!(read_settings(&db).unwrap()["coach_idle_minutes"], 30);
         assert!(list(&db, &cycle).unwrap().is_empty());
+    }
+
+    #[test]
+    fn global_pending_actions_keep_their_original_source_when_browsing_changes() {
+        let (_dir, db, _ai, first) = setup();
+        let second = service::cycles::get_or_create_day(
+            &db,
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 16).unwrap(),
+            1,
+        )
+        .unwrap()
+        .value
+        .id;
+        let a = stage(
+            &db,
+            &first,
+            Action::Settings(SettingAction::CoachIdleMinutes { value: 30 }),
+            "First plan",
+        )
+        .unwrap();
+        let b = stage(
+            &db,
+            &second,
+            Action::Settings(SettingAction::CoachIdleMinutes { value: 45 }),
+            "Second plan",
+        )
+        .unwrap();
+        let pending = list_all(&db).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending
+            .iter()
+            .any(|item| item.id == a["action_id"] && item.source_cycle_id == first));
+        assert!(pending
+            .iter()
+            .any(|item| item.id == b["action_id"] && item.source_cycle_id == second));
+        assert!(claim(&db, &second, a["action_id"].as_str().unwrap(), false).is_err());
+        claim(&db, &first, a["action_id"].as_str().unwrap(), false).unwrap();
+        assert_eq!(list_all(&db).unwrap().len(), 1);
+        assert_eq!(list_all(&db).unwrap()[0].source_cycle_id, second);
     }
 
     #[test]

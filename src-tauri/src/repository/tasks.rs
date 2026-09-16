@@ -3,12 +3,13 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::domain::proposal::ProposalKind;
+use crate::domain::cycle::CycleType;
 use crate::domain::task::{Subtask, Task, ROOT_COLOR_KEYS};
 use crate::error::{from_rusqlite, AppError, AppResult};
 
 const TASK_COLUMNS: &str = "id, cycle_id, parent_id, title, subtasks, position, completed, \
      goal_breakdown, needs_refinement, needs_breakdown, root_color_key, copied_from_task_id, \
-     proposal, created_at";
+     proposal, created_at, later_plan_type";
 
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let subtasks_json: String = row.get("subtasks")?;
@@ -38,6 +39,8 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .map(|v| v != 0),
         root_color_key: row.get("root_color_key")?,
         copied_from_task_id: row.get("copied_from_task_id")?,
+        later_plan_type: row.get::<_, Option<String>>("later_plan_type")?
+            .as_deref().and_then(CycleType::parse),
         proposal: proposal_str.as_deref().and_then(ProposalKind::parse),
         created_at: row.get("created_at")?,
     })
@@ -226,6 +229,7 @@ pub struct TaskUpdate {
     pub position: Option<i64>,
     pub proposal: Option<Option<ProposalKind>>,
     pub copied_from_task_id: Option<String>,
+    pub later_plan_type: Option<Option<CycleType>>,
 }
 
 impl TaskUpdate {
@@ -243,6 +247,7 @@ impl TaskUpdate {
             position: None,
             proposal: None,
             copied_from_task_id: None,
+            later_plan_type: None,
         }
     }
 
@@ -259,6 +264,7 @@ impl TaskUpdate {
             && self.position.is_none()
             && self.proposal.is_none()
             && self.copied_from_task_id.is_none()
+            && self.later_plan_type.is_none()
     }
 }
 
@@ -317,6 +323,9 @@ pub fn update(conn: &Connection, id: &str, update: &TaskUpdate) -> AppResult<()>
     if let Some(v) = &update.copied_from_task_id {
         let v = v.clone();
         push("copied_from_task_id", Box::new(v));
+    }
+    if let Some(v) = update.later_plan_type {
+        push("later_plan_type", Box::new(v.map(CycleType::as_str)));
     }
 
     if sets.is_empty() {

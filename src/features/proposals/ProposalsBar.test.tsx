@@ -12,7 +12,7 @@ function mount(count:number){
   invoke.mockReset().mockImplementation(async(cmd:string,args:{cycleId?:string})=>{
     if(cmd===commands.getPlannerState) return {cycles:[{id:"day"},{id:"week"}]};
     if(cmd===commands.getPreviewSummary) return {count:args.cycleId==="week"?count:0};
-    if(cmd==="get_agent_actions") return count&&args.cycleId==="day"?[{id:"action"}]:[];
+    if(cmd==="get_agent_actions") return count?[{id:"action",source_cycle_id:"day"}]:[];
     throw new Error(`Unexpected command: ${cmd}`);
   });
   const open=vi.fn();

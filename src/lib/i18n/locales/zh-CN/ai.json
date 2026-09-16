@@ -341,5 +341,7 @@
   "issue.pendingPreview_one": "{{count}} 项助理预览尚未确认，不纳入本次检查。",
   "issue.pendingPreview_other": "{{count}} 项助理预览尚未确认，不纳入本次检查。",
   "proposals.pendingBarTitle_one": "{{count}} 项改动：在助理中查看并确认",
-  "proposals.pendingBarTitle_other": "{{count}} 项改动：在助理中查看并确认"
+  "proposals.pendingBarTitle_other": "{{count}} 项改动：在助理中查看并确认",
+  "proposals.waitForTurn": "助理正在整理改动，回复完成后即可确认。",
+  "proposals.confirmAdd": "确认添加"
 }

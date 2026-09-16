@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 /Users/lordcasser/workspace/projects/goal
+
+ ✓ src/features/planner/CycleOptionsMenu.test.tsx (4 tests) 151ms
+ ✓ src/features/calendar/CalendarView.test.tsx (26 tests) 1040ms
+
+ Test Files  2 passed (2)
+      Tests  30 passed (30)
+   Start at  21:41:02
+   Duration  1.51s (transform 128ms, setup 0ms, collect 286ms, tests 1.19s, environment 318ms, prepare 64ms)
+

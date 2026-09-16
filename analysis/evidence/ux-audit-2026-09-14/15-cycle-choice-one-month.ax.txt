@@ -1,0 +1,112 @@
+Window: "Hyperfocus", App: hyperfocus.
+0 standard window Hyperfocus, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: hyperfocus, URL: tauri://localhost
+			3 container
+				4 button Toggle Later sidebar
+				5 button (collapsed) Getting started, 3 of 5, Secondary Actions: Expand
+				6 container Header status
+					7 text AI included · 14 days left
+				8 pop up button Open application menu
+			9 container
+				10 text 2026 Cycles
+				11 button Sep 14 - Dec 7
+				12 button + Add
+				13 heading LONG-TERM GOALS, Value: 2
+					14 text LONG-TERM GOALS
+				15 text 12 weeks left
+				16 pop up button Long-term cycle options
+				17 text entry area (settable) [button: Do Later]
+[pop up button: Change link color]
+Write a book draft
+					18 container (settable)
+						19 button Do Later
+						20 pop up button Change link color
+						21 text (settable) Write a book draft
+				22 container Setting long-term goals
+					23 button Dismiss Setting long-term goals
+					24 text Setting long-term goals
+					25 text Write 1-3 meaningful outcomes, not tasks. Examples: get 50 users for side project, or run 10K in 45 min. Click feedback under goals for help.
+				26 container CHOOSE YOUR PLANNING CYCLE
+					27 heading CHOOSE YOUR PLANNING CYCLE, Value: 2
+						28 text CHOOSE YOUR PLANNING CYCLE
+					29 text Pick how long you want to focus on a few goals before reviewing results.
+					30 button 1 month For fast iteration and adjusting direction quickly.
+					31 button 3 months For meaningful goals that need steady progress.
+					32 button 6 months For larger outcomes with multiple stages.
+					33 button Create long-term plan
+					34 container
+						35 text December 7 .  Set 1-3 long-term goals
+					36 container
+						37 text Next  1 month .  Make weekly progress
+					38 container
+						39 text January 4 .  Review results
+				40 text Weeks
+				41 button W38
+				42 button + Add
+				43 heading WEEKLY PLAN, Value: 2
+					44 text WEEKLY PLAN
+				45 text 7 days left
+				46 pop up button Weekly cycle options
+				47 text entry area (settable) [button: Do Later]
+[pop up button: Change parent goal]
+UX audit validate the weekly workflow
+[pop up button: Link to parent goal]
+
+					48 container (settable)
+						49 button Do Later
+						50 pop up button Change parent goal
+						51 text (settable) UX audit validate the weekly workflow
+						52 pop up button Link to parent goal
+						53 text Make subtask with (⇥ Tab)
+				54 container Planning weekly cycle
+					55 button Dismiss Planning weekly cycle
+					56 text Planning weekly cycle
+					57 text Choose a few weekly outcomes that move your long-term goals forward, plus anything else on your plate this week.
+				58 text Days
+				59 button Mon
+				60 button + Add
+				61 heading MONDAY PLAN, Value: 2
+					62 text MONDAY PLAN
+				63 text Today
+				64 pop up button Day cycle options
+				65 text entry area (settable) [button: Do Later][button: Improve with Agent]
+[pop up button: Change parent goal]
+UX audit daily action
+
+					66 container (settable)
+						67 button Do Later
+						68 button Improve with Agent
+						69 pop up button Change parent goal
+						70 text (settable) UX audit daily action
+						71 pop up button Link to parent goal
+						72 text Make subtask with (⇥ Tab)
+				73 text FOCUS BLOCKS 0 min
+				74 button
+				75 button (disabled) Start
+				76 text entry area (disabled, settable) Afternoon focus
+					77 text (settable) Afternoon focus
+				78 text 90  min
+				79 pop up button (disabled) Focus block options
+				80 text entry area (disabled, settable) 
+
+					81 container (settable)
+						82 text Type your goal here...
+				83 text UX audit focus 0 / 90 min
+				84 button
+				85 pop up button Focus block options
+				86 text entry area (settable)
+					87 container (settable)
+						88 text (settable) UX audit focus action
+	89 close button
+	90 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	91 minimize button
+92 menu bar
+	93 hyperfocus
+	94 File
+	95 Edit
+	96 View
+	97 Window
+	98 Help
+
+The focused UI element is 2 HTML content Description: hyperfocus, URL: tauri://localhost

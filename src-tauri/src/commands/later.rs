@@ -32,15 +32,18 @@ pub fn add_later_goal(
     Ok(mutation.value)
 }
 
-/// Pull a parked idea into a planning cycle (typically the long-term one).
+/// Arrange a parked item at its recorded level; week/day default to now.
 #[tauri::command]
 pub fn promote_later_goal(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
     task_id: String,
-    target_cycle_id: String,
+    target_cycle_id: Option<String>,
 ) -> AppResult<Task> {
-    let mutation = tasks::move_task(&db, &task_id, &target_cycle_id, None)?;
+    let mutation = tasks::promote_later_task(
+        &db, &task_id, target_cycle_id.as_deref(),
+        crate::domain::calendar::today_local(), crate::service::now_ms(),
+    )?;
     emit_mutation(&app, &mutation);
     Ok(mutation.value)
 }

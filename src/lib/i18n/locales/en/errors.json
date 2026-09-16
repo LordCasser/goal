@@ -121,5 +121,9 @@
   "unknown_issue_type": "This planning issue type is not recognized.",
   "unknown_tool": "This Coach tool is not recognized.",
   "deletion_impact_changed": "The linked content changed. Review the updated impact and confirm again.",
-  "deletion_confirmation_required": "Review the linked content before confirming deletion."
+  "deletion_confirmation_required": "Review the linked content before confirming deletion.",
+  "later_source_required": "This item is no longer in Later. Refresh the list and try again.",
+  "later_target_required": "Choose a long-term cycle for this item.",
+  "later_target_type_mismatch": "Choose a plan matching this item's planning level.",
+  "later_target_unavailable": "The target plan is archived. Restore it before arranging this item."
 }

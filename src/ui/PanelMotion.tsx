@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 /** Keep the closing panel inert until its transition finishes. */
-export function PanelMotion({ open, children, side = "right" }: { open: boolean; children: ReactNode; side?: "left" | "right" }) {
+export function PanelMotion({ open, children, side = "right", keepMounted = false }: { open: boolean; children: ReactNode; side?: "left" | "right"; keepMounted?: boolean }) {
   const [mounted, setMounted] = useState(open);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
@@ -18,6 +18,6 @@ export function PanelMotion({ open, children, side = "right" }: { open: boolean;
   }, [open, mounted]);
   return <div className="panel-motion" data-open={expanded} data-side={side} inert={!open}
     onTransitionEnd={(event) => { if (event.target === event.currentTarget && !open) setMounted(false); }}>
-    <div className="min-w-0 overflow-hidden">{mounted && <div className="panel-motion-content h-full w-panel">{children}</div>}</div>
+    <div className="min-w-0 overflow-hidden">{(mounted || keepMounted) && <div className="panel-motion-content h-full w-panel">{children}</div>}</div>
   </div>;
 }

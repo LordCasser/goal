@@ -18,9 +18,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { Button, cn } from "../../ui";
-import { ensureDay, getPlannerState, getEditorWorkspacesByCycleIds } from "../../lib/ipc";
+import { ensureDay, getPlannerState, getEditorWorkspacesByCycleIds, getSettings, LATER_CYCLE_ID, type AgentPageContext } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import { addDaysISO, todayISO } from "../planner/dates";
+import { weekStartForDate } from "../planner/WeekNavigation";
 import { errorMessage, useActionError } from "../planner/actions";
 import {
   addMonthsISO,
@@ -64,7 +65,7 @@ function invalidateCalendar(qc: ReturnType<typeof useQueryClient>): void {
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export function CalendarView({ active = true, onClose, onActiveCycleChange, onReviewIssues, onPlanWithAI }: { active?: boolean; onClose?: () => void; onActiveCycleChange?: (id: string) => void; onReviewIssues?: (id: string) => void; onPlanWithAI?: (id: string) => void }) {
+export function CalendarView({ active = true, onClose, onActiveCycleChange, onPageContextChange, onReviewIssues, onPlanWithAI }: { active?: boolean; onClose?: () => void; onActiveCycleChange?: (id: string | null) => void; onPageContextChange?: (context: AgentPageContext) => void; onReviewIssues?: (id: string) => void; onPlanWithAI?: (id: string) => void }) {
   const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const [view, setView] = useState<CalendarViewMode>(() => loadPreferredView());
@@ -90,6 +91,8 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
     queryFn: () => getCalendarRange(bounds.start, bounds.end),
   });
   const { data: planner } = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
+  const { data: settings } = useQuery({ queryKey: qk.settings(), queryFn: getSettings });
+  const weekStartDay = settings?.week_start_day ?? 1;
   const cycles = planner?.cycles ?? [];
   const planCycleIds = calendarPlanCycleIds(cycles, range?.grid_start ?? bounds.start, range?.grid_end ?? bounds.end);
   const plans = useQuery({
@@ -178,7 +181,7 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
     setAnchor(date);
     setDetail("plan");
     setSelectedTask(null);
-    if (cell?.day_cycle) onActiveCycleChange?.(cell.day_cycle.id);
+    onActiveCycleChange?.(cell?.day_cycle?.id ?? null);
     dismiss();
   };
 
@@ -262,8 +265,28 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onRe
   const selectedDay = selectedDate === null ? undefined : days.find((d) => d.date === selectedDate);
   const selectedDayCycleId = selectedDay?.day_cycle?.id ?? null;
   useEffect(() => {
-    if (active && selectedDayCycleId) onActiveCycleChange?.(selectedDayCycleId);
+    if (active) onActiveCycleChange?.(selectedDayCycleId);
   }, [active, selectedDayCycleId, onActiveCycleChange]);
+  const selectedDayParentWeek = selectedDay?.day_cycle?.parent_id
+    ? cycles.find((cycle) => cycle.id === selectedDay.day_cycle?.parent_id && cycle.type === "week") ?? null
+    : null;
+  const selectedWeekCycle = selectedDayParentWeek ?? cycles.find((cycle) => cycle.type === "week"
+    && cycle.starts_on !== null && cycle.ends_on !== null
+    && cycle.starts_on <= selectedDate && selectedDate < cycle.ends_on) ?? null;
+  const selectedLongTermCycle = selectedDayParentWeek?.parent_id
+    ? cycles.find((cycle) => cycle.id === selectedDayParentWeek.parent_id && cycle.type === "month" && cycle.id !== LATER_CYCLE_ID) ?? null
+    : null;
+  useEffect(() => {
+    if (!active) return;
+    onPageContextChange?.({
+      view: "calendar",
+      long_term_cycle_id: selectedLongTermCycle?.id ?? null,
+      week_cycle_id: selectedWeekCycle?.id ?? null,
+      day_cycle_id: selectedDayCycleId,
+      week_starts_on: selectedWeekCycle?.starts_on ?? weekStartForDate(selectedDate, weekStartDay),
+      selected_date: selectedDate,
+    });
+  }, [active, onPageContextChange, selectedDate, selectedDayCycleId, selectedLongTermCycle?.id, selectedWeekCycle?.id, selectedWeekCycle?.starts_on, weekStartDay]);
 
   const { data: budget } = useQuery({
     queryKey: [BUDGET_KEY, selectedDate],

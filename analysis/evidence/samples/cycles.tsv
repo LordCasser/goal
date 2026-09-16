@@ -1,0 +1,6 @@
+id|title|type|duration|starts_on|ends_on|calendar_key
+later|Later|month|0|||
+8258791f-8a72-453d-8fb5-ae86d8824e10|Long-term|month|7257600000|2026-09-14|2026-12-07|long-term:2026-09-14:2026-12-07
+fc993cc8-b0eb-4897-9749-e6ed995d54e8|Weekly|week|604800000|2026-09-14|2026-09-21|week:2026-09-14
+4d068adc-f9d4-4ff6-81ed-98594afdad92|Day|day|86400000|2026-09-14|2026-09-15|day:2026-09-14
+ab0db030-2135-48a0-8048-39fe1bc4de21|Afternoon focus|session|5400000|||

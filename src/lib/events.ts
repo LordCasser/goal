@@ -31,6 +31,7 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ConversationView, TurnResult } from "./ipc";
 
 /** Mirrors `events::CycleIdsPayload`. */
 export interface CycleIdsPayload {
@@ -48,11 +49,27 @@ export const qk = {
   editorWorkspaces: (cycleIds: string[]) => ["editor-workspaces", cycleIds] as const,
   previewSummary: (cycleId: string) => ["preview-summary", cycleId] as const,
   sessions: (dayCycleId: string) => ["sessions", dayCycleId] as const,
-  agentConversation: (cycleId: string) => ["agent-conversation", cycleId] as const,
+  agentConversation: () => ["agent-conversation"] as const,
   issueReport: (cycleId: string) => ["issue-report", cycleId] as const,
   settings: () => ["settings"] as const,
-  agentActions: (cycleId: string) => ["agent-actions", cycleId] as const,
+  agentActions: () => ["agent-actions"] as const,
+  agentDecision: () => ["agent-decision"] as const,
+  pendingTaskCycles: () => ["preview-summary", "pending-cycles"] as const,
 };
+
+/** A completed IPC turn is authoritative. Cancel a pre-completion read before
+ * publishing it, so an old active_turn_id cannot relock freshly shown cards. */
+export function completeAgentTurn(client: QueryClient, result: TurnResult): void {
+  void client.cancelQueries({ queryKey: qk.agentConversation() });
+  client.setQueryData<ConversationView>(qk.agentConversation(), (previous) => {
+    if (!previous || previous.revision > result.revision) return previous;
+    const messages = new Map(previous.messages.map((message) => [message.id, message]));
+    for (const message of result.messages) messages.set(message.id, message);
+    return { ...previous, active_turn_id: null, revision: result.revision,
+      active_skill: result.active_skill, last_error: null,
+      messages: [...messages.values()].sort((a, b) => a.sequence_number - b.sequence_number) };
+  });
+}
 
 /**
  * Subscribes to the backend change events and wires them to cache
@@ -75,16 +92,17 @@ export async function initEventInvalidation(queryClient: QueryClient): Promise<(
     );
     unlisteners.push(
       await listen<CycleIdPayload>("proposals:changed", (event) => {
+        queryClient.invalidateQueries({ queryKey: qk.pendingTaskCycles() });
         queryClient.invalidateQueries({ queryKey: qk.previewSummary(event.payload.cycle_id) });
       }),
     );
     unlisteners.push(
-      await listen<{ conversation_id: string; cycle_id: string; revision: number }>(
+      await listen<{ conversation_id: string; revision: number }>(
         "agent:conversation_updated",
-        (event) => {
+        () => {
           invalidateAgentEffects(queryClient);
           queryClient.invalidateQueries({
-            queryKey: qk.agentConversation(event.payload.cycle_id),
+          queryKey: qk.agentConversation(),
           });
         },
       ),

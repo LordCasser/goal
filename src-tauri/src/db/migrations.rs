@@ -80,7 +80,105 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "optional focus task association",
         sql: M0012_FOCUS_TASK_ASSOCIATION,
     },
+    Migration {
+        version: 13,
+        description: "preserve Later plan type",
+        sql: M0013_LATER_PLAN_TYPE,
+    },
+    Migration {
+        version: 14,
+        description: "global Coach conversation",
+        sql: M0014_GLOBAL_COACH_CONVERSATION,
+    },
 ];
+
+const M0013_LATER_PLAN_TYPE: &str = r#"
+ALTER TABLE tasks ADD COLUMN later_plan_type TEXT CHECK (
+    later_plan_type IS NULL OR (
+        cycle_id = 'later' AND later_plan_type IN ('month', 'week', 'day')
+    )
+);
+"#;
+
+const M0014_GLOBAL_COACH_CONVERSATION: &str = r#"
+-- Coach history is global. Keep the old conversations and messages while
+-- rebuilding the cycle-owned tables so deleting a planning cycle cannot
+-- cascade through the conversation history.
+CREATE TEMP TABLE saved_agent_messages AS
+SELECT
+    id,
+    conversation_id AS old_conversation_id,
+    turn_id,
+    sequence_number AS old_sequence_number,
+    message_type,
+    payload_json,
+    created_at,
+    MIN(created_at) OVER (PARTITION BY conversation_id, turn_id) AS turn_created_at,
+    MIN(sequence_number) OVER (PARTITION BY conversation_id, turn_id) AS turn_first_sequence
+FROM agent_messages;
+
+CREATE TABLE agent_conversations_new (
+    id             TEXT PRIMARY KEY NOT NULL CHECK (id = 'coach'),
+    active_turn_id TEXT,
+    revision       INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    active_skill   TEXT CHECK (active_skill IS NULL OR active_skill IN
+                     ('goal_setting','long_term_planning','short_term_planning','weekly_planning','daily_planning','prioritization','review','period_analysis','planning_issues')),
+    last_error     TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT INTO agent_conversations_new
+    (id, active_turn_id, revision, active_skill, last_error, created_at, updated_at)
+SELECT
+    'coach',
+    NULL,
+    COALESCE(MAX(revision), 0),
+    (SELECT active_skill FROM agent_conversations ORDER BY updated_at DESC, id DESC LIMIT 1),
+    (SELECT last_error FROM agent_conversations ORDER BY updated_at DESC, id DESC LIMIT 1),
+    MIN(created_at),
+    MAX(updated_at)
+FROM agent_conversations
+HAVING COUNT(*) > 0;
+
+DROP TABLE agent_messages;
+DROP TABLE agent_conversations;
+ALTER TABLE agent_conversations_new RENAME TO agent_conversations;
+
+CREATE INDEX ix_agent_conversations_updated ON agent_conversations(updated_at);
+
+CREATE TABLE agent_messages (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+    turn_id         TEXT NOT NULL,
+    sequence_number INTEGER NOT NULL CHECK (sequence_number > 0),
+    message_type    TEXT NOT NULL CHECK (message_type IN
+                      ('user','model_text','model_function_call','function_result','app_tool_result')),
+    payload_json    TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (conversation_id, sequence_number)
+);
+
+INSERT INTO agent_messages
+    (id, conversation_id, turn_id, sequence_number, message_type, payload_json, created_at)
+SELECT
+    id,
+    'coach',
+    turn_id,
+    ROW_NUMBER() OVER (
+        ORDER BY turn_created_at ASC, old_conversation_id ASC,
+                 turn_first_sequence ASC, turn_id ASC, old_sequence_number ASC
+    ),
+    message_type,
+    payload_json,
+    created_at
+FROM saved_agent_messages
+ORDER BY turn_created_at ASC, old_conversation_id ASC,
+         turn_first_sequence ASC, turn_id ASC, old_sequence_number ASC;
+
+CREATE INDEX ix_agent_messages_seq ON agent_messages(conversation_id, sequence_number);
+DROP TABLE saved_agent_messages;
+"#;
 
 const M0012_FOCUS_TASK_ASSOCIATION: &str = r#"
 ALTER TABLE cycles ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE
@@ -484,6 +582,22 @@ mod tests {
             .expect("select");
         let value: serde_json::Value = serde_json::from_str(&raw).expect("valid JSON stored");
         assert_eq!(value["must"][0]["task_id"], "t1");
+    }
+
+    #[test]
+    fn later_type_upgrade_preserves_unclassified_rows_and_is_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply_up_to(&mut conn, 12);
+        conn.execute(
+            "INSERT INTO tasks (id, cycle_id, title) VALUES ('parked', 'later', 'Existing idea')",
+            [],
+        )
+        .unwrap();
+        apply(&mut conn).unwrap();
+        apply(&mut conn).unwrap();
+        let task = crate::repository::tasks::require(&conn, "parked").unwrap();
+        assert_eq!(task.title, "Existing idea");
+        assert_eq!(task.later_plan_type, None, "Old source cannot be inferred");
     }
 
     #[test]

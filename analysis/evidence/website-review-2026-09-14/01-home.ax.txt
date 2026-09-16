@@ -1,0 +1,190 @@
+25 HTML 内容 Hyperfocus – Goals-first planner, URL: hyperfocus.in/
+					26 container
+						27 link Description: Hyperfocus home, Value: hyperfocus.in/
+						28 link Description: Download for macOS, Value: hyperfocus.in/download/mac
+					29 container
+						30 标题 Free planner that turns goals into daily progress., Value: 1
+							31 文本 Free planner that turns goals into daily progress.
+						32 文本 Choose the few goals that matter most, plan weeks and days around them, and finally make progress by doing focused work.
+						33 link Description: Download for Mac, Value: hyperfocus.in/download/mac
+						34 link Description: Hyperfocus - Planner that turns goals into daily progress | Product Hunt, Value: producthunt.com/products/hyperfocus-2?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_campaign=badge-hyperfocus-3
+						35 container Interactive Hyperfocus planning mock
+							36 container
+								37 container Hyperfocus app header
+									38 图像 Later
+								39 container
+									40 文本 2026
+									41 container Cycles cycles
+										42 text Cycles Mar 30 - Jun 21
+										43 文本 Jun 22 - Sep 13
+										44 文本 + Add
+									45 container Long-term goals
+										46 container
+											47 标题 LONG-TERM GOALS, Value: 2
+												48 文本 LONG-TERM GOALS
+											49 文本 11 weeks left
+										50 内容列表 Plan tasks
+											51 内容列表
+												52 container
+													53 按钮 Show connections for Launch Hyperfocus on Product Hunt in top3
+													54 文本 Launch Hyperfocus on Product Hunt in top3
+												55 文本 Validate onboarding with five beta users
+												56 文本 Ship the launch-ready macOS app
+												57 文本 Publish the new landing page and demo
+												58 文本 Prepare the Product Hunt launch (hunter, supporters, assets)
+												59 文本 Launch & engage with users
+												60 文本 Track 200 downloads and 20 paying customers
+											61 内容列表
+												62 container
+													63 按钮 Show connections for Finish Cappadocia Ultra under 7 hours
+													64 文本 Finish Cappadocia Ultra under 7 hours
+												65 文本 Finalize the training plan with a coach
+												66 文本 Complete 40k test race
+												67 文本 Validate pacing, fueling, and equipment
+												68 文本 Arrive healthy, recovered and ready
+											69 内容列表
+												70 container
+													71 按钮 Show connections for Publish 12 essays by Dec 31
+													72 文本 Publish 12 essays by Dec 31
+												73 文本 Focus is not about managing more
+												74 文本 What games teaches us about experience
+												75 文本 Why focus still matters in AI world
+										76 text 1 issue
+									77 container Weeks cycles
+										78 text Weeks W28
+										79 文本 W29
+										80 文本 + Add
+									81 container Weekly plan
+										82 container
+											83 标题 WEEKLY PLAN, Value: 2
+												84 文本 WEEKLY PLAN
+											85 文本 4 days left
+										86 内容列表 Plan tasks
+											87 内容列表
+												88 container
+													89 按钮 Show connections for Create a product hunt launch checklist
+													90 文本 Create a product hunt launch checklist
+												91 文本 Research best practices
+												92 文本 Chat w/ Anton, Rahul, James on launches
+												93 文本 Create a launch checklist
+											94 内容列表
+												95 container
+													96 按钮 Show connections for Update landing page with product video
+													97 文本 Update landing page with product video
+												98 文本 Finalize hero & feature copy
+												99 文本 Record product video
+												100 文本 Run 3 quick tests
+												101 文本 Publish
+											102 内容列表
+												103 container
+													104 按钮 Show connections for Publish "Focus is not about managing more"
+													105 文本 Publish "Focus is not about managing more"
+											106 内容列表
+												107 container
+													108 按钮 Show connections for Order present for mom’s birthday
+													109 文本 Order present for mom’s birthday
+									110 container Days cycles
+										111 text Days Mon Tue
+										112 文本 Wed
+										113 文本 + Add
+									114 container Wednesday plan
+										115 container
+											116 标题 WEDNESDAY PLAN, Value: 2
+												117 文本 WEDNESDAY PLAN
+											118 文本 10 hours left
+										119 内容列表 Plan tasks
+											120 内容列表
+												121 container
+													122 按钮 Show connections for Write 1000 words for essay
+													123 文本 Write 1000 words for essay
+											124 内容列表
+												125 container
+													126 按钮 Show connections for Finalize hero & feature copy
+													127 文本 Finalize hero & feature copy
+												128 文本 Hero screenshot
+												129 文本 Method
+												130 文本 Feature 1: long-term goals
+												131 文本 Feature 2: weekly & daily plans
+												132 文本 Feature 3: Focus blocks
+												133 文本 Manifest
+											134 内容列表
+												135 container
+													136 按钮 Show connections for Pay the rent to Mariam
+													137 文本 Pay the rent to Mariam
+									138 container Focus blocks
+										139 container
+											140 标题 FOCUS BLOCKS, Value: 2
+												141 文本 FOCUS BLOCKS
+											142 文本 90 min
+										143 container
+											144 按钮 Stop
+											145 text 37:38 pan_zoom more_horiz Finalize copy for landing page Update hero screenshot Add old way vs hyperfocus way Align features copy with new value props
+										146 container
+											147 text check Afternoon focus 90 / 90 min keyboard_arrow_down more_horiz
+					148 container
+						149 文本 Task managers got it backward.
+						150 text They all promised you the same thing – that if you capture more, organize more, and keep up with more, you’ll finally get everything under control. I believe this is backward. When everything starts from an inbox, you’re reacting to things instead of spending time on goals that actually matter. You organize things. Process things. Jump between things. You feel busy, but not always productive. Yet there’s another way to work. With Hyperfocus, you start from “What do I want to achieve in the coming months?” It takes time to answer. But when you finally have it, the rest falls into place. You start feeling focused. Committed. Moving forward. Making progress toward goals that are actually yours. That's how I work. And if this resonates, I invite you to try Hyperfocus. Download the app, play around, and see if it fits.
+						151 图像 Dmitri, maker of Hyperfocus
+						152 文本 Dmitri Tcepelev
+						153 link Description: dmitri@hyperfocus.in, Value: mailto:dmitri@hyperfocus.in
+						154 文本 Maker of Hyperfocus
+					155 container A method that puts goals first.
+						156 标题 A method that puts goals first., Value: 2
+							157 文本 A method that puts goals first.
+						158 内容列表 Hyperfocus planning flow
+							159 文本 Goals
+							160 文本 Weeks
+							161 文本 Days
+							162 文本 Focus blocks
+						163 弹出式按钮 Watch a 2 minute tour
+					164 container
+						165 标题 Your plans, connected to what matters., Value: 3
+							166 文本 Your plans, connected to what matters.
+						167 文本 Stay focused on what matters most by connecting long-term goals to your weekly and daily plans in one workspace.
+						168 图像 A long-term goal connected to its weekly and daily plans
+					169 container
+						170 标题 Second opinion on your goals and plans., Value: 3
+							171 文本 Second opinion on your goals and plans.
+						172 文本 Hyperfocus AI reviews your goals and plans as you write, flagging vague outcomes, unrealistic scope, and missing next steps. Apply the feedback yourself – or work through it with an assistant built for goal-setting, prioritization, and planning.
+						173 图像 Real-time planning feedback beside guidance from the Hyperfocus assistant
+					174 container
+						175 标题 Your next step, always clear., Value: 3
+							176 文本 Your next step, always clear.
+						177 文本 A quick weekly and daily planning ritual narrows everything down to one clear next step – so you can spend less time deciding, and more time doing.
+						178 图像 Weekly planning and review rituals in Hyperfocus
+					179 container
+						180 标题 Turn plans into progress, one block at a time., Value: 3
+							181 文本 Turn plans into progress, one block at a time.
+						182 文本 Make progress with time-boxed sessions where you focus on one task at a time.
+						183 图像 A recurring focus block in Hyperfocus, with one task selected for the session
+					184 container FAQ
+						185 container
+							186 标题 FAQ, Value: 2
+								187 文本 FAQ
+							188 文本 If you can’t find the answer to your question below, email me 
+							189 link Description: dmitri@hyperfocus.in, Value: mailto:dmitri@hyperfocus.in
+						190 开合三角标记 Is Hyperfocus really free? What’s included?
+							191 文本 Is Hyperfocus really free? What’s included?
+						192 开合三角标记 How does AI work? Is it also free?
+							193 文本 How does AI work? Is it also free?
+						194 开合三角标记 What does Hyperfocus AI do, and can I use Hyperfocus without it?
+							195 文本 What does Hyperfocus AI do, and can I use Hyperfocus without it?
+						196 开合三角标记 Which operating systems does Hyperfocus support?
+							197 文本 Which operating systems does Hyperfocus support?
+						198 开合三角标记 How is Hyperfocus different from a task manager or to-do app?
+							199 文本 How is Hyperfocus different from a task manager or to-do app?
+						200 开合三角标记 Where is my data stored?
+							201 文本 Where is my data stored?
+					202 container
+						203 标题 Start making progress on your goals today., Value: 2
+							204 文本 Start making progress on your goals today.
+						205 link Description: Download for Mac, Value: hyperfocus.in/download/mac
+					206 container
+						207 文本 © 2026 Hyperfocus
+						208 link Description: Terms, Value: hyperfocus.in/terms/
+						209 link Description: Privacy, Value: hyperfocus.in/privacy/
+						210 link Description: Contact, Value: mailto:dmts@hyperfocus.in
+					211 container Notifications
+					212 container Notifications
+					213 container Notifications
+					214 container Notifications

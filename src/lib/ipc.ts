@@ -120,7 +120,6 @@ export const commands = {
   startAgentConversation: "start_agent_conversation",
   sendAgentMessage: "send_agent_message",
   getAgentConversation: "get_agent_conversation",
-  getPreviousAgentConversation: "get_previous_agent_conversation",
   startPlanning: "start_planning",
   analyzePlanningPeriod: "analyze_planning_period",
   startGoalSetting: "start_goal_setting",
@@ -289,12 +288,12 @@ export function addLaterGoal(title: string): Promise<Task> {
   return invoke<Task>(commands.addLaterGoal, { title });
 }
 
-/** Pull a parked idea into a planning cycle (typically the long-term one). */
+/** Pull a parked idea into a planning cycle; null lets the backend resolve the current week/day. */
 export function promoteLaterGoal(
   task_id: string,
-  target_cycle_id: string,
+  target_cycle_id?: string | null,
 ): Promise<Task> {
-  return invoke<Task>(commands.promoteLaterGoal, { taskId: task_id, targetCycleId: target_cycle_id });
+  return invoke<Task>(commands.promoteLaterGoal, { taskId: task_id, targetCycleId: target_cycle_id ?? null });
 }
 
 // --- agent proposals --------------------------------------------------------
@@ -445,32 +444,33 @@ export function testProviderConnection(provider_id: string): Promise<ConnectionT
 
 // --- agent conversations & planning issues ----------------------------------
 
-export function startAgentConversation(cycle_id: string): Promise<ConversationView> {
-  return invoke<ConversationView>(commands.startAgentConversation, { cycleId: cycle_id });
+export function startAgentConversation(): Promise<ConversationView> {
+  return invoke<ConversationView>(commands.startAgentConversation);
 }
 
 export function sendAgentMessage(
-  cycle_id: string,
+  cycle_id: string | null,
   text: string,
   focused_task_id?: string | null,
+  page_context?: import("./types").AgentPageContext | null,
 ): Promise<TurnResult> {
   return invoke<TurnResult>(commands.sendAgentMessage, {
     cycleId: cycle_id,
     text,
     focusedTaskId: focused_task_id ?? null,
+    pageContext: page_context ?? null,
   });
 }
 
-export function getAgentConversation(cycle_id: string): Promise<ConversationView | null> {
-  return invoke<ConversationView | null>(commands.getAgentConversation, { cycleId: cycle_id });
+export function getAgentConversation(): Promise<ConversationView | null> {
+  return invoke<ConversationView | null>(commands.getAgentConversation);
 }
 
-export function getPreviousAgentConversation(cycle_id: string): Promise<ConversationView | null> {
-  return invoke<ConversationView | null>(commands.getPreviousAgentConversation, { cycleId: cycle_id });
-}
-
-export function startPlanning(cycle_id: string): Promise<TurnResult> {
-  return invoke<TurnResult>(commands.startPlanning, { cycleId: cycle_id });
+export function startPlanning(
+  cycle_id: string,
+  page_context?: import("./types").AgentPageContext | null,
+): Promise<TurnResult> {
+  return invoke<TurnResult>(commands.startPlanning, { cycleId: cycle_id, pageContext: page_context ?? null });
 }
 
 export function startGoalSetting(cycle_id: string, task_id: string): Promise<TurnResult> {

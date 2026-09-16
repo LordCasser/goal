@@ -948,6 +948,7 @@ mod tests {
             needs_breakdown: None,
             root_color_key: None,
             copied_from_task_id: None,
+            later_plan_type: None,
             proposal: None,
             created_at: 0,
         }

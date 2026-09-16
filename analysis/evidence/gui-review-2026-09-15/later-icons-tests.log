@@ -1,0 +1,14 @@
+
+> planner@0.1.0 test
+> vitest run src/features/later --reporter=dot
+
+
+ RUN  v3.2.7 /Users/lordcasser/workspace/projects/goal
+
+···········
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  14:16:41
+   Duration  964ms (transform 65ms, setup 0ms, collect 227ms, tests 200ms, environment 343ms, prepare 52ms)
+

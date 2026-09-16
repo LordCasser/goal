@@ -1,0 +1,32 @@
+24 HTML 内容 Hyperfocus – Goals-first planner, URL: hyperfocus.in/
+					25 container Take a 2 minute tour of Hyperfocus
+						26 按钮 Close video
+						27 container
+							28 container
+								29 container Hyperfocus Walkthrough
+								30 container
+									31 container
+										32 按钮 Play Video: Hyperfocus Walkthrough
+										33 文本 Press O for more options
+									34 container Video controls: Hyperfocus Walkthrough
+										35 container
+											36 按钮 Play Video
+											37 container
+												38 文本 2:24
+												39 滑块 Description: Seek, Value: 143.894, Details: 2 minutes, Secondary Actions: Increment, Decrement
+												40 工具栏 Chapter Markers
+													41 工具栏 Chapter Markers
+														42 container
+															43 按钮 The Problem With Traditional Task Managers
+															44 按钮 Goal Centric Prioritization Approach
+															45 按钮 AI Coaching and Goal Clarity
+															46 按钮 Connecting Long Term Goals to Daily Plans
+															47 按钮 Aligning Daily Work With Long Term Objectives
+															48 按钮 Using Focus Blocks for Execution
+											49 container
+												50 按钮 Show captions menu
+												51 切换按钮 Description: Mute, Value: 0
+												52 按钮 Show settings menu
+												53 按钮 Open chapters
+												54 按钮 Fullscreen
+											55 link Description: Wistia Logo -- Learn More, Value: wistia.com/?utm_type=player&utm_campaign=wistia-branding&utm_medium=referral&utm_source=wistia&about=2401042
