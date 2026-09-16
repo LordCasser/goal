@@ -13,43 +13,30 @@ import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
+import { ReminderSettingsSection } from "../reminders/ReminderSettingsSection";
 import { AiSettingsPage } from "../ai-settings/AiSettingsPage";
-import { Button, Dialog, cn } from "../../ui";
+import { Button, Dialog, Select, SelectItem, cn } from "../../ui";
 import { qk } from "../../lib/events";
 import {
   getDebugLogDir,
   getSchemaVersion,
   getSettings,
-  isAppError,
+  setLocale,
   setLogLevel,
   setTheme,
   setWeekStartDay,
 } from "../../lib/ipc";
 import type { LogLevel, Settings, Theme } from "../../lib/ipc";
+import { applyLocale, errorMessage, useTranslation } from "../../lib/i18n";
 import { applyTheme } from "../../lib/theme";
 
 /** 两个用户确认的浅色主题（design.md §4.4）；默认白底。 */
-const THEME_OPTIONS: ReadonlyArray<{ value: Theme; label: string }> = [
-  { value: "white", label: "白底" },
-  { value: "gray", label: "灰底" },
+const THEME_OPTIONS: ReadonlyArray<{ value: Theme }> = [
+  { value: "white" },
+  { value: "gray" },
 ];
 
-/** 周一…周日 ↔ ISO 1…7，与 setWeekStartDay 的取值域一致。 */
-const WEEK_DAY_LABELS = [
-  "周一",
-  "周二",
-  "周三",
-  "周四",
-  "周五",
-  "周六",
-  "周日",
-] as const;
-
 const LOG_LEVELS: readonly LogLevel[] = ["error", "warn", "info", "debug"];
-
-/* 原生 select 复用 Input 的表面样式（design.md 4.1/4.3）；箭头留给平台。 */
-const SELECT_CLASS =
-  "h-8 rounded-sm border border-control bg-content px-2 text-[14px] text-primary transition-colors duration-100";
 
 /*
  * 主题示意小图（48×32、2px 圆角）：canvas 上承托一块 content 面板。
@@ -60,15 +47,15 @@ function ThemePreview({ theme }: { theme: Theme }) {
   const canvas = theme === "gray" ? "#f6f6f6" : "#ffffff";
   const edge = theme === "gray" ? "#e3e3e3" : "#edf0f2";
   return (
-    <div
-      aria-hidden="true"
-      className="rounded-[2px] p-[5px]"
-      style={{ width: 48, height: 32, backgroundColor: canvas }}
-    >
-      <div
-        className="h-full w-full rounded-[2px] bg-white"
-        style={{ border: `1px solid ${edge}` }}
-      />
+    <div aria-hidden="true" className="overflow-hidden rounded-md border p-3" style={{ height: 104, backgroundColor: canvas, borderColor: edge }}>
+      <div className="mb-3 flex items-center gap-1"><i className="h-1 w-1 rounded-full bg-[#bac0c7]" /><i className="h-1 w-1 rounded-full bg-[#bac0c7]" /><i className="h-1 w-1 rounded-full bg-[#bac0c7]" /></div>
+      <div className="flex h-16 gap-2">
+        {[0, 1].map((column) => <div key={column} className="flex-1 rounded-sm bg-white p-2" style={{ border: `1px solid ${edge}` }}>
+          <div className="mb-2 h-1 w-8 rounded bg-[#949ca7]" />
+          <div className="mb-1.5 h-1 w-12 rounded bg-[#e0e4e9]" />
+          <div className="h-1 w-9 rounded bg-[#e0e4e9]" />
+        </div>)}
+      </div>
     </div>
   );
 }
@@ -76,12 +63,7 @@ function ThemePreview({ theme }: { theme: Theme }) {
 /** 行内错误（AppError 优先取 message），不打断、不弹窗（design.md 9.2）。 */
 function InlineError({ error }: { error: unknown }) {
   if (error === null || error === undefined) return null;
-  const message = isAppError(error)
-    ? error.message
-    : error instanceof Error
-      ? error.message
-      : String(error);
-  return <p className="text-caption text-danger">{message}</p>;
+  return <p className="text-caption text-danger">{errorMessage(error)}</p>;
 }
 
 export function SettingsDialog({
@@ -95,8 +77,10 @@ export function SettingsDialog({
   onPreviewExitPoll?: () => void;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
+  const { t } = useTranslation("shell");
   const weekStartId = useId();
   const logLevelId = useId();
+  const localeId = useId();
 
   // 关闭期间不发 IPC；settings 键与 App 共享同一份缓存。
   const settingsQuery = useQuery({
@@ -154,6 +138,23 @@ export function SettingsDialog({
     },
   });
 
+  const localeMutation = useMutation({
+    mutationFn: async (locale: Settings["locale"]) => {
+      await setLocale(locale);
+      return locale;
+    },
+    onMutate: () => queryClient.cancelQueries({ queryKey: qk.settings() }),
+    onSuccess: (locale) => {
+      // Publish the durable preference only after success. App also observes
+      // this cache, so optimistic writes would switch the whole UI too early.
+      queryClient.setQueryData<Settings>(qk.settings(), (current) =>
+        current ? { ...current, locale } : current,
+      );
+      applyLocale(locale);
+      void queryClient.invalidateQueries({ queryKey: qk.settings() });
+    },
+  });
+
   // 后端没有日志级别回读命令，先显示 info；之后的取值以本地选择为准。
   const [logLevel, setLogLevelValue] = useState<LogLevel>("info");
   const logLevelMutation = useMutation({ mutationFn: setLogLevel });
@@ -162,10 +163,11 @@ export function SettingsDialog({
   const [logDir, setLogDir] = useState<string | null>(null);
   const [logDirError, setLogDirError] = useState<unknown>(null);
   // 模型设置二级弹窗：设置弹窗保持打开，AI 页在上层展示。
-  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [section, setSection] = useState<"general" | "ai" | "reminders" | "diagnostics">("general");
 
   const selectedTheme = settingsQuery.data?.theme ?? "white";
   const weekStartDay = settingsQuery.data?.week_start_day ?? 1;
+  const selectedLocale = settingsQuery.data?.locale ?? "en";
 
   const chooseTheme = (theme: Theme) => {
     if (theme === selectedTheme) return;
@@ -201,134 +203,109 @@ export function SettingsDialog({
   if (!open) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} title="Settings">
-      {/* 分区之间 24px（design.md 4.3 间距节奏）。 */}
-      <div className="flex flex-col gap-6">
-        <section className="flex flex-col gap-2">
-          <h3 className="text-block-title font-semibold text-primary">Appearance</h3>
-          <div className="flex gap-2">
-            {THEME_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={selectedTheme === option.value}
-                onClick={() => chooseTheme(option.value)}
-                className={cn(
-                  "flex flex-1 flex-col items-start gap-1.5 rounded-sm border p-2",
-                  "transition-colors duration-100",
-                  selectedTheme === option.value
-                    ? "border-focus bg-focus-surface"
-                    : "border-light hover:bg-hover",
-                )}
-              >
-                <ThemePreview theme={option.value} />
-                <span className="text-caption text-primary">{option.label}</span>
-              </button>
-            ))}
-          </div>
-          <InlineError error={themeMutation.error} />
-        </section>
-
-        <section className="flex flex-col gap-2">
-          <h3 className="text-block-title font-semibold text-primary">General</h3>
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between gap-3">
-              <label htmlFor={weekStartId} className="text-caption text-secondary">
-                周起始日
-              </label>
-              <select
-                id={weekStartId}
-                value={weekStartDay}
-                onChange={(e) => chooseWeekStart(Number(e.currentTarget.value))}
-                className={cn(SELECT_CLASS, "w-auto")}
-              >
-                {WEEK_DAY_LABELS.map((label, index) => (
-                  <option key={label} value={index + 1}>
-                    {label}
-                  </option>
+    <Dialog open={open} onClose={onClose} title={t("settings.title")} wide className="max-w-[1040px]! h-[680px] max-h-[calc(100vh-64px)]" bodyClassName="overflow-hidden!">
+      <div className="flex h-full gap-7 border-t border-light pt-5">
+        <nav aria-label={t("settings.navLabel")} className="flex w-[136px] shrink-0 flex-col gap-1">
+          {([
+            ["general", t("settings.nav.general"), t("settings.nav.generalDescription")],
+            ["ai", t("settings.nav.ai"), t("settings.nav.aiDescription")],
+            ["reminders", t("settings.nav.reminders"), t("settings.nav.remindersDescription")],
+            ["diagnostics", t("settings.nav.diagnostics"), t("settings.nav.diagnosticsDescription")],
+          ] as const).map(([id, label, description]) => (
+            <button key={id} type="button" aria-current={section === id ? "page" : undefined}
+              onClick={() => setSection(id)}
+              className={cn("rounded-lg px-3 py-3 text-left transition-colors hover:bg-hover", section === id && "bg-subtle")}>
+              <span className={cn("block text-body font-medium", section === id ? "text-primary" : "text-secondary")}>{label}</span>
+              <span className="mt-0.5 block text-caption text-hint">{description}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1 pb-2">
+          {section === "general" && <div className="flex flex-col gap-7">
+            <section>
+              <h3 className="text-section-title font-semibold text-primary">{t("settings.appearance.title")}</h3>
+              <p className="mt-1 text-body text-secondary">{t("settings.appearance.description")}</p>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                {THEME_OPTIONS.map((option) => (
+                  <button key={option.value} type="button" aria-label={t(`settings.theme.${option.value}`)}
+                    aria-pressed={selectedTheme === option.value}
+                    disabled={settingsQuery.isPending || themeMutation.isPending}
+                    onClick={() => chooseTheme(option.value)}
+                    className={cn("overflow-hidden rounded-lg border p-2 text-left transition-colors", selectedTheme === option.value ? "border-focus" : "border-light hover:border-control")}>
+                    <ThemePreview theme={option.value} />
+                    <span className="flex items-center justify-between px-2 pb-1 pt-3 text-body font-medium text-primary">
+                      {t(`settings.theme.${option.value}`)}
+                      <span aria-hidden="true" className={cn("flex h-4 w-4 items-center justify-center rounded-full border text-[10px]", selectedTheme === option.value ? "border-focus bg-focus text-white" : "border-control")}>{selectedTheme === option.value ? "✓" : ""}</span>
+                    </span>
+                    <span className="block px-2 pb-2 text-caption text-secondary">{t(`settings.theme.${option.value}Description`)}</span>
+                  </button>
                 ))}
-              </select>
-            </div>
-            <InlineError error={weekStartMutation.error} />
-          </div>
-        </section>
-
-        {/* AI 分区（§9.3）：先说明接入状态，管理入口打开模型设置页。 */}
-        <section className="flex flex-col gap-2">
-          <h3 className="text-block-title font-semibold text-primary">AI</h3>
-          <p className="text-caption text-secondary">
-            Bring your own key — requests go directly to your provider, and you
-            pay your provider directly.
-          </p>
-          <Button
-            variant="secondary"
-            size="compact"
-            onClick={() => setAiSettingsOpen(true)}
-          >
-            模型设置…
-          </Button>
-          {onPreviewExitPoll && (
-            <Button
-              variant="ghost"
-              size="compact"
-              onClick={onPreviewExitPoll}
-            >
-              反馈：退出调查…
-            </Button>
-          )}
-        </section>
-
-        <section className="flex flex-col gap-2">
-          <h3 className="text-block-title font-semibold text-primary">Diagnostics</h3>
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between gap-3">
-              <label htmlFor={logLevelId} className="text-caption text-secondary">
-                日志级别
-              </label>
-              <select
-                id={logLevelId}
-                value={logLevel}
-                onChange={(e) => chooseLogLevel(e.currentTarget.value as LogLevel)}
-                className={cn(SELECT_CLASS, "w-auto")}
-              >
-                {LOG_LEVELS.map((level) => (
-                  <option key={level} value={level}>
-                    {level}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <InlineError error={logLevelMutation.error} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Button
-              variant="secondary"
-              size="compact"
-              loading={openingLogs}
-              onClick={() => void openLogDir()}
-            >
-              打开日志目录
-            </Button>
-            {logDir !== null && (
-              <p className="break-all text-caption text-secondary">{logDir}</p>
-            )}
-            <InlineError error={logDirError} />
-          </div>
-          {schemaQuery.data !== undefined && (
-            <p className="text-hint">Schema v{schemaQuery.data}</p>
-          )}
-        </section>
+              </div>
+              <InlineError error={themeMutation.error} />
+            </section>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <label htmlFor={localeId} className="text-body font-medium text-primary">{t("settings.language.label")}</label>
+                  <p className="mt-1 text-caption text-secondary">{t("settings.language.description")}</p>
+                </div>
+                <Select id={localeId} value={selectedLocale} disabled={settingsQuery.isPending || localeMutation.isPending}
+                  onValueChange={(value) => {
+                    const locale = value as Settings["locale"];
+                    if (locale !== selectedLocale) localeMutation.mutate(locale);
+                  }} triggerClassName="w-[132px]">
+                  <SelectItem value="zh-CN">{t("settings.language.zhCN")}</SelectItem>
+                  <SelectItem value="en">{t("settings.language.en")}</SelectItem>
+                </Select>
+              </div>
+              <InlineError error={localeMutation.error} />
+            </section>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <label htmlFor={weekStartId} className="text-body font-medium text-primary">{t("settings.weekStart.label")}</label>
+                  <p className="mt-1 text-caption text-secondary">{t("settings.weekStart.description")}</p>
+                </div>
+                <Select id={weekStartId} value={String(weekStartDay)} disabled={settingsQuery.isPending || weekStartMutation.isPending}
+                  onValueChange={(value) => chooseWeekStart(Number(value))} triggerClassName="w-[116px]">
+                  {Array.from({ length: 7 }, (_, index) => <SelectItem key={index + 1} value={String(index + 1)}>{t(`settings.weekDay.${index + 1}`)}</SelectItem>)}
+                </Select>
+              </div>
+              <InlineError error={weekStartMutation.error} />
+            </section>
+            {onPreviewExitPoll && <section className="flex items-center justify-between gap-4 border-t border-light pt-5">
+              <div><h3 className="text-body font-medium text-primary">{t("settings.feedback.title")}</h3><p className="mt-1 text-caption text-secondary">{t("settings.feedback.description")}</p></div>
+              <Button size="compact" onClick={onPreviewExitPoll}>{t("settings.feedback.action")}</Button>
+            </section>}
+            <InlineError error={settingsQuery.error} />
+            <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending || localeMutation.isPending ? t("settings.saveStatus.saving") : t("settings.saveStatus.auto")}</p>
+          </div>}
+          {section === "ai" && <AiSettingsPage />}
+          {section === "reminders" && <div className="flex flex-col gap-6"><div><h3 className="text-section-title font-semibold text-primary">{t("settings.reminders.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.reminders.description")}</p></div><ReminderSettingsSection /></div>}
+          {section === "diagnostics" && <div className="flex flex-col gap-6">
+            <div><h3 className="text-section-title font-semibold text-primary">{t("settings.diagnostics.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.diagnostics.description")}</p></div>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-3">
+                <div><label htmlFor={logLevelId} className="text-body font-medium text-primary">{t("settings.logLevel.label")}</label><p className="mt-1 text-caption text-secondary">{t("settings.logLevel.description")}</p></div>
+                <Select id={logLevelId} value={logLevel} onValueChange={(value) => chooseLogLevel(value as LogLevel)} triggerClassName="w-[116px]">
+                  {LOG_LEVELS.map((level) => <SelectItem key={level} value={level}>{level}</SelectItem>)}
+                </Select>
+              </div>
+              <InlineError error={logLevelMutation.error} />
+            </section>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-3">
+                <div><h3 className="text-body font-medium text-primary">{t("settings.logs.title")}</h3><p className="mt-1 text-caption text-secondary">{t("settings.logs.description")}</p></div>
+                <Button size="compact" loading={openingLogs} onClick={() => void openLogDir()}>{t("settings.logs.open")}</Button>
+              </div>
+              {logDir !== null && <p className="mt-3 break-all rounded-md bg-subtle p-3 text-caption text-secondary">{logDir}</p>}
+              <InlineError error={logDirError} />
+            </section>
+            {schemaQuery.data !== undefined && <p className="border-t border-light pt-5 text-caption text-hint">{t("settings.schemaVersion", { version: schemaQuery.data })}</p>}
+            <InlineError error={schemaQuery.error} />
+          </div>}
+        </div>
       </div>
-      {aiSettingsOpen && (
-        <Dialog
-          open
-          wide
-          title="AI models"
-          onClose={() => setAiSettingsOpen(false)}
-        >
-          <AiSettingsPage />
-        </Dialog>
-      )}
     </Dialog>
   );
 }

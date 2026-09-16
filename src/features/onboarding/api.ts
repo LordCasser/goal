@@ -2,8 +2,8 @@
  * Onboarding & lifecycle IPC surface (change: add-onboarding-and-lifecycle).
  *
  * 本地 api.ts 直连 @tauri-apps/api/core —— 与 src/lib/ipc.ts 同构（命令名
- * 集中声明、参数键保持 Rust 侧 snake_case），但本变更不允许改动 src/lib，
- * 故命令名落在本文件，前端测试按这些名字 mock invoke 以钉住线上契约。
+ * 集中声明、顶层参数键使用 camelCase、嵌套 serde 数据保持 snake_case），
+ * 本模块的命令名落在本文件，前端测试按这些名字 mock invoke 以钉住线上契约。
  *
  * 隐私边界：退出调查与反馈在本版本没有上报通道，后端只写本地队列
  * （staged_events / staged_feedback）；`listStagedFeedback` 是将来显式导出
@@ -158,7 +158,7 @@ export function getDismissedHints(): Promise<string[]> {
 }
 
 export function dismissHint(hint_id: string): Promise<void> {
-  return invoke<void>(commands.dismissHint, { hint_id });
+  return invoke<void>(commands.dismissHint, { hintId: hint_id });
 }
 
 // --- §3 exit poll ----------------------------------------------------------------
@@ -234,7 +234,7 @@ export function getLifecyclePrefs(): Promise<LifecyclePrefs> {
 
 /** `null` clears the preference. */
 export function setDailyPlanTime(daily_plan_time: string | null): Promise<void> {
-  return invoke<void>(commands.setDailyPlanTime, { daily_plan_time });
+  return invoke<void>(commands.setDailyPlanTime, { dailyPlanTime: daily_plan_time });
 }
 
 // --- §6 focus-block due notification -------------------------------------------------------
@@ -249,8 +249,8 @@ export function notifySessionDue(
   duration_ms: number | null,
 ): Promise<SessionDueOutcome> {
   return invoke<SessionDueOutcome>(commands.notifySessionDue, {
-    session_id,
+    sessionId: session_id,
     title,
-    duration_ms,
+    durationMs: duration_ms,
   });
 }

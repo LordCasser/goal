@@ -6,6 +6,7 @@
 //! also captures request headers and bodies, which drives the auth-header
 //! and sampling-preference assertions (no real endpoints are contacted).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ use axum::response::Response;
 use axum::routing::post;
 use axum::Router;
 use futures_util::StreamExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{
     sample, ApiFormat, MessageRole, SamplingError, SamplingEvent, SamplingMessage, SamplingRequest,
@@ -24,6 +26,8 @@ use super::{
 
 /// Key used across tests; never equals a real credential.
 const TEST_KEY: &str = "sk-replay-key-1";
+const EXTRA_SECRET: &str = "gateway-header-secret-1";
+const STREAM_SECRET: &str = "gateway-stream-secret-1";
 
 const FORMATS: [ApiFormat; 3] = [
     ApiFormat::AnthropicMessages,
@@ -40,12 +44,16 @@ const FORMATS: [ApiFormat; 3] = [
 enum Scenario {
     /// Reply 200 with a fixed SSE payload, dribbled in small chunks.
     Sse(&'static str),
+    /// Reply 200 with an SSE provider error event.
+    SseError(&'static str),
     /// Reply with this HTTP status and raw body (JSON error shapes).
     Error(StatusCode, String),
     /// Accept the connection but never answer.
     Hang,
     /// Send an SSE prefix, then stall forever (idle-timeout path).
     StallAfter(&'static str),
+    /// Reply with a redirect to another local server.
+    Redirect(String),
 }
 
 /// One captured request.
@@ -70,6 +78,7 @@ async fn handle(State(ctx): State<Ctx>, headers: HeaderMap, body: axum::body::By
     });
     match ctx.scenario {
         Scenario::Sse(payload) => sse_response(payload, Chunking::Dribble),
+        Scenario::SseError(payload) => sse_response(payload, Chunking::Dribble),
         Scenario::Error(status, body) => Response::builder()
             .status(status)
             .header("content-type", "application/json")
@@ -80,6 +89,11 @@ async fn handle(State(ctx): State<Ctx>, headers: HeaderMap, body: axum::body::By
             unreachable!()
         }
         Scenario::StallAfter(prefix) => sse_response(prefix, Chunking::Stall),
+        Scenario::Redirect(location) => Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header("location", location)
+            .body(Body::empty())
+            .unwrap(),
     }
 }
 
@@ -268,16 +282,40 @@ const RESPONSES_TOOL: &str = concat!(
     "\n",
 );
 
+fn streaming_error_fixture(format: ApiFormat) -> &'static str {
+    match format {
+        ApiFormat::AnthropicMessages => concat!(
+            "event: error\n",
+            "data: {\"type\":\"error\",\"error\":{\"message\":\"gateway rejected ",
+            "gateway-stream-secret-1",
+            "\"}}\n\n",
+        ),
+        ApiFormat::OpenaiChatCompletions => concat!(
+            "data: {\"error\":{\"message\":\"gateway rejected ",
+            "gateway-stream-secret-1",
+            "\"}}\n\n",
+        ),
+        ApiFormat::OpenaiResponses => concat!(
+            "event: error\n",
+            "data: {\"type\":\"error\",\"message\":\"gateway rejected ",
+            "gateway-stream-secret-1",
+            "\"}\n\n",
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 fn request(base: &str, format: ApiFormat) -> SamplingRequest {
     SamplingRequest {
+        connection: Default::default(),
         base_url: base.into(),
         api_format: format,
         model: "replay-model".into(),
         api_key: Some(TEST_KEY.into()),
+        extra_headers: vec![],
         messages: vec![SamplingMessage {
             role: MessageRole::User,
             content: "hello".into(),
@@ -637,9 +675,122 @@ async fn no_key_sends_no_auth_headers_on_any_format() {
     }
 }
 
+#[tokio::test]
+async fn custom_headers_merge_and_override_defaults_for_all_formats() {
+    for format in FORMATS {
+        let (base, captured) = spawn(Scenario::Sse(text_fixture(format))).await;
+        let mut req = request(&base, format);
+        req.extra_headers = match format {
+            ApiFormat::AnthropicMessages => vec![
+                ("X-Gateway-Route".into(), EXTRA_SECRET.into()),
+                ("X-API-KEY".into(), "custom-anthropic-key".into()),
+                (
+                    "ANTHROPIC-VERSION".into(),
+                    "custom-anthropic-version".into(),
+                ),
+            ],
+            ApiFormat::OpenaiChatCompletions | ApiFormat::OpenaiResponses => vec![
+                ("X-Gateway-Route".into(), EXTRA_SECRET.into()),
+                ("Authorization".into(), "Bearer custom-authorization".into()),
+            ],
+        };
+        run(sample(req, Timeouts::default()).await.unwrap()).await;
+        let records = captured.lock().unwrap();
+        assert_eq!(header(&records, "x-gateway-route"), Some(EXTRA_SECRET));
+        match format {
+            ApiFormat::AnthropicMessages => {
+                assert_eq!(header(&records, "x-api-key"), Some("custom-anthropic-key"));
+                assert_eq!(
+                    header(&records, "anthropic-version"),
+                    Some("custom-anthropic-version")
+                );
+                assert_eq!(records[0].headers.get_all("x-api-key").iter().count(), 1);
+            }
+            ApiFormat::OpenaiChatCompletions | ApiFormat::OpenaiResponses => {
+                assert_eq!(
+                    header(&records, "authorization"),
+                    Some("Bearer custom-authorization")
+                );
+                assert_eq!(
+                    records[0].headers.get_all("authorization").iter().count(),
+                    1
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn invalid_custom_headers_are_rejected_before_network_for_all_formats() {
+    for format in FORMATS {
+        let (base, captured) = spawn(Scenario::Sse(text_fixture(format))).await;
+        let mut req = request(&base, format);
+        req.extra_headers = vec![("X-Gateway-Route".into(), "line\nbreak".into())];
+        let error = sample(req, Timeouts::default()).await.unwrap_err();
+        assert_eq!(
+            error,
+            SamplingError::InvalidRequest {
+                message: "invalid request headers".into()
+            }
+        );
+        assert!(captured.lock().unwrap().is_empty(), "{format:?}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Task 3.8 scenario 4: error classification (design D3)
 // ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn http_error_redacts_custom_header_values() {
+    for format in FORMATS {
+        let body = format!(r#"{{"error":{{"message":"gateway rejected {EXTRA_SECRET}"}}}}"#);
+        let (base, _) = spawn(Scenario::Error(StatusCode::BAD_REQUEST, body)).await;
+        let mut req = request(&base, format);
+        req.extra_headers = vec![("X-Gateway-Route".into(), EXTRA_SECRET.into())];
+        let error = sample(req, Timeouts::default()).await.unwrap_err();
+        let SamplingError::InvalidRequest { message } = error else {
+            panic!("expected InvalidRequest");
+        };
+        assert!(!message.contains(EXTRA_SECRET), "{format:?}: {message}");
+        assert!(message.contains("[REDACTED]"), "{format:?}: {message}");
+    }
+}
+
+#[tokio::test]
+async fn streaming_error_redacts_custom_header_values() {
+    for format in FORMATS {
+        let (base, _) = spawn(Scenario::SseError(streaming_error_fixture(format))).await;
+        let mut req = request(&base, format);
+        req.extra_headers = vec![("X-Gateway-Route".into(), STREAM_SECRET.into())];
+        let events = run(sample(req, Timeouts::default()).await.unwrap()).await;
+        let Some(Err(SamplingError::ProtocolError { message })) = events.first() else {
+            panic!("expected one streaming protocol error: {events:?}");
+        };
+        assert!(!message.contains(STREAM_SECRET), "{format:?}: {message}");
+        assert!(message.contains("[REDACTED]"), "{format:?}: {message}");
+    }
+}
+
+#[tokio::test]
+async fn redirects_do_not_forward_sampling_credentials() {
+    let (target, target_captured) = spawn(Scenario::Sse(text_fixture(
+        ApiFormat::OpenaiChatCompletions,
+    )))
+    .await;
+    let (base, _) = spawn(Scenario::Redirect(target)).await;
+    let error = sample(
+        request(&base, ApiFormat::OpenaiChatCompletions),
+        Timeouts::default(),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, SamplingError::InvalidRequest { .. }));
+    assert!(
+        target_captured.lock().unwrap().is_empty(),
+        "redirect target received a request"
+    );
+}
 
 #[tokio::test]
 async fn http_errors_classify_per_design_d3() {
@@ -766,6 +917,8 @@ async fn malformed_sse_is_a_protocol_error_and_is_not_retried() {
 /// Env variables carrying the subprocess helper's instructions.
 const ENV_LOG_DIR: &str = "PLANNER_SAMPLING_TEST_LOG_DIR";
 const ENV_SECRET: &str = "PLANNER_SAMPLING_TEST_SECRET";
+const ENV_LOOPBACK_PROXY_TEST: &str = "PLANNER_SAMPLING_TEST_LOOPBACK_PROXY";
+const ENV_REMOTE_PROXY_TEST: &str = "PLANNER_SAMPLING_TEST_REMOTE_PROXY";
 
 /// The logger is a process-global singleton that the logging module's own
 /// tests keep re-pointing at their temp directories, so an in-process log
@@ -839,6 +992,182 @@ async fn invalid_request_message_never_leaks_key_into_logs() {
     assert!(contents.contains("[REDACTED]"));
 }
 
+/// Runs in a clean child process with every proxy variable pointing at a
+/// dropped local port and no NO_PROXY entry. The parent test below uses this
+/// boundary because proxy environment variables are process-global and the
+/// rest of the sampling suite runs in parallel.
+#[tokio::test]
+#[ignore = "spawned as a subprocess by loopback_request_bypasses_unreachable_proxy"]
+async fn loopback_proxy_subprocess_helper() {
+    if std::env::var(ENV_LOOPBACK_PROXY_TEST).is_err() {
+        return;
+    }
+
+    let (base, captured) = spawn(Scenario::Sse(text_fixture(
+        ApiFormat::OpenaiChatCompletions,
+    )))
+    .await;
+
+    // Reproduce the pre-fix path in this isolated process: reqwest's default
+    // client sees the bad proxy and cannot reach the same local listener.
+    let old_client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_millis(100))
+        .build()
+        .unwrap();
+    assert!(
+        old_client.get(&base).send().await.is_err(),
+        "default client unexpectedly bypassed the bad proxy"
+    );
+
+    let stream = sample(
+        request(&base, ApiFormat::OpenaiChatCompletions),
+        Timeouts::default(),
+    )
+    .await
+    .expect("loopback sampling must bypass the unreachable proxy");
+    let events = run(stream).await;
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            Ok(SamplingEvent::TextDelta { text }) if text == "Hi"
+        )),
+        "local mock did not produce a decoded event: {events:?}"
+    );
+    assert_eq!(captured.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn loopback_request_bypasses_unreachable_proxy() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let proxy = format!("http://127.0.0.1:{proxy_port}");
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sampling::tests::loopback_proxy_subprocess_helper",
+            "--ignored",
+            "--quiet",
+        ])
+        .env(ENV_LOOPBACK_PROXY_TEST, "1")
+        .env("HTTP_PROXY", &proxy)
+        .env("http_proxy", &proxy)
+        .env("HTTPS_PROXY", &proxy)
+        .env("https_proxy", &proxy)
+        .env("ALL_PROXY", &proxy)
+        .env("all_proxy", &proxy)
+        .env_remove("NO_PROXY")
+        .env_remove("no_proxy")
+        .env_remove("REQUEST_METHOD")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "loopback proxy subprocess failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A tiny HTTP proxy used only by the child-process remote transport check.
+/// It returns a valid SSE response without connecting to the reserved remote
+/// address, so a globally disabled proxy is distinguishable from selective
+/// loopback bypass.
+async fn spawn_test_proxy(payload: &'static str) -> (String, Arc<AtomicBool>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let saw_request = Arc::new(AtomicBool::new(false));
+    let saw_request_for_task = saw_request.clone();
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        loop {
+            let read =
+                match tokio::time::timeout(Duration::from_secs(2), socket.read(&mut chunk)).await {
+                    Ok(Ok(read)) => read,
+                    _ => return,
+                };
+            if read == 0 {
+                return;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        saw_request_for_task.store(true, Ordering::Relaxed);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            payload.len(), payload
+        );
+        let _ = socket.write_all(response.as_bytes()).await;
+    });
+    (format!("http://{address}"), saw_request)
+}
+
+#[tokio::test]
+#[ignore = "spawned as a subprocess by remote_request_retains_system_proxy"]
+async fn remote_proxy_subprocess_helper() {
+    if std::env::var(ENV_REMOTE_PROXY_TEST).is_err() {
+        return;
+    }
+
+    let (proxy, saw_request) =
+        spawn_test_proxy(text_fixture(ApiFormat::OpenaiChatCompletions)).await;
+    for name in [
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        std::env::set_var(name, &proxy);
+    }
+    std::env::remove_var("NO_PROXY");
+    std::env::remove_var("no_proxy");
+    std::env::remove_var("REQUEST_METHOD");
+
+    let mut req = request("http://192.0.2.1/v1", ApiFormat::OpenaiChatCompletions);
+    req.api_key = None;
+    let stream = sample(req, Timeouts::default())
+        .await
+        .expect("remote request should retain the configured system proxy");
+    let events = run(stream).await;
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(SamplingEvent::TextDelta { text }) if text == "Hi"
+    )));
+    assert!(saw_request.load(Ordering::Relaxed));
+}
+
+#[tokio::test]
+async fn remote_request_retains_system_proxy() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sampling::tests::remote_proxy_subprocess_helper",
+            "--ignored",
+            "--quiet",
+        ])
+        .env(ENV_REMOTE_PROXY_TEST, "1")
+        .env_remove("NO_PROXY")
+        .env_remove("no_proxy")
+        .env_remove("REQUEST_METHOD")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "remote proxy subprocess failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Task 3.8 scenario 7: layered timeouts (design D5)
 // ---------------------------------------------------------------------------
@@ -884,4 +1213,32 @@ async fn stalled_stream_hits_idle_timeout_between_chunks() {
         Ok(SamplingEvent::TextDelta { text: "Hi".into() })
     );
     assert_eq!(events[1], Err(SamplingError::Timeout));
+}
+
+
+#[tokio::test]
+async fn every_protocol_uses_explicit_proxy_for_remote_targets() {
+    for format in FORMATS {
+        let (proxy, received) = spawn_test_proxy(text_fixture(format)).await;
+        let mut req = request("http://model.invalid/v1", format);
+        req.connection = crate::network::ConnectionSettings::Proxy { url: proxy };
+        let events = run(sample(req, Timeouts::default()).await.unwrap()).await;
+        assert!(received.load(Ordering::Relaxed));
+        assert!(events.iter().any(|event| matches!(event, Ok(SamplingEvent::TextDelta { .. }))));
+    }
+}
+
+#[tokio::test]
+async fn loopback_is_direct_in_all_modes_and_protocols() {
+    for format in FORMATS {
+        for connection in [crate::network::ConnectionSettings::Auto, crate::network::ConnectionSettings::Direct,
+            crate::network::ConnectionSettings::Proxy { url: "http://127.0.0.1:1".into() }] {
+            let (base, captured) = spawn(Scenario::Sse(text_fixture(format))).await;
+            let mut req = request(&base, format);
+            req.connection = connection;
+            let events = run(sample(req, Timeouts::default()).await.unwrap()).await;
+            assert!(events.iter().any(|event| matches!(event, Ok(SamplingEvent::TextDelta { .. }))));
+            assert_eq!(captured.lock().unwrap().len(), 1);
+        }
+    }
 }

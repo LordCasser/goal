@@ -1,0 +1,143 @@
+   Compiling objc2-exception-helper v0.1.1
+   Compiling aws-lc-sys v0.43.0
+   Compiling libsqlite3-sys v0.38.2
+   Compiling mac-notification-sys v0.6.15
+   Compiling planner v0.1.0 (/Users/lordcasser/workspace/projects/goal/src-tauri)
+   Compiling objc2 v0.6.4
+   Compiling block2 v0.6.2
+   Compiling objc2-core-foundation v0.3.2
+   Compiling dispatch2 v0.3.1
+   Compiling objc2-foundation v0.3.2
+   Compiling rusqlite v0.40.2
+   Compiling r2d2_sqlite v0.35.0
+   Compiling objc2-app-kit v0.3.2
+   Compiling notify-rust v4.11.7
+   Compiling aws-lc-rs v1.17.3
+   Compiling rustls v0.23.43
+   Compiling objc2-web-kit v0.3.2
+   Compiling tao v0.35.3
+   Compiling muda v0.19.3
+   Compiling window-vibrancy v0.6.0
+   Compiling rfd v0.16.0
+   Compiling wry v0.55.1
+   Compiling tauri-runtime v2.11.3
+   Compiling rustls-webpki v0.103.13
+   Compiling tauri-runtime-wry v2.11.4
+   Compiling tauri v2.11.5
+   Compiling tokio-rustls v0.26.5
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.5
+   Compiling tauri-plugin-fs v2.5.2
+   Compiling tauri-plugin-opener v2.5.5
+   Compiling tauri-plugin-notification v2.4.0
+   Compiling tauri-plugin-dialog v2.7.3
+warning: unused import: `FakeTurn`
+   --> src/ai/review.rs:857:75
+    |
+857 |         AgentError, AgentRequest, AgentResponse, BoxFuture, FakeProvider, FakeTurn, LlmProvider,
+    |                                                                           ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `NotificationExt`
+   --> src/commands/onboarding.rs:209:51
+    |
+209 |     use tauri_plugin_notification::{Notification, NotificationExt};
+    |                                                   ^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> src/ai/agent/context.rs:377:13
+    |
+377 |         let mut ctx = CycleContext {
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `ctx`
+   --> src/ai/agent/context.rs:376:13
+    |
+376 |         let ctx = empty_ctx(cycle_of(CycleType::Month));
+    |             ^^^ help: if this is intentional, prefix it with an underscore: `_ctx`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `reply` is never read
+   --> src/ai/agent/turn.rs:373:21
+    |
+373 |     let mut reply = String::new();
+    |                     ^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+393 |             reply = response.text.clone();
+    |             ----- `reply` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `provider`
+   --> src/ai/agent/turn.rs:656:13
+    |
+656 |         let provider: Arc<dyn LlmProvider> = Arc::new(FakeProvider::with_script(vec![
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_provider`
+
+warning: unused variable: `conn`
+    --> src/service/reviews.rs:1320:13
+     |
+1320 |         let conn = db.pool().get().unwrap();
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_conn`
+
+warning: struct `ScriptedProvider` is never constructed
+   --> src/ai/agent/turn.rs:611:12
+    |
+611 |     struct ScriptedProvider {
+    |            ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `add_task` is never used
+   --> src/commands/onboarding.rs:296:8
+    |
+296 |     fn add_task(db: &crate::db::Db, cycle_id: &str, title: &str) -> Task {
+    |        ^^^^^^^^
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:33:23
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<Result<AgentResponse, AgentError>>;
+   |                       ^^^^^                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                       |
+   |                       the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+   = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<'_, Result<AgentResponse, AgentError>>;
+   |                                                              +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:35:22
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<Result<serde_json::Value, AgentError>>;
+   |                      ^^^^^                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                      |
+   |                      the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<'_, Result<serde_json::Value, AgentError>>;
+   |                                                           +++
+
+warning: `planner` (lib test) generated 11 warnings (run `cargo fix --lib -p planner --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 22.63s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/planner_lib-7e3d04c952d68a8c)
+
+running 3 tests
+test platform::geometry::tests::rejects_nonfinite_outside_and_overlapping_regions ... ok
+test platform::geometry::tests::maps_current_viewport_once_at_fractional_dpi ... ok
+test platform::geometry::tests::rejects_stale_or_wrong_sized_measurements ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 373 filtered out; finished in 0.00s
+

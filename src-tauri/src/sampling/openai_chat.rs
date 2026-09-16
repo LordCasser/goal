@@ -10,7 +10,10 @@ use std::collections::{BTreeMap, VecDeque};
 
 use serde_json::{json, Value};
 
-use super::client::{emit_finished, endpoint, PreparedRequest, ProtocolDecoder, ToolCallBuffer};
+use super::client::{
+    emit_finished, endpoint, sanitize_message_with_secrets, PreparedRequest, ProtocolDecoder,
+    ToolCallBuffer,
+};
 use super::sse::{SseEvent, SseParser};
 use super::types::{SamplingError, SamplingEvent, SamplingRequest, StopReason};
 
@@ -62,6 +65,7 @@ pub(crate) fn prepare(request: &SamplingRequest) -> Result<PreparedRequest, Samp
         body,
         decoder: Box::new(Decoder {
             parser: SseParser::new(),
+            secrets: request.redaction_secrets(),
             tools: BTreeMap::new(),
             finish_reason: None,
             usage_input: None,
@@ -74,6 +78,8 @@ pub(crate) fn prepare(request: &SamplingRequest) -> Result<PreparedRequest, Samp
 /// Decodes the Chat Completions SSE stream into sampling events.
 struct Decoder {
     parser: SseParser,
+    /// Kept only to scrub server-echoed secrets out of error messages.
+    secrets: Vec<String>,
     /// Tool calls by `delta.tool_calls[].index`, buffered until `[DONE]`.
     tools: BTreeMap<u64, ToolCallBuffer>,
     finish_reason: Option<StopReason>,
@@ -106,6 +112,10 @@ impl Decoder {
             self.fail(out, "SSE data line is not valid JSON");
             return;
         };
+        if let Some(message) = value.pointer("/error/message").and_then(Value::as_str) {
+            self.fail(out, sanitize_message_with_secrets(message, &self.secrets));
+            return;
+        }
         self.capture_usage(&value);
         // Providers stream a single choice; usage-only chunks carry none.
         let Some(choice) = value
@@ -297,10 +307,12 @@ mod tests {
 
     fn request() -> SamplingRequest {
         SamplingRequest {
+            connection: Default::default(),
             base_url: "https://provider.test/v1".into(),
             api_format: ApiFormat::OpenaiChatCompletions,
             model: "gpt-test".into(),
             api_key: Some("secret-key".into()),
+            extra_headers: vec![],
             messages: vec![],
             tools: vec![],
             max_tokens: None,

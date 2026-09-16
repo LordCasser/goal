@@ -1,8 +1,8 @@
 /**
  * 日历视图的本地 IPC 层（change: add-calendar-time-view §5）。
  *
- * 与 src/lib/ipc.ts 同一约定：命令名集中声明、参数键保持 Rust 侧的
- * snake_case 原名、`Option<T>` 以 `T | null` 表达。这里不复用 lib/ipc.ts
+ * 与 src/lib/ipc.ts 同一约定：命令名集中声明、顶层参数键使用 camelCase，嵌套数据使用
+ * Rust serde 的 snake_case、`Option<T>` 以 `T | null` 表达。这里不复用 lib/ipc.ts
  * 是刻意的——日历的 5 个命令（get_calendar_range 等）只服务本特性，避免
  * 每加一个视图都去膨胀全局 IPC 面；ensure_day 是既有命令，直接从 lib/ipc
  * 导入使用。类型与 src-tauri/src/service/calendar.rs 的 serde 输出 1:1。
@@ -92,25 +92,25 @@ export function moveDayCycle(
   target_date: string,
   strategy: MoveStrategy | null,
 ): Promise<MoveDayOutcome> {
-  return invoke<MoveDayOutcome>(commands.moveDayCycle, { cycle_id, target_date, strategy });
+  return invoke<MoveDayOutcome>(commands.moveDayCycle, { cycleId: cycle_id, targetDate: target_date, strategy });
 }
 
-/** 把专注块放到时间轴上；`duration_ms` 传 null 表示保持既有承诺时长。 */
+/** 把专注块放到时间轴上；`starts_at` 为 null 时清除排期但保留承诺时长。 */
 export function setSessionSchedule(
   session_id: string,
-  starts_at: number,
+  starts_at: number | null,
   duration_ms: number | null,
-): Promise<SessionSchedule> {
-  return invoke<SessionSchedule>(commands.setSessionSchedule, {
-    session_id,
-    starts_at,
-    duration_ms,
+): Promise<SessionSchedule | null> {
+  return invoke<SessionSchedule | null>(commands.setSessionSchedule, {
+    sessionId: session_id,
+    startsAt: starts_at,
+    durationMs: duration_ms,
   });
 }
 
 /** 某日全部重叠排期对（纯查询，后端不改数据）。 */
 export function getScheduleOverlaps(day_cycle_id: string): Promise<ScheduleOverlap[]> {
-  return invoke<ScheduleOverlap[]>(commands.getScheduleOverlaps, { day_cycle_id });
+  return invoke<ScheduleOverlap[]>(commands.getScheduleOverlaps, { dayCycleId: day_cycle_id });
 }
 
 /** 单日时间预算；`capacity_minutes` 为 null 时界面不渲染预算条。 */

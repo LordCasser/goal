@@ -14,6 +14,7 @@ pub const DEFAULT_WEEK_START_DAY: i64 = 1;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Settings {
+    pub locale: crate::i18n::Locale,
     /// `Some` once the user's week start day has been determined.
     pub week_start_day: Option<i64>,
     /// Preferred surface theme: `"white"` or `"gray"`; `None` until first
@@ -28,9 +29,17 @@ pub fn get(db: &Db) -> AppResult<Settings> {
         .filter(|v| is_valid_week_start_day(*v));
     let theme = repo::get(&conn, repo::KEY_THEME)?.filter(|v| is_valid_theme(v));
     Ok(Settings {
+        locale: crate::i18n::current(&conn)?,
         week_start_day,
         theme,
     })
+}
+
+pub fn set_locale(db: &Db, value: String) -> AppResult<()> {
+    let locale = crate::i18n::Locale::parse(&value).ok_or_else(|| {
+        AppError::validation("invalid_locale", "Choose English or Simplified Chinese.")
+    })?;
+    repo::set(&*db.pool().get()?, crate::i18n::KEY_LOCALE, locale.as_str())
 }
 
 /// The two user-confirmed light themes (design.md §4.4).
@@ -77,6 +86,20 @@ pub fn get_app_flag(db: &Db, key: String) -> AppResult<Option<String>> {
 
 pub fn set_app_flag(db: &Db, key: String, value: String) -> AppResult<()> {
     validate_flag_key(&key)?;
+    if key == crate::i18n::KEY_LOCALE {
+        return set_locale(db, value);
+    }
+    if key == crate::repository::agent::CONTEXT_IDLE_SETTING
+        && !value
+            .parse::<i64>()
+            .ok()
+            .is_some_and(|v| (1..=1440).contains(&v))
+    {
+        return Err(AppError::validation(
+            "invalid_context_timeout",
+            "Context timeout must be a whole number from 1 to 1440 minutes.",
+        ));
+    }
     if value.len() > 1024 {
         return Err(AppError::validation(
             "invalid_flag_value",

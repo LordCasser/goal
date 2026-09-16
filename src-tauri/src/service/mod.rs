@@ -7,6 +7,7 @@
 
 pub mod calendar;
 pub mod cycles;
+pub mod deletion;
 pub mod editor;
 pub mod onboarding;
 pub mod proposals;

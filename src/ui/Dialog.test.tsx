@@ -33,3 +33,33 @@ describe("Dialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
+
+describe("dialog interaction boundaries", () => {
+  it("provides an explicit close button", () => {
+    const onClose = vi.fn();
+    render(<Dialog open title="Settings" onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("Escape closes only the uppermost dialog and respects IME composition", () => {
+    const outerClose = vi.fn();
+    const innerClose = vi.fn();
+    render(<Dialog open title="Settings" onClose={outerClose}>
+      <Dialog open title="Add model" onClose={innerClose} />
+    </Dialog>);
+    fireEvent.keyDown(document, { key: "Escape", isComposing: true });
+    expect(innerClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(innerClose).toHaveBeenCalledOnce();
+    expect(outerClose).not.toHaveBeenCalled();
+  });
+
+  it("does not steal typing focus when an inline close callback changes", () => {
+    const { rerender } = render(<Dialog open title="Settings" onClose={() => {}}><input aria-label="Provider name" /></Dialog>);
+    const input = screen.getByRole("textbox");
+    input.focus();
+    rerender(<Dialog open title="Settings" onClose={() => {}}><input aria-label="Provider name" /></Dialog>);
+    expect(document.activeElement).toBe(input);
+  });
+});

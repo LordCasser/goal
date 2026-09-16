@@ -11,6 +11,7 @@ import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "../../ui";
+import { useTranslation } from "../../lib/i18n";
 import {
   acknowledgeMissedSummary,
   formatFireAt,
@@ -19,14 +20,8 @@ import {
   useRemindersChanged,
 } from "./api";
 
-const TARGET_KIND_LABEL = {
-  task: "任务",
-  session: "专注块",
-  day: "日计划",
-  cycle: "周期",
-} as const;
-
 export function MissedSummary(): JSX.Element | null {
+  const { t } = useTranslation("shell");
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   useRemindersChanged(queryClient);
@@ -51,12 +46,12 @@ export function MissedSummary(): JSX.Element | null {
 
   return (
     <aside
-      aria-label="错过的提醒"
+      aria-label={t("reminders.missed.aria")}
       className="flex flex-col gap-2 rounded-sm border border-light bg-content p-3"
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-caption text-primary">
-          您离开时有 {summary.total} 条提醒到期
+          {t("reminders.missed.count", { count: summary.total })}
         </p>
         <span className="flex shrink-0 gap-1">
           <Button
@@ -65,7 +60,7 @@ export function MissedSummary(): JSX.Element | null {
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
           >
-            {expanded ? "收起" : "展开"}
+            {expanded ? t("reminders.missed.collapse") : t("reminders.missed.expand")}
           </Button>
           <Button
             variant="secondary"
@@ -73,7 +68,7 @@ export function MissedSummary(): JSX.Element | null {
             loading={acknowledge.isPending}
             onClick={() => acknowledge.mutate()}
           >
-            全部标为已读
+            {t("reminders.missed.markAllRead")}
           </Button>
         </span>
       </div>
@@ -81,20 +76,20 @@ export function MissedSummary(): JSX.Element | null {
         <ul className="flex flex-col gap-1">
           {summary.items.map((item) => (
             <li key={item.id} className="text-caption text-secondary">
-              {TARGET_KIND_LABEL[item.target_kind]} ·{" "}
+              {t(`reminders.target.${item.target_kind}`)} ·{" "}
               {item.title ?? item.target_id.slice(0, 8)} ·{" "}
               {formatFireAt(item.fire_at)}
             </li>
           ))}
           {summary.has_more && (
             <li className="text-caption text-hint">
-              …以及其余 {summary.total - summary.items.length} 条
+              {t("reminders.missed.remaining", { count: summary.total - summary.items.length })}
             </li>
           )}
         </ul>
       )}
       {acknowledge.isError && (
-        <p className="text-caption text-danger">操作失败，请重试</p>
+        <p className="text-caption text-danger">{t("reminders.missed.actionError")}</p>
       )}
     </aside>
   );

@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/lordcasser/workspace/projects/goal
+
+ ✓ scripts/desktop-platform.test.mjs (12 tests) 2ms
+ ✓ scripts/desktop-config.test.mjs (7 tests) 3ms
+ ✓ scripts/desktop-build.test.mjs (5 tests) 33ms
+
+ Test Files  3 passed (3)
+      Tests  24 passed (24)
+   Start at  20:20:06
+   Duration  485ms (transform 33ms, setup 0ms, collect 51ms, tests 38ms, environment 828ms, prepare 99ms)
+

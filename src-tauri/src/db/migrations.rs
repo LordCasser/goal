@@ -60,7 +60,169 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "session schedule",
         sql: M0008_SESSION_SCHEDULE,
     },
+    Migration {
+        version: 9,
+        description: "agent skill routing",
+        sql: M0009_AGENT_SKILLS,
+    },
+    Migration {
+        version: 10,
+        description: "human-approved app actions",
+        sql: M0010_AGENT_ACTIONS,
+    },
+    Migration {
+        version: 11,
+        description: "long-term progress check schedule",
+        sql: M0011_PROGRESS_CHECK,
+    },
+    Migration {
+        version: 12,
+        description: "optional focus task association",
+        sql: M0012_FOCUS_TASK_ASSOCIATION,
+    },
+    Migration {
+        version: 13,
+        description: "preserve Later plan type",
+        sql: M0013_LATER_PLAN_TYPE,
+    },
+    Migration {
+        version: 14,
+        description: "global Coach conversation",
+        sql: M0014_GLOBAL_COACH_CONVERSATION,
+    },
 ];
+
+const M0013_LATER_PLAN_TYPE: &str = r#"
+ALTER TABLE tasks ADD COLUMN later_plan_type TEXT CHECK (
+    later_plan_type IS NULL OR (
+        cycle_id = 'later' AND later_plan_type IN ('month', 'week', 'day')
+    )
+);
+"#;
+
+const M0014_GLOBAL_COACH_CONVERSATION: &str = r#"
+-- Coach history is global. Keep the old conversations and messages while
+-- rebuilding the cycle-owned tables so deleting a planning cycle cannot
+-- cascade through the conversation history.
+CREATE TEMP TABLE saved_agent_messages AS
+SELECT
+    id,
+    conversation_id AS old_conversation_id,
+    turn_id,
+    sequence_number AS old_sequence_number,
+    message_type,
+    payload_json,
+    created_at,
+    MIN(created_at) OVER (PARTITION BY conversation_id, turn_id) AS turn_created_at,
+    MIN(sequence_number) OVER (PARTITION BY conversation_id, turn_id) AS turn_first_sequence
+FROM agent_messages;
+
+CREATE TABLE agent_conversations_new (
+    id             TEXT PRIMARY KEY NOT NULL CHECK (id = 'coach'),
+    active_turn_id TEXT,
+    revision       INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    active_skill   TEXT CHECK (active_skill IS NULL OR active_skill IN
+                     ('goal_setting','long_term_planning','short_term_planning','weekly_planning','daily_planning','prioritization','review','period_analysis','planning_issues')),
+    last_error     TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT INTO agent_conversations_new
+    (id, active_turn_id, revision, active_skill, last_error, created_at, updated_at)
+SELECT
+    'coach',
+    NULL,
+    COALESCE(MAX(revision), 0),
+    (SELECT active_skill FROM agent_conversations ORDER BY updated_at DESC, id DESC LIMIT 1),
+    (SELECT last_error FROM agent_conversations ORDER BY updated_at DESC, id DESC LIMIT 1),
+    MIN(created_at),
+    MAX(updated_at)
+FROM agent_conversations
+HAVING COUNT(*) > 0;
+
+DROP TABLE agent_messages;
+DROP TABLE agent_conversations;
+ALTER TABLE agent_conversations_new RENAME TO agent_conversations;
+
+CREATE INDEX ix_agent_conversations_updated ON agent_conversations(updated_at);
+
+CREATE TABLE agent_messages (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+    turn_id         TEXT NOT NULL,
+    sequence_number INTEGER NOT NULL CHECK (sequence_number > 0),
+    message_type    TEXT NOT NULL CHECK (message_type IN
+                      ('user','model_text','model_function_call','function_result','app_tool_result')),
+    payload_json    TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (conversation_id, sequence_number)
+);
+
+INSERT INTO agent_messages
+    (id, conversation_id, turn_id, sequence_number, message_type, payload_json, created_at)
+SELECT
+    id,
+    'coach',
+    turn_id,
+    ROW_NUMBER() OVER (
+        ORDER BY turn_created_at ASC, old_conversation_id ASC,
+                 turn_first_sequence ASC, turn_id ASC, old_sequence_number ASC
+    ),
+    message_type,
+    payload_json,
+    created_at
+FROM saved_agent_messages
+ORDER BY turn_created_at ASC, old_conversation_id ASC,
+         turn_first_sequence ASC, turn_id ASC, old_sequence_number ASC;
+
+CREATE INDEX ix_agent_messages_seq ON agent_messages(conversation_id, sequence_number);
+DROP TABLE saved_agent_messages;
+"#;
+
+const M0012_FOCUS_TASK_ASSOCIATION: &str = r#"
+ALTER TABLE cycles ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE
+    CHECK (task_id IS NULL OR type = 'session');
+CREATE INDEX ix_cycles_task ON cycles(task_id) WHERE task_id IS NOT NULL;
+"#;
+
+const M0011_PROGRESS_CHECK: &str = r#"
+ALTER TABLE cycles ADD COLUMN progress_check TEXT CHECK (
+    progress_check IS NULL OR COALESCE((
+        type = 'month' AND starts_on IS NOT NULL AND ends_on > starts_on
+        AND json_valid(progress_check)
+        AND (
+            (json_extract(progress_check, '$.kind') = 'once'
+             AND json_type(progress_check, '$.date') = 'text'
+             AND length(json_extract(progress_check, '$.date')) = 10
+             AND date(json_extract(progress_check, '$.date'), '+0 days') = json_extract(progress_check, '$.date')
+             AND json_extract(progress_check, '$.date') >= starts_on
+             AND json_extract(progress_check, '$.date') < ends_on
+             AND json_type(progress_check, '$.every_days') IS NULL)
+            OR
+            (json_extract(progress_check, '$.kind') = 'repeat'
+             AND json_type(progress_check, '$.every_days') = 'integer'
+             AND json_extract(progress_check, '$.every_days') > 0
+             AND json_type(progress_check, '$.date') IS NULL)
+        )
+    ), 0)
+);
+"#;
+
+const M0010_AGENT_ACTIONS: &str = r#"
+CREATE TABLE agent_actions (
+    id TEXT PRIMARY KEY,
+    -- The receipt must survive even if the approved action deletes its source cycle.
+    source_cycle_id TEXT NOT NULL,
+    action_json TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending','applying','applied','rejected')),
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX ix_agent_actions_pending ON agent_actions(source_cycle_id, state);
+"#;
 
 fn checksum(sql: &str) -> String {
     let mut hasher = Sha256::new();
@@ -423,6 +585,22 @@ mod tests {
     }
 
     #[test]
+    fn later_type_upgrade_preserves_unclassified_rows_and_is_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply_up_to(&mut conn, 12);
+        conn.execute(
+            "INSERT INTO tasks (id, cycle_id, title) VALUES ('parked', 'later', 'Existing idea')",
+            [],
+        )
+        .unwrap();
+        apply(&mut conn).unwrap();
+        apply(&mut conn).unwrap();
+        let task = crate::repository::tasks::require(&conn, "parked").unwrap();
+        assert_eq!(task.title, "Existing idea");
+        assert_eq!(task.later_plan_type, None, "Old source cannot be inferred");
+    }
+
+    #[test]
     fn database_at_0004_upgrades_to_0005_without_data_loss() {
         let mut conn = Connection::open_in_memory().expect("open");
         conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk");
@@ -562,4 +740,26 @@ const M0008_SESSION_SCHEDULE: &str = r#"
 -- wall-clock start. Lifecycle `started_at` keeps its meaning; this column is
 -- the schedule the timeline renders and the budget aggregates.
 ALTER TABLE cycles ADD COLUMN scheduled_start_at INTEGER;
+"#;
+
+const M0009_AGENT_SKILLS: &str = r#"
+-- Preserve messages before the FK cascade triggered by rebuilding the CHECK.
+CREATE TEMP TABLE saved_agent_messages AS SELECT * FROM agent_messages;
+CREATE TABLE agent_conversations_new (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
+    active_turn_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    active_skill TEXT CHECK (active_skill IS NULL OR active_skill IN
+      ('goal_setting','long_term_planning','short_term_planning','weekly_planning','daily_planning','prioritization','review','period_analysis','planning_issues')),
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO agent_conversations_new SELECT * FROM agent_conversations;
+DROP TABLE agent_conversations;
+ALTER TABLE agent_conversations_new RENAME TO agent_conversations;
+CREATE INDEX ix_agent_conversations_updated ON agent_conversations(updated_at);
+INSERT INTO agent_messages SELECT * FROM saved_agent_messages;
+DROP TABLE saved_agent_messages;
 "#;

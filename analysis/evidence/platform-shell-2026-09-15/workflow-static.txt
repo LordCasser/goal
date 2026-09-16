@@ -1,0 +1,16 @@
+workflow YAML OK
+
+> planner@0.1.0 desktop:config:check
+> node scripts/desktop-config.mjs macos
+
+desktop config OK: macos
+
+> planner@0.1.0 desktop:config:check
+> node scripts/desktop-config.mjs windows
+
+desktop config OK: windows
+
+> planner@0.1.0 desktop:config:check
+> node scripts/desktop-config.mjs linux
+
+desktop config OK: linux

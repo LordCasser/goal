@@ -46,12 +46,12 @@ export function EmptyState({
     <div
       className={cn(
         "flex flex-col items-center justify-center gap-3 px-6 py-12 text-center",
-        "rounded-sm border border-dashed border-control",
+        "rounded-lg border border-dashed border-light bg-content",
         className,
       )}
     >
-      <span className="text-hint">{icon ?? <DefaultIcon />}</span>
-      <h3 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-secondary">
+      <span className="mb-1 flex h-10 w-10 items-center justify-center rounded-xl bg-subtle text-secondary">{icon ?? <DefaultIcon />}</span>
+      <h3 className="text-section-title font-semibold text-primary">
         {title}
       </h3>
       {description && (

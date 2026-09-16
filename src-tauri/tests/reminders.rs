@@ -5,9 +5,12 @@
 
 mod common;
 
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
+use planner_lib::commands::reminders::SystemNotifier;
 use planner_lib::repository::reminders as repo;
+use planner_lib::repository::settings as settings_repo;
 use planner_lib::service::cycles;
 use planner_lib::service::reminders::{
     self, DeliveryOutcome, NotificationContent, PassReport, QuietHours, RecordingNotifier,
@@ -23,6 +26,52 @@ fn notifier_granted() -> Arc<RecordingNotifier> {
 
 fn notifier_denied() -> Arc<RecordingNotifier> {
     Arc::new(RecordingNotifier::with_permission("denied"))
+}
+
+struct FailingNotifier;
+
+impl ReminderNotifier for FailingNotifier {
+    fn permission(&self) -> String {
+        "system_managed".into()
+    }
+
+    fn request_permission(&self) -> String {
+        self.permission()
+    }
+
+    fn notify(&self, _notification: &NotificationContent) -> DeliveryOutcome {
+        DeliveryOutcome::Failed("native notification submission failed".into())
+    }
+}
+
+struct SequenceNotifier {
+    outcomes: Mutex<VecDeque<DeliveryOutcome>>,
+}
+
+impl SequenceNotifier {
+    fn new(outcomes: impl IntoIterator<Item = DeliveryOutcome>) -> Self {
+        Self {
+            outcomes: Mutex::new(outcomes.into_iter().collect()),
+        }
+    }
+}
+
+impl ReminderNotifier for SequenceNotifier {
+    fn permission(&self) -> String {
+        "system_managed".into()
+    }
+
+    fn request_permission(&self) -> String {
+        self.permission()
+    }
+
+    fn notify(&self, _notification: &NotificationContent) -> DeliveryOutcome {
+        self.outcomes
+            .lock()
+            .expect("sequence notifier")
+            .pop_front()
+            .expect("notification outcome")
+    }
 }
 
 /// Long-term -> week -> day, the smallest real context tasks can live in.
@@ -68,6 +117,7 @@ fn start_session(
     let session = cycles::add_session(
         db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day_id.into(),
             title: "Deep work".into(),
             duration_ms: Some(duration_ms),
@@ -150,6 +200,7 @@ fn deleting_a_cycle_subtree_removes_all_attached_reminders() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "Deep work".into(),
             duration_ms: Some(900_000),
@@ -319,6 +370,89 @@ fn denied_permission_still_records_the_reminder_in_app() {
 
     let alerts = reminders::list_reminders(&db.db, None, repo::StatusFilter::Fired).unwrap();
     assert_eq!(alerts.len(), 1, "fired but not dismissed = in-app alert");
+}
+
+#[test]
+fn native_submission_failure_keeps_the_fired_reminder_and_records_error() {
+    let db = TestDb::open();
+    let day = day_fixture(&db);
+    let task = add_task(&db.db, &day.id, "Write report", NOW);
+    set_reminder(&db.db, "task", &task.id, NOW + 1_000, false);
+
+    let report = reconcile_with(&db.db, Arc::new(FailingNotifier).as_ref(), NOW + 9_000);
+    assert_eq!(report.notified, 0);
+    assert_eq!(report.in_app_only, 1);
+    assert_eq!(
+        report.last_error.as_deref(),
+        Some("native notification submission failed")
+    );
+    assert_eq!(
+        reminders::list_reminders(&db.db, None, repo::StatusFilter::Fired)
+            .unwrap()
+            .len(),
+        1,
+        "the fired row remains the in-app fallback"
+    );
+}
+
+#[test]
+fn desktop_notifier_reports_system_managed_permission() {
+    let notifier = SystemNotifier::new();
+    assert_eq!(notifier.permission(), "system_managed");
+    assert_eq!(notifier.request_permission(), "system_managed");
+}
+
+#[test]
+fn empty_scheduler_pass_keeps_the_last_submission_error() {
+    let db = TestDb::open();
+    let day = day_fixture(&db);
+    let task = add_task(&db.db, &day.id, "Write report", NOW);
+    set_reminder(&db.db, "task", &task.id, NOW + 1_000, false);
+
+    let scheduler = Scheduler::new(db.db.clone(), Arc::new(FailingNotifier), None);
+    let first = scheduler.run_pass(NOW + 9_000).expect("first pass");
+    assert_eq!(first.in_app_only, 1);
+    assert_eq!(
+        scheduler.delivery_status().last_error.as_deref(),
+        Some("native notification submission failed")
+    );
+
+    let second = scheduler.run_pass(NOW + 10_000).expect("empty pass");
+    assert_eq!(second.in_app_only, 0);
+    assert_eq!(
+        scheduler.delivery_status().last_error.as_deref(),
+        Some("native notification submission failed")
+    );
+}
+
+#[test]
+fn successful_submission_clears_a_previous_error_after_an_empty_pass() {
+    let db = TestDb::open();
+    let day = day_fixture(&db);
+    let first_task = add_task(&db.db, &day.id, "First report", NOW);
+    set_reminder(&db.db, "task", &first_task.id, NOW + 1_000, false);
+
+    let second_task = add_task(&db.db, &day.id, "Second report", NOW);
+    let notifier = Arc::new(SequenceNotifier::new([
+        DeliveryOutcome::Failed("native notification submission failed".into()),
+        DeliveryOutcome::Delivered,
+    ]));
+    let scheduler = Scheduler::new(db.db.clone(), notifier, None);
+
+    scheduler.run_pass(NOW + 9_000).expect("failed pass");
+    assert_eq!(
+        scheduler.delivery_status().last_error.as_deref(),
+        Some("native notification submission failed")
+    );
+    scheduler.run_pass(NOW + 10_000).expect("empty pass");
+    assert_eq!(
+        scheduler.delivery_status().last_error.as_deref(),
+        Some("native notification submission failed")
+    );
+
+    set_reminder(&db.db, "task", &second_task.id, NOW + 11_000, false);
+    scheduler.run_pass(NOW + 12_000).expect("successful pass");
+    assert_eq!(scheduler.delivery_status().last_error, None);
 }
 
 #[test]
@@ -545,8 +679,27 @@ fn scheduler_thread_delivers_when_the_trigger_time_reaches() {
     let notifier = notifier_granted();
     let scheduler = Scheduler::new(db.db.clone(), notifier.clone(), None).spawn();
 
+    // Establish that the newly spawned thread completed its first empty-queue
+    // pass and is now allowed to take the long idle wait. The command layer
+    // must wake it after committing a new reminder; extending this deadline
+    // would only hide the production race.
+    let empty_pass_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while settings_repo::get(&db.conn(), reminders::KEY_LAST_SEEN_AT)
+        .expect("read scheduler heartbeat")
+        .is_none()
+    {
+        assert!(
+            std::time::Instant::now() < empty_pass_deadline,
+            "scheduler did not complete its initial empty-queue pass"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
     let fire_at = planner_lib::service::now_ms() + 120;
     set_reminder(&db.db, "task", &task.id, fire_at, false);
+    // This is the command-layer boundary used by set/update/delete reminder
+    // commands after their transaction and invalidation event are complete.
+    scheduler.wake();
 
     // Poll instead of a fixed sleep: the suite runs tests in parallel, so
     // the scheduler thread may not be scheduled promptly. Fails fast when
@@ -819,6 +972,7 @@ fn session_start_schedules_background_due_notice() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "background block".into(),
             duration_ms: Some(900_000),

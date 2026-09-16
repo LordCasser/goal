@@ -7,14 +7,12 @@
  */
 import { useCallback, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { isAppError } from "../../lib/ipc";
+import { errorMessage as localizedErrorMessage } from "../../lib/i18n";
 import { qk } from "../../lib/events";
 
 /** 后端 message 已面向用户；非 AppError 尽量保底不抛裸异常文案。 */
 export function errorMessage(e: unknown): string {
-  if (isAppError(e)) return e.message;
-  if (e instanceof Error && e.message) return e.message;
-  return "Something went wrong";
+  return localizedErrorMessage(e);
 }
 
 export function useActionError(): {
@@ -44,6 +42,9 @@ export function useActionError(): {
 /** 任务写入后的补充失效（事件矩阵见 lib/events.ts）。 */
 export function invalidateTasks(qc: QueryClient, cycleId: string): void {
   void qc.invalidateQueries({ queryKey: qk.editorWorkspace(cycleId) });
+  // A parent goal link changes the work mix of its descendants too.
+  void qc.invalidateQueries({ queryKey: ["editor-workspace"] });
+  void qc.invalidateQueries({ queryKey: ["editor-workspaces"] });
   void qc.invalidateQueries({ queryKey: qk.previewSummary(cycleId) });
   void qc.invalidateQueries({ queryKey: qk.plannerState() });
 }

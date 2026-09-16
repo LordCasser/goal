@@ -362,21 +362,61 @@ pub fn purge_for_cycle_subtree(conn: &Connection, cycle_ids: &[String]) -> AppRe
         .take(cycle_ids.len())
         .collect::<Vec<_>>()
         .join(", ");
-    let sql = format!(
-        "DELETE FROM reminders WHERE \
-         (target_kind IN ('session','day','cycle') AND target_id IN ({placeholders})) \
-         OR (target_kind = 'task' AND target_id IN ( \
-             SELECT id FROM tasks WHERE cycle_id IN ({placeholders})) )"
-    );
-    let mut bound: Vec<rusqlite::types::Value> = cycle_ids
-        .iter()
-        .map(|id| rusqlite::types::Value::Text(id.clone()))
-        .collect();
-    bound.extend(
-        cycle_ids
-            .iter()
-            .map(|id| rusqlite::types::Value::Text(id.clone())),
-    );
+    let sql = format!("SELECT id FROM tasks WHERE cycle_id IN ({placeholders}) ORDER BY id");
+    let mut stmt = conn.prepare(&sql).map_err(from_rusqlite)?;
+    let task_ids = stmt
+        .query_map(params_from_iter(cycle_ids.iter()), |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    purge_for_cycle_impact(conn, cycle_ids, &task_ids)
+}
+
+/// Removes reminders for a deleted cycle subtree and the complete task FK
+/// cascade.  The latter can include tasks in other cycles through
+/// `tasks.parent_id`, so the service supplies the authoritative task closure.
+pub fn purge_for_cycle_impact(
+    conn: &Connection,
+    cycle_ids: &[String],
+    task_ids: &[String],
+) -> AppResult<usize> {
+    if cycle_ids.is_empty() && task_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let mut clauses = Vec::new();
+    let mut bound: Vec<rusqlite::types::Value> = Vec::new();
+    if !cycle_ids.is_empty() {
+        let placeholders = std::iter::repeat("?")
+            .take(cycle_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        clauses.push(format!(
+            "(target_kind IN ('session','day','cycle') AND target_id IN ({placeholders}))"
+        ));
+        bound.extend(
+            cycle_ids
+                .iter()
+                .map(|id| rusqlite::types::Value::Text(id.clone())),
+        );
+    }
+    if !task_ids.is_empty() {
+        let placeholders = std::iter::repeat("?")
+            .take(task_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        clauses.push(format!(
+            "(target_kind = 'task' AND target_id IN ({placeholders}))"
+        ));
+        bound.extend(
+            task_ids
+                .iter()
+                .map(|id| rusqlite::types::Value::Text(id.clone())),
+        );
+    }
+    let sql = format!("DELETE FROM reminders WHERE {}", clauses.join(" OR "));
     let rows = conn
         .execute(&sql, params_from_iter(bound))
         .map_err(from_rusqlite)?;

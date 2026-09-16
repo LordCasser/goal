@@ -31,6 +31,7 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ConversationView, TurnResult } from "./ipc";
 
 /** Mirrors `events::CycleIdsPayload`. */
 export interface CycleIdsPayload {
@@ -48,10 +49,27 @@ export const qk = {
   editorWorkspaces: (cycleIds: string[]) => ["editor-workspaces", cycleIds] as const,
   previewSummary: (cycleId: string) => ["preview-summary", cycleId] as const,
   sessions: (dayCycleId: string) => ["sessions", dayCycleId] as const,
-  agentConversation: (cycleId: string) => ["agent-conversation", cycleId] as const,
+  agentConversation: () => ["agent-conversation"] as const,
   issueReport: (cycleId: string) => ["issue-report", cycleId] as const,
   settings: () => ["settings"] as const,
+  agentActions: () => ["agent-actions"] as const,
+  agentDecision: () => ["agent-decision"] as const,
+  pendingTaskCycles: () => ["preview-summary", "pending-cycles"] as const,
 };
+
+/** A completed IPC turn is authoritative. Cancel a pre-completion read before
+ * publishing it, so an old active_turn_id cannot relock freshly shown cards. */
+export function completeAgentTurn(client: QueryClient, result: TurnResult): void {
+  void client.cancelQueries({ queryKey: qk.agentConversation() });
+  client.setQueryData<ConversationView>(qk.agentConversation(), (previous) => {
+    if (!previous || previous.revision > result.revision) return previous;
+    const messages = new Map(previous.messages.map((message) => [message.id, message]));
+    for (const message of result.messages) messages.set(message.id, message);
+    return { ...previous, active_turn_id: null, revision: result.revision,
+      active_skill: result.active_skill, last_error: null,
+      messages: [...messages.values()].sort((a, b) => a.sequence_number - b.sequence_number) };
+  });
+}
 
 /**
  * Subscribes to the backend change events and wires them to cache
@@ -61,6 +79,7 @@ export const qk = {
 export async function initEventInvalidation(queryClient: QueryClient): Promise<() => void> {
   const unlisteners: UnlistenFn[] = [];
   try {
+    unlisteners.push(await listen("agent:actions_changed", () => invalidateAgentEffects(queryClient)));
     unlisteners.push(
       await listen<CycleIdsPayload>("cycles:changed", (event) => {
         invalidateCycles(queryClient, event.payload.cycle_ids, { taskWrites: false });
@@ -73,15 +92,17 @@ export async function initEventInvalidation(queryClient: QueryClient): Promise<(
     );
     unlisteners.push(
       await listen<CycleIdPayload>("proposals:changed", (event) => {
+        queryClient.invalidateQueries({ queryKey: qk.pendingTaskCycles() });
         queryClient.invalidateQueries({ queryKey: qk.previewSummary(event.payload.cycle_id) });
       }),
     );
     unlisteners.push(
-      await listen<{ conversation_id: string; cycle_id: string; revision: number }>(
+      await listen<{ conversation_id: string; revision: number }>(
         "agent:conversation_updated",
-        (event) => {
+        () => {
+          invalidateAgentEffects(queryClient);
           queryClient.invalidateQueries({
-            queryKey: qk.agentConversation(event.payload.cycle_id),
+          queryKey: qk.agentConversation(),
           });
         },
       ),
@@ -96,6 +117,14 @@ export async function initEventInvalidation(queryClient: QueryClient): Promise<(
   };
 }
 
+/** A tool turn may stage edits in another cycle, including before an error.
+ * Invalidate existing projections after every settled turn; no second state store. */
+export function invalidateAgentEffects(queryClient: QueryClient): void {
+  for (const root of ["planner-state", "editor-workspace", "editor-workspaces", "preview-summary", "issue-report", "agent-actions", "settings", "app-flag", "ai-settings", "ai-availability", "agent-conversation", "sessions", "calendar", "calendar-range", "schedule-overlaps", "reminders", "repeats", "time-budget", "daily-capacity"]) {
+    void queryClient.invalidateQueries({ queryKey: [root] });
+  }
+}
+
 /** Shared body of the two `{ cycle_ids }` events; see the matrix above. */
 function invalidateCycles(
   queryClient: QueryClient,
@@ -104,8 +133,10 @@ function invalidateCycles(
 ): void {
   if (cycleIds.length === 0) return; // emitters skip empty sets; stay defensive
   queryClient.invalidateQueries({ queryKey: qk.plannerState() });
+  queryClient.invalidateQueries({ queryKey: ["issue-report"] });
   // Length-1 root prefix-matches every batch key built by qk.editorWorkspaces.
   queryClient.invalidateQueries({ queryKey: ["editor-workspaces"] });
+  if (opts.taskWrites) queryClient.invalidateQueries({ queryKey: ["editor-workspace"] });
   for (const cycleId of cycleIds) {
     queryClient.invalidateQueries({ queryKey: qk.editorWorkspace(cycleId) });
     // Session mutations (add/start/finish/repeat) emit cycles:changed for the

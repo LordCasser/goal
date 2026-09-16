@@ -32,13 +32,7 @@ import {
   type CycleDeletionPreview,
 } from "../../lib/ipc";
 import { errorMessage, invalidateCycles, invalidateTasks, useActionError } from "./actions";
-
-const TYPE_NAME: Record<Cycle["type"], string> = {
-  month: "long-term cycle",
-  week: "week plan",
-  day: "day plan",
-  session: "focus block",
-};
+import { useTranslation } from "../../lib/i18n";
 
 export function CycleOptionsMenu({
   cycle,
@@ -48,6 +42,7 @@ export function CycleOptionsMenu({
   cycle: Cycle;
   runningElsewhere?: boolean;
 }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -71,8 +66,8 @@ export function CycleOptionsMenu({
     if (copied) {
       setNotice(
         copied.length > 0
-          ? `Copied ${copied.length} uncompleted item${copied.length === 1 ? "" : "s"}`
-          : "Nothing uncompleted in the previous cycle",
+          ? t("cycle.copied", { count: copied.length })
+          : t("cycle.nothingCopied"),
       );
       invalidateTasks(qc, cycle.id);
     }
@@ -108,7 +103,7 @@ export function CycleOptionsMenu({
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`${cycle.title} options`}
+        aria-label={t("cycle.options", { title: cycle.title })}
         onClick={() => setOpen((o) => !o)}
         className="flex h-7 w-7 items-center justify-center rounded-sm text-secondary transition-colors duration-100 hover:bg-hover"
       >
@@ -133,11 +128,11 @@ export function CycleOptionsMenu({
               setNotice(null);
             }}
           >
-            Dismiss
+            {t("cycle.dismiss")}
           </button>
         </div>
       )}
-      <Popover open={open} onClose={close} anchorRef={anchorRef} label={`${cycle.title} options`}>
+      <Popover open={open} onClose={close} anchorRef={anchorRef} label={t("cycle.options", { title: cycle.title })}>
         {cycle.type === "session" && (
           <PopoverItem
             onSelect={() => {
@@ -145,7 +140,7 @@ export function CycleOptionsMenu({
               setRenameOpen(true);
             }}
           >
-            Rename
+            {t("cycle.rename")}
           </PopoverItem>
         )}
         {(cycle.type === "week" || cycle.type === "day") && (
@@ -154,13 +149,13 @@ export function CycleOptionsMenu({
             disabled={finished || !cycle.starts_on}
             title={
               finished
-                ? "This page has ended"
+                ? t("cycle.endedPage")
                 : !cycle.starts_on
-                  ? "Copying needs a dated cycle"
-                  : "Copy uncompleted items from the previous cycle"
+                  ? t("cycle.datedRequired")
+                  : t("cycle.copyPreviousTitle")
             }
           >
-            Copy uncompleted from previous
+            {t("cycle.copyPrevious")}
           </PopoverItem>
         )}
         {cycle.type === "session" && !finished && !started && (
@@ -169,18 +164,18 @@ export function CycleOptionsMenu({
             disabled={runningElsewhere || noDuration}
             title={
               runningElsewhere
-                ? "Another focus block is running"
+                ? t("cycle.anotherRunning")
                 : noDuration
-                  ? "Set a duration before starting"
-                  : "Start this focus block"
+                  ? t("cycle.durationRequired")
+                  : t("cycle.startFocus")
             }
           >
-            Start
+            {t("cycle.start")}
           </PopoverItem>
         )}
         {cycle.type === "session" && started && (
-          <PopoverItem onSelect={() => void onFinish()} title="Stop and record the focused time">
-            Stop
+          <PopoverItem onSelect={() => void onFinish()} title={t("cycle.stopRecord")}>
+            {t("cycle.stop")}
           </PopoverItem>
         )}
         {/* Finish 之外的所有周期类型共享同一条生命周期规则。 */}
@@ -188,9 +183,9 @@ export function CycleOptionsMenu({
           <PopoverItem
             onSelect={() => void onFinish()}
             disabled={!started}
-            title={started ? "Mark this cycle as finished" : "The cycle is not running"}
+            title={started ? t("cycle.finishTitle") : t("cycle.notRunning")}
           >
-            Finish
+            {t("cycle.finish")}
           </PopoverItem>
         )}
         {cycle.type === "session" && (
@@ -198,9 +193,9 @@ export function CycleOptionsMenu({
             <PopoverItem
               onSelect={() => void onRepeat()}
               disabled={noDuration}
-              title={noDuration ? "A focus block needs a duration to repeat" : "Create a daily template from this block"}
+              title={noDuration ? t("cycle.repeatDurationRequired") : t("cycle.createDailyTemplate")}
             >
-              Repeat every day
+              {t("cycle.repeatDaily")}
             </PopoverItem>
             {cycle.repeat_id && (
               <PopoverItem
@@ -209,7 +204,7 @@ export function CycleOptionsMenu({
                   setRepeatOpen(true);
                 }}
               >
-                Edit repeat
+                {t("cycle.editRepeat")}
               </PopoverItem>
             )}
           </>
@@ -222,11 +217,11 @@ export function CycleOptionsMenu({
           /* 危险操作用危险色文字（9.2）；inline 样式避开与默认 text-primary 的类冲突。 */
           style={{ color: "var(--color-danger)" }}
         >
-          Delete
+          {t("cycle.delete")}
         </PopoverItem>
         {cycle.type === "session" && cycle.repeat_id && (
           <PopoverItem onSelect={() => void onStopRepeat()} style={{ color: "var(--color-danger)" }}>
-            Stop repeat
+            {t("cycle.stopRepeat")}
           </PopoverItem>
         )}
       </Popover>
@@ -236,7 +231,7 @@ export function CycleOptionsMenu({
       {repeatOpen && cycle.repeat_id && (
         <EditRepeatDialog cycle={cycle} open={repeatOpen} onClose={() => setRepeatOpen(false)} />
       )}
-      <DeleteCycleDialog cycle={cycle} open={deleteOpen} onClose={() => setDeleteOpen(false)} />
+      {deleteOpen && <DeleteCycleDialog cycle={cycle} open onClose={() => setDeleteOpen(false)} />}
     </span>
   );
 }
@@ -251,6 +246,7 @@ function RenameSessionDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const [title, setTitle] = useState(cycle.title);
   const [saving, setSaving] = useState(false);
@@ -276,11 +272,11 @@ function RenameSessionDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="Rename focus block"
+      title={t("cycle.renameTitle")}
       footer={
         <>
           <Button onClick={onClose} disabled={saving}>
-            Cancel
+            {t("cycle.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -288,7 +284,7 @@ function RenameSessionDialog({
             disabled={!title.trim()}
             onClick={() => void save()}
           >
-            Save
+            {t("cycle.save")}
           </Button>
         </>
       }
@@ -296,7 +292,7 @@ function RenameSessionDialog({
       <Input
         autoFocus
         value={title}
-        aria-label="Focus block title"
+        aria-label={t("cycle.focusTitle")}
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.nativeEvent.isComposing) void save();
@@ -321,6 +317,7 @@ function EditRepeatDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const [title, setTitle] = useState(cycle.title);
   const [saving, setSaving] = useState(false);
@@ -347,11 +344,11 @@ function EditRepeatDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="Edit repeat"
+      title={t("cycle.editRepeatTitle")}
       footer={
         <>
           <Button onClick={onClose} disabled={saving}>
-            Cancel
+            {t("cycle.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -359,18 +356,18 @@ function EditRepeatDialog({
             disabled={!title.trim()}
             onClick={() => void save()}
           >
-            Save
+            {t("cycle.save")}
           </Button>
         </>
       }
     >
       <p className="mb-3 text-caption text-hint">
-        Edits the daily template — future instances pick it up, past ones stay unchanged.
+        {t("cycle.repeatHelp")}
       </p>
       <Input
         autoFocus
         value={title}
-        aria-label="Repeat title"
+        aria-label={t("cycle.repeatTitle")}
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.nativeEvent.isComposing) void save();
@@ -387,8 +384,8 @@ function EditRepeatDialog({
 
 /**
  * 删除确认：先展示影响数量与保护规则，guard 命中时确认键禁用并显示后端
- * message（past_cycle / has_started_session / not_latest_n 等，文案由
- * service 层给出，前端不重复翻译）。
+ * message（past_cycle / has_started_session / not_latest_n 等）通过稳定错误码
+ * 本地化，未知错误码仍保留后端诊断信息。
  */
 function DeleteCycleDialog({
   cycle,
@@ -399,11 +396,13 @@ function DeleteCycleDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const [preview, setPreview] = useState<CycleDeletionPreview | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const { error, run, dismiss } = useActionError();
 
   useEffect(() => {
@@ -411,7 +410,7 @@ function DeleteCycleDialog({
     let cancelled = false;
     setPreview(null);
     setLoadError(null);
-    dismiss();
+    if (previewRevision === 0) dismiss();
     setLoading(true);
     getCycleDeletionPreview(cycle.id).then(
       (p) => {
@@ -428,11 +427,22 @@ function DeleteCycleDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, cycle.id, dismiss]);
+  }, [open, cycle.id, dismiss, previewRevision]);
 
   const onDelete = async () => {
+    if (!preview || preview.guard_code || deleting) return;
     setDeleting(true);
-    const ok = await run(() => deletePlanningCycle(cycle.id));
+    const ok = await run(async () => {
+      try { await deletePlanningCycle(cycle.id, preview.confirmation_token); }
+      catch (failure) {
+        if (typeof failure === "object" && failure !== null && "code" in failure && failure.code === "deletion_impact_changed") {
+          setPreview(null);
+          setPreviewRevision((revision) => revision + 1);
+        }
+        throw failure;
+      }
+      return true;
+    });
     setDeleting(false);
     if (ok) {
       invalidateCycles(qc);
@@ -445,27 +455,27 @@ function DeleteCycleDialog({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
-      title={`Delete “${cycle.title || TYPE_NAME[cycle.type]}”`}
+      onClose={() => { if (!deleting) onClose(); }}
+      title={t("cycle.deleteTitle", { title: cycle.title || cycleTypeName(cycle.type, t) })}
       footer={
         <>
           <Button onClick={onClose} disabled={deleting} autoFocus>
-            Cancel
+            {t("cycle.cancel")}
           </Button>
           <Button
             variant="primary"
             loading={deleting}
-            disabled={loading || blocked || loadError !== null}
+            disabled={!preview || loading || blocked || loadError !== null}
             /* 危险主操作：深红底白字；inline 覆盖 bg-primary，避开类序问题。 */
             style={{ backgroundColor: "var(--color-danger)" }}
             onClick={() => void onDelete()}
           >
-            Delete {TYPE_NAME[cycle.type]}
+            {t("cycle.deleteType", { type: cycleTypeName(cycle.type, t) })}
           </Button>
         </>
       }
     >
-      {loading && <p className="text-body text-hint">Loading impact…</p>}
+      {loading && <p className="text-body text-hint">{t("cycle.loadingImpact")}</p>}
       {loadError && (
         <p role="alert" className="text-body text-danger">
           {loadError}
@@ -473,27 +483,30 @@ function DeleteCycleDialog({
       )}
       {preview && blocked && (
         <p className="text-body text-danger" role="alert">
-          {preview.guard_message}
+          {errorMessage({ code: preview.guard_code!, message: preview.guard_message ?? "" })}
         </p>
       )}
       {preview && !blocked && (
         <div className="flex flex-col gap-2">
+          {cycle.type === "session" ? <>
+            <p className="text-body text-primary">{t("cycle.deleteHelp")}</p>
+            {cycle.started && !cycle.finished && <p className="text-body text-secondary">{t("cycle.runningDeleteHelp")}</p>}
+            {preview.tasks > 0 && <p className="text-body text-secondary">{t("cycle.sessionTasksDeleted", { tasks: t("cycle.tasks", { count: preview.tasks }) })}</p>}
+          </> : <>
           <p className="text-body text-primary">
-            This deletes the {TYPE_NAME[cycle.type]} and everything inside it:
+            {t("cycle.deleteContainerHelp", { type: cycleTypeName(cycle.type, t) })}
           </p>
           <ul className="flex flex-col gap-1 text-body text-secondary">
             <li>
-              {preview.tasks} task{plural(preview.tasks)}
+              {t("cycle.tasks", { count: preview.tasks })}
             </li>
             <li>
-              {preview.descendant_cycles} nested cycle{plural(preview.descendant_cycles)}
+              {t("cycle.nestedPlans", { count: preview.descendant_cycles - preview.total_focus_blocks })}
             </li>
-            {preview.started_sessions > 0 && (
-              <li>
-                {preview.started_sessions} started focus block{plural(preview.started_sessions)}
-              </li>
-            )}
+            <li>{t("cycle.deletedFocus", { count: preview.total_focus_blocks })}</li>
           </ul>
+          <p className="mt-1 text-caption text-hint">{t("cycle.deleteRecursiveNote")}</p>
+          </>}
         </div>
       )}
       {error && (
@@ -505,6 +518,6 @@ function DeleteCycleDialog({
   );
 }
 
-function plural(n: number): string {
-  return n === 1 ? "" : "s";
+function cycleTypeName(type: Cycle["type"], t: (key: string, options?: Record<string, unknown>) => string): string {
+  return t({ month: "cycle.longTermType", week: "cycle.weekType", day: "cycle.dayType", session: "cycle.focusType" }[type]);
 }

@@ -20,6 +20,8 @@ export type CycleType = "session" | "day" | "week" | "month";
 /** `domain::cycle::LATER_CYCLE_ID` — id of the permanent Do Later container. */
 export const LATER_CYCLE_ID = "later";
 
+export type ProgressCheck = { kind: "once"; date: string } | { kind: "repeat"; every_days: number };
+
 /** One row of `cycles`, as it travels across IPC (`domain::cycle::Cycle`). */
 export interface Cycle {
   id: string;
@@ -27,6 +29,8 @@ export interface Cycle {
   /** Serialized as `type` (`#[serde(rename = "type")]`). */
   type: CycleType;
   parent_id: string | null;
+  /** Linked daily task for a focus block; null when the block is unassociated. */
+  task_id: string | null;
   position: number;
   archived: boolean;
   started: boolean;
@@ -48,6 +52,8 @@ export interface Cycle {
   calendar_key: string | null;
   /** Template this session was generated from; cleared, never cascaded. */
   repeat_id: string | null;
+  /** Long-term checkpoint policy; absent old cycles use their midpoint. */
+  progress_check?: ProgressCheck | null;
   /** Milliseconds since the Unix epoch. */
   created_at: number;
 }
@@ -78,10 +84,15 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 /** `domain::proposal::ProposalKind`. */
 export type ProposalKind = "upsert" | "delete";
 
+/** The planning intent retained while a task lives in the Later container. */
+export type LaterPlanType = "month" | "week" | "day";
+
 /** `domain::task::Task` — goals, week items, daily tasks and subtasks alike. */
 export interface Task {
   id: string;
   cycle_id: string;
+  /** Later intent; null means a direct/legacy Later item (treated as month), and is always null outside Later. */
+  later_plan_type: LaterPlanType | null;
   parent_id: string | null;
   title: string;
   subtasks: Subtask[];
@@ -107,6 +118,8 @@ export interface TaskNode extends Task {
   children: TaskNode[];
   /** Subtasks rendered as Markdown for AI context and sessions. */
   subtasks_markdown: string;
+  /** Accumulated focus time from linked focus blocks, in milliseconds. */
+  focused_time: number;
 }
 
 /** `domain::repeat::Repeat`. */
@@ -135,6 +148,10 @@ export interface CreateCycleArgs {
   parent_id?: string | null;
   /** Long-term only: 1, 3 or 6 product months (28 days each). */
   duration_months?: number | null;
+  /** Explicit long-term bounds, mutually exclusive with duration_months. */
+  starts_on?: string | null;
+  ends_on?: string | null;
+  progress_check?: ProgressCheck | null;
   /** Optional; dated cycles derive a title from their bounds when absent. */
   title?: string | null;
   /** Day cycles: `YYYY-MM-DD`. Defaults to today (local). */
@@ -147,6 +164,8 @@ export interface AddSessionArgs {
   title: string;
   /** Milliseconds; null leaves the focus block without a set duration. */
   duration_ms?: number | null;
+  /** Optional committed task from the same day. */
+  task_id?: string | null;
   position?: number | null;
 }
 
@@ -159,6 +178,18 @@ export interface CycleDeletionPreview {
   descendant_cycles: number;
   tasks: number;
   started_sessions: number;
+  total_focus_blocks: number;
+  confirmation_token: string;
+}
+
+export interface TaskDeletionPreview {
+  task_id: string;
+  descendant_tasks: number;
+  /** Focus blocks linked to this task and all descendants. */
+  total_focus_blocks: number;
+  /** Linked focus blocks currently running. */
+  started_focus_count: number;
+  confirmation_token: string;
 }
 
 /** `service::tasks::AddTaskArgs`. */
@@ -196,6 +227,7 @@ export interface TaskPatch {
 export interface EditorWorkspace {
   cycle: Cycle | null;
   tasks: TaskNode[];
+  work_mix: { total: number; long_term: number; weekly_standalone: number; daily_standalone: number; unresolved: number } | null;
 }
 
 /** `service::proposals::PreviewSummary`. */
@@ -204,7 +236,19 @@ export interface PreviewSummary {
   count: number;
   /** Pending rows with their proposed content, for the highlight pass. */
   tasks: Task[];
+  originals: Record<string, TaskSnapshot>;
+  deletion_impacts: Record<string, string[]>;
 }
+
+/** Existing proposal snapshot; returned only for review, never edited by UI. */
+export type TaskSnapshot = Omit<Task, "id" | "cycle_id" | "proposal" | "copied_from_task_id" | "title" | "completed" | "subtasks" | "position" | "created_at"> & {
+  original_exists: boolean;
+  title: string | null;
+  completed: boolean | null;
+  subtasks: Subtask[] | null;
+  position: number | null;
+  created_at: number | null;
+};
 
 /** `service::repeats::RepeatPatch` — edits future instances only. */
 export interface RepeatPatch {
@@ -215,6 +259,7 @@ export interface RepeatPatch {
 
 /** `service::settings::Settings`. */
 export interface Settings {
+  locale: import("./i18n").Locale;
   /** null until the user's week start day has been determined (1=Mon…7=Sun). */
   week_start_day: number | null;
   /** Preferred surface theme; null until first chosen (client defaults to white). */
@@ -254,17 +299,17 @@ export type ApiFormat =
   | "openai_chat_completions"
   | "openai_responses";
 
+/** `providers::config::ProviderConnection` — routing for provider requests. */
+export type ProviderConnection =
+  | { mode: "auto" }
+  | { mode: "direct" }
+  | { mode: "proxy"; url: string };
+
 /** `providers::config::InputType`. `text` is mandatory for every model. */
 export type InputType = "text" | "image" | "video" | "pdf";
 
 /** `providers::config::OutputType` — text is the only variant today. */
 export type OutputType = "text";
-
-/** `providers::config::ExtraHeader` — non-sensitive custom header, never credentials. */
-export interface ExtraHeader {
-  name: string;
-  value: string;
-}
 
 /** `providers::config::ModelConfig` — user-declared capability metadata. */
 export interface ModelConfig {
@@ -288,12 +333,17 @@ export interface ProviderConfig {
   /** Scheme included; may carry a path prefix (e.g. `https://host/v1`). */
   base_url: string;
   api_format: ApiFormat;
-  extra_headers: ExtraHeader[];
+  /** Defaults to `{ mode: "auto" }` when omitted by an older configuration. */
+  connection: ProviderConnection;
+  /** Lowercase custom header names; values stay in the system credential store. */
+  extra_headers: string[];
   models: ModelConfig[];
   /** Unix epoch milliseconds. */
   created_at: number;
   /** Forward-compat only; deletion removes entries outright. */
   archived: boolean;
+  /** Established by the backend only after probing this configuration and key. */
+  connection_verified_at: number | null;
 }
 
 /**
@@ -312,8 +362,9 @@ export interface ProviderSummary extends ProviderConfig {
 export interface AiSettingsSummary {
   /** Resolved active provider; null when nothing is active or the id dangles. */
   active_provider: ProviderSummary | null;
+  active_model_id: string | null;
   providers: ProviderSummary[];
-  /** True iff the active provider exists; a keyless local endpoint counts. */
+  /** Active provider has a persisted successful connection test. */
   ai_available: boolean;
 }
 
@@ -340,6 +391,16 @@ export interface MessageView {
   payload: MessagePayload;
 }
 
+/** Context of the visible planning surface sent with each Coach turn. */
+export interface AgentPageContext {
+  view: "workspace" | "calendar";
+  long_term_cycle_id: string | null;
+  week_cycle_id: string | null;
+  day_cycle_id: string | null;
+  week_starts_on: string | null;
+  selected_date: string | null;
+}
+
 /** Tagged payloads stored per message type (mirrors turn.rs MessagePayload). */
 export type MessagePayload =
   | { kind: "text"; text: string }
@@ -354,10 +415,12 @@ export type MessagePayload =
     }
   | { kind: "app_tool_result"; name: string; result: unknown };
 
-/** `ai::agent::turn::ConversationView` — one cycle's conversation. */
+/** `ai::agent::turn::ConversationView` — the global Coach conversation. */
 export interface ConversationView {
+  expires_at: number | null;
+  context_idle_minutes: number;
   id: string;
-  cycle_id: string;
+  active_turn_id: string | null;
   revision: number;
   active_skill: string | null;
   last_error: string | null;
@@ -375,6 +438,8 @@ export interface TurnResult {
 
 /** `ai::review::PlanningIssue` — one diagnosed plan problem. */
 export interface PlanningIssue {
+  message_key?: string | null;
+  message_params?: Record<string, string | number | string[]> | null;
   issue_type:
     | "too_many_goals"
     | "too_many_tasks"
@@ -386,6 +451,22 @@ export interface PlanningIssue {
   task_id: string | null;
   title: string;
   detail: string;
+}
+
+/** Current snapshot plus the status of the explicit AI inspection. */
+export interface PlanningIssueReport {
+  cycle_id: string;
+  cycle_title: string;
+  cycle_type: CycleType;
+  starts_on: string | null;
+  task_count: number;
+  pending_count: number;
+  ignored_count: number;
+  issues: Array<PlanningIssue & { source: "structure" | "ai"; task_title: string | null }>;
+  ai_status: "not_checked" | "completed" | "empty" | "stale";
+  checked_at: number | null;
+  checked_count: number;
+  model: string | null;
 }
 
 /** One persisted dismissal (cycle-level when task_id is null). */

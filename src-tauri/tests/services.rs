@@ -85,6 +85,7 @@ fn start_requires_duration() {
     let session = planner_lib::service::cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "Focus".into(),
             duration_ms: None,
@@ -103,9 +104,9 @@ fn start_requires_duration() {
 }
 
 #[test]
-fn week_requires_parent() {
+fn week_can_be_created_without_long_term_goals() {
     let db = TestDb::open();
-    let err = cycles::create_planning_cycle(
+    let week = cycles::create_planning_cycle(
         &db.db,
         &CreateCycleArgs {
             cycle_type: "week".into(),
@@ -114,8 +115,137 @@ fn week_requires_parent() {
         common::today(),
         NOW,
     )
-    .unwrap_err();
-    assert_eq!(err_code(&err), "weekly_requires_parent");
+    .unwrap()
+    .value;
+    assert_eq!(week.parent_id, None);
+    add_task(&db.db, &week.id, "Book a repair", NOW);
+    add_task(&db.db, &week.id, "Renew membership", NOW);
+    let day = cycles::get_or_create_day(&db.db, common::today(), NOW)
+        .unwrap()
+        .value;
+    assert_eq!(day.parent_id.as_deref(), Some(week.id.as_str()));
+}
+
+#[test]
+fn opening_an_independent_day_does_not_force_a_parent_or_duplicate_it() {
+    let db = TestDb::open();
+    let day = cycles::create_planning_cycle(
+        &db.db,
+        &CreateCycleArgs {
+            cycle_type: "day".into(),
+            ..Default::default()
+        },
+        common::today(),
+        NOW,
+    )
+    .unwrap()
+    .value;
+    let reopened = cycles::get_or_create_day(&db.db, common::today(), NOW + 1)
+        .unwrap()
+        .value;
+    assert_eq!(reopened.id, day.id);
+    assert_eq!(reopened.parent_id, None);
+    assert_eq!(
+        cycles::get_planner_state(&db.db)
+            .unwrap()
+            .cycles
+            .iter()
+            .filter(|cycle| cycle.id != "later")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn independent_weeks_copy_unfinished_tasks_from_the_previous_date() {
+    let db = TestDb::open();
+    let args = CreateCycleArgs {
+        cycle_type: "week".into(),
+        ..Default::default()
+    };
+    let first = cycles::create_planning_cycle(&db.db, &args, common::today(), NOW)
+        .unwrap()
+        .value;
+    let item = add_task(&db.db, &first.id, "Arrange a repair", NOW);
+    let next_date = planner_lib::domain::calendar::add_days(common::today(), 7);
+    let next = cycles::create_planning_cycle(&db.db, &args, next_date, NOW + 1)
+        .unwrap()
+        .value;
+    cycles::copy_uncompleted_from_previous(&db.db, &next.id, NOW + 2).unwrap();
+    let workspace = planner_lib::service::editor::get_editor_workspace(&db.db, &next.id).unwrap();
+    assert_eq!(workspace.tasks.len(), 1);
+    assert_eq!(
+        workspace.tasks[0].task.copied_from_task_id.as_deref(),
+        Some(item.id.as_str())
+    );
+}
+
+#[test]
+fn work_mix_counts_real_commitments_and_follows_optional_goal_links() {
+    use planner_lib::service::editor;
+    let db = TestDb::open();
+    let day = cycles::get_or_create_day(&db.db, common::today(), NOW)
+        .unwrap()
+        .value;
+    let week_id = day.parent_id.as_deref().unwrap();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let goal = add_task(&db.db, &month.id, "Launch the product", NOW);
+    let planned = add_task(&db.db, week_id, "Test the release", NOW);
+    let temporary = add_task(&db.db, week_id, "Arrange a repair", NOW);
+    tasks::set_task_parent_link(&db.db, &planned.id, Some(&goal.id)).unwrap();
+    for (title, parent) in [
+        ("Run the checks", Some(planned.id.as_str())),
+        ("Call the repair shop", Some(temporary.id.as_str())),
+        ("Receive a delivery", None),
+    ] {
+        let task = add_task(&db.db, &day.id, title, NOW);
+        tasks::set_task_parent_link(&db.db, &task.id, parent).unwrap();
+        if parent.is_none() {
+            tasks::add_task(
+                &db.db,
+                &tasks::AddTaskArgs {
+                    cycle_id: day.id.clone(),
+                    title: "Check the parcel".into(),
+                    parent_id: Some(task.id),
+                    ..Default::default()
+                },
+                NOW,
+            )
+            .unwrap();
+        }
+    }
+    add_task(&db.db, &day.id, "", NOW);
+    let mix = editor::get_editor_workspace(&db.db, &day.id)
+        .unwrap()
+        .work_mix
+        .unwrap();
+    assert_eq!(
+        (
+            mix.total,
+            mix.long_term,
+            mix.weekly_standalone,
+            mix.daily_standalone
+        ),
+        (3, 1, 1, 1)
+    );
+    tasks::set_task_parent_link(&db.db, &planned.id, None).unwrap();
+    let mix = editor::get_editor_workspace(&db.db, &day.id)
+        .unwrap()
+        .work_mix
+        .unwrap();
+    assert_eq!(
+        (
+            mix.total,
+            mix.long_term,
+            mix.weekly_standalone,
+            mix.daily_standalone
+        ),
+        (3, 0, 2, 1)
+    );
+    let ctx = planner_lib::ai::agent::context::load_context(&db.conn(), &day.id).unwrap();
+    let rendered = planner_lib::ai::agent::context::render(&ctx, None);
+    assert!(rendered.contains("<standalone_weekly>2</standalone_weekly>"));
+    assert!(rendered.contains("not time spent"));
 }
 
 #[test]
@@ -187,6 +317,7 @@ fn deletion_guard_blocks_cycles_with_started_sessions() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "running".into(),
             duration_ms: Some(900_000),
@@ -263,6 +394,7 @@ fn finishing_a_session_accrues_focused_time_up_the_chain() {
     let session = cycles::add_session(
         &db.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "deep work".into(),
             duration_ms: Some(3_600_000),
@@ -371,7 +503,7 @@ fn manual_goals_default_to_needing_clarity() {
 }
 
 #[test]
-fn cross_level_links_allow_only_adjacent_levels_in_branch() {
+fn cross_level_links_allow_only_adjacent_levels() {
     let db = TestDb::open();
     let month = create_long_term(&db.db, TODAY, 1);
     let week = create_week(&db.db, &month.id, TODAY);
@@ -405,15 +537,17 @@ fn cross_level_links_allow_only_adjacent_levels_in_branch() {
 }
 
 #[test]
-fn cross_branch_link_is_rejected() {
+fn weekly_items_can_link_goals_outside_the_container_parent() {
     let db = TestDb::open();
     let month_a = create_long_term(&db.db, TODAY, 1);
     let month_b = create_long_term(&db.db, "2026-12-09", 1);
     let week_b = create_week(&db.db, &month_b.id, "2026-12-09");
     let goal_a = add_task(&db.db, &month_a.id, "goal of A", NOW);
     let weekly_b = add_task(&db.db, &week_b.id, "weekly of B", NOW);
-    let err = tasks::set_task_parent_link(&db.db, &weekly_b.id, Some(&goal_a.id)).unwrap_err();
-    assert_eq!(err_code(&err), "link_cycle_mismatch");
+    let linked = tasks::set_task_parent_link(&db.db, &weekly_b.id, Some(&goal_a.id))
+        .unwrap()
+        .value;
+    assert_eq!(linked.parent_id.as_deref(), Some(goal_a.id.as_str()));
 }
 
 #[test]
@@ -716,6 +850,7 @@ fn make_session(
     planner_lib::service::cycles::add_session(
         &db.db,
         &planner_lib::service::cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id,
             title: title.into(),
             duration_ms: Some(duration_ms),
@@ -748,6 +883,54 @@ fn save_as_repeat_links_first_instance() {
         linked.repeat_id.as_deref(),
         Some(mutation.value.id.as_str())
     );
+}
+
+#[test]
+fn opening_days_without_active_repeats_keeps_sessions_empty() {
+    let db = TestDb::open();
+    let today = cycles::get_or_create_day(&db.db, common::today(), NOW)
+        .unwrap()
+        .value;
+    assert!(cycles::list_sessions(&db.db, &today.id).unwrap().is_empty());
+
+    let reopened = cycles::get_or_create_day(&db.db, common::today(), NOW + 1)
+        .unwrap()
+        .value;
+    assert_eq!(reopened.id, today.id);
+    assert!(cycles::list_sessions(&db.db, &reopened.id)
+        .unwrap()
+        .is_empty());
+
+    // A stopped template must not materialize into a later newly opened day.
+    let source = cycles::add_session(
+        &db.db,
+        &cycles::AddSessionArgs {
+            task_id: None,
+            day_cycle_id: today.id,
+            title: "Stopped repeat source".into(),
+            duration_ms: Some(1_500_000),
+            position: None,
+        },
+        NOW,
+    )
+    .unwrap()
+    .value;
+    let repeat = planner_lib::service::repeats::add_repeat(
+        &db.db,
+        &planner_lib::service::repeats::AddRepeatArgs {
+            session_id: source.id,
+        },
+        NOW,
+    )
+    .unwrap()
+    .value;
+    planner_lib::service::repeats::stop_repeat(&db.db, &repeat.id).unwrap();
+
+    let later_date = planner_lib::domain::calendar::add_days(common::today(), 1);
+    let later = cycles::get_or_create_day(&db.db, later_date, NOW + 2)
+        .unwrap()
+        .value;
+    assert!(cycles::list_sessions(&db.db, &later.id).unwrap().is_empty());
 }
 
 #[test]
@@ -991,4 +1174,53 @@ fn repeat_instances_obey_the_same_deletion_guards() {
     };
     let err = planner_lib::service::cycles::delete_cycle(&db.db, &day_id).unwrap_err();
     assert_eq!(err_code(&err), "has_started_session");
+}
+
+#[test]
+fn coach_preview_locks_only_affected_tasks_and_rejection_restores_the_exact_tree() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let root = add_task(&db.db, &month.id, "Original", NOW);
+    let child = add_task(&db.db, &month.id, "Child", NOW + 1);
+    tasks::set_task_parent_link(&db.db, &child.id, Some(&root.id)).unwrap();
+    let other = add_task(&db.db, &month.id, "Other", NOW + 2);
+    let before = planner_lib::repository::tasks::require(&db.conn(), &root.id).unwrap();
+    proposals::apply_update_preview(&db.db, &root.id, &input("AI title")).unwrap();
+    let editor = planner_lib::service::editor::get_editor_workspace(&db.db, &month.id).unwrap();
+    assert_eq!(editor.tasks[0].task.title, "AI title");
+    assert_eq!(editor.tasks[0].children[0].task.id, child.id);
+    let patch = tasks::TaskPatch {
+        title: Some("Manual".into()),
+        ..Default::default()
+    };
+    assert!(tasks::patch_task(&db.db, &root.id, &patch).is_err());
+    assert!(tasks::delete_task(&db.db, &root.id).is_err());
+    assert!(tasks::set_task_root_color(&db.db, &root.id, Some("blue")).is_err());
+    assert!(tasks::move_task(&db.db, &root.id, &month.id, None).is_err());
+    tasks::patch_task(&db.db, &other.id, &patch).unwrap();
+    proposals::undo_task_preview(&db.db, &root.id).unwrap();
+    assert_eq!(
+        planner_lib::repository::tasks::require(&db.conn(), &root.id).unwrap(),
+        before
+    );
+    tasks::patch_task(&db.db, &root.id, &patch).unwrap();
+    proposals::apply_delete_preview(&db.db, &root.id).unwrap();
+    assert!(tasks::patch_task(&db.db, &child.id, &patch).is_err());
+    assert!(cycles::delete_cycle(&db.db, &month.id).is_err());
+    let editor = planner_lib::service::editor::get_editor_workspace(&db.db, &month.id).unwrap();
+    assert_eq!(
+        editor.tasks[0].children[0].task.proposal,
+        Some(planner_lib::domain::proposal::ProposalKind::Delete)
+    );
+    assert_eq!(
+        proposals::get_preview_summary(&db.db, &month.id)
+            .unwrap()
+            .deletion_impacts[&root.id],
+        vec!["Child"]
+    );
+    proposals::undo_task_preview(&db.db, &root.id).unwrap();
+    tasks::patch_task(&db.db, &child.id, &patch).unwrap();
+    proposals::apply_update_preview(&db.db, &root.id, &input("Confirmed title")).unwrap();
+    proposals::keep_task_preview(&db.db, &root.id).unwrap();
+    tasks::patch_task(&db.db, &root.id, &patch).unwrap();
 }

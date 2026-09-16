@@ -13,6 +13,7 @@ import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "../../ui";
+import { useTranslation } from "../../lib/i18n";
 import {
   acknowledgeMissedSummary,
   deleteReminder,
@@ -22,22 +23,15 @@ import {
   useReminderReconcile,
   useRemindersChanged,
   type Reminder,
-  type TargetKind,
 } from "./api";
 import { ReminderPicker } from "./ReminderPicker";
 
-const TARGET_KIND_LABEL: Record<TargetKind, string> = {
-  task: "任务",
-  session: "专注块",
-  day: "日计划",
-  cycle: "周期",
-};
-
-function reminderTitle(reminder: Reminder): string {
-  return `${TARGET_KIND_LABEL[reminder.target_kind]} · ${reminder.target_id.slice(0, 8)}`;
+function reminderTitle(t: (key: string, options?: Record<string, unknown>) => string, reminder: Reminder): string {
+  return `${t(`reminders.target.${reminder.target_kind}`)} · ${reminder.target_id.slice(0, 8)}`;
 }
 
 export function ReminderList({ cycleId }: { cycleId?: string }): JSX.Element {
+  const { t } = useTranslation("shell");
   const queryClient = useQueryClient();
   useReminderReconcile();
   useRemindersChanged(queryClient);
@@ -69,9 +63,9 @@ export function ReminderList({ cycleId }: { cycleId?: string }): JSX.Element {
   const alerts = alertsQuery.data ?? [];
 
   return (
-    <section aria-label="提醒" className="flex flex-col gap-2">
+    <section aria-label={t("reminders.sectionLabel")} className="flex flex-col gap-2">
       {pending.length === 0 ? (
-        <p className="text-caption text-hint">暂无提醒</p>
+        <p className="text-caption text-hint">{t("reminders.empty")}</p>
       ) : (
         <ul className="flex flex-col gap-1">
           {pending.map((reminder) => (
@@ -87,7 +81,7 @@ export function ReminderList({ cycleId }: { cycleId?: string }): JSX.Element {
 
       {alerts.length > 0 && (
         <div className="flex flex-col gap-1 rounded-sm border border-light bg-content p-2">
-          <p className="text-caption text-secondary">已到期，待查看</p>
+          <p className="text-caption text-secondary">{t("reminders.firedTitle")}</p>
           <ul className="flex flex-col gap-1">
             {alerts.map((reminder) => (
               <li
@@ -95,15 +89,15 @@ export function ReminderList({ cycleId }: { cycleId?: string }): JSX.Element {
                 className="flex items-center justify-between gap-2"
               >
                 <span className="text-caption text-primary">
-                  {reminderTitle(reminder)} · {formatFireAt(reminder.fire_at)}
+                  {reminderTitle(t, reminder)} · {formatFireAt(reminder.fire_at)}
                 </span>
                 <Button
                   variant="ghost"
                   size="compact"
-                  aria-label="知道了"
+                  aria-label={t("reminders.acknowledge")}
                   onClick={() => dismiss.mutate(reminder.id)}
                 >
-                  知道了
+                  {t("reminders.acknowledge")}
                 </Button>
               </li>
             ))}
@@ -123,6 +117,7 @@ function ReminderRow({
   onDelete: () => void;
   onChanged: () => void;
 }): JSX.Element {
+  const { t } = useTranslation("shell");
   const [editing, setEditing] = useState(false);
 
   if (editing) {
@@ -148,9 +143,9 @@ function ReminderRow({
   return (
     <li className="flex items-center justify-between gap-2 rounded-sm px-1 hover:bg-hover">
       <span className="min-w-0 truncate text-caption text-primary">
-        {reminderTitle(reminder)}
+        {reminderTitle(t, reminder)}
         {reminder.quiet_ok && (
-          <span className="ml-1 text-hint">（免打扰时段静音）</span>
+          <span className="ml-1 text-hint">{t("reminders.quietMuted")}</span>
         )}
       </span>
       <span className="flex shrink-0 items-center gap-1">
@@ -160,18 +155,18 @@ function ReminderRow({
         <Button
           variant="ghost"
           size="compact"
-          aria-label={`修改提醒时间 ${reminder.id}`}
+          aria-label={t("reminders.editTime", { id: reminder.id })}
           onClick={() => setEditing(true)}
         >
-          改时间
+          {t("reminders.edit")}
         </Button>
         <Button
           variant="ghost"
           size="compact"
-          aria-label={`删除提醒 ${reminder.id}`}
+          aria-label={t("reminders.delete", { id: reminder.id })}
           onClick={onDelete}
         >
-          删除
+          {t("reminders.deleteAction")}
         </Button>
       </span>
     </li>

@@ -1,6 +1,7 @@
 # Rust / Tauri
 src-tauri/target/
 src-tauri/gen/
+.artifacts/
 
 # Node
 node_modules/
@@ -30,3 +31,10 @@ Thumbs.db
 .idea/
 .agents/
 .atlas/
+
+# Release output and private signing material
+release-artifacts/
+*.p12
+*.pfx
+*.key
+private-key.pem

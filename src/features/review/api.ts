@@ -124,11 +124,11 @@ export const reviewQk = {
 
 /** Live「截至目前」facts of a cycle that has no saved review yet. */
 export function getCycleFacts(cycle_id: string): Promise<CycleReviewFacts> {
-  return invoke<CycleReviewFacts>(commands.getCycleFacts, { cycle_id });
+  return invoke<CycleReviewFacts>(commands.getCycleFacts, { cycleId: cycle_id });
 }
 
 export function getCycleReview(cycle_id: string): Promise<CycleReviewView | null> {
-  return invoke<CycleReviewView | null>(commands.getCycleReview, { cycle_id });
+  return invoke<CycleReviewView | null>(commands.getCycleReview, { cycleId: cycle_id });
 }
 
 export function saveCycleReview(args: SaveReviewArgs): Promise<CycleReviewView> {
@@ -141,8 +141,8 @@ export function applyReviewDisposition(
   disposition: Disposition,
 ): Promise<void> {
   return invoke<void>(commands.applyReviewDisposition, {
-    cycle_id,
-    task_id,
+    cycleId: cycle_id,
+    taskId: task_id,
     disposition,
   });
 }
@@ -153,9 +153,9 @@ export function getReviewSummary(): Promise<ReviewSummaryPoint[]> {
 
 /** Markdown string; the UI decides where it goes (clipboard / save dialog). */
 export function saveCycleReviewMarkdown(cycleId: string, targetPath: string): Promise<void> {
-  return invoke(commands.saveCycleReviewMarkdown, { cycle_id: cycleId, target_path: targetPath });
+  return invoke(commands.saveCycleReviewMarkdown, { cycleId: cycleId, targetPath: targetPath });
 }
 
 export function exportCycleReviewMarkdown(cycle_id: string): Promise<string> {
-  return invoke<string>(commands.exportCycleReviewMarkdown, { cycle_id });
+  return invoke<string>(commands.exportCycleReviewMarkdown, { cycleId: cycle_id });
 }

@@ -71,20 +71,65 @@ pub struct ToolSpec {
 /// One sampling request: base_url + api_format + model + api_key plus the
 /// conversation. Everything else in provider configuration is metadata that
 /// does not reach the wire (design D1).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SamplingRequest {
     /// Includes scheme and path prefix, e.g. `https://api.example.com/v1`.
     pub base_url: String,
     pub api_format: ApiFormat,
+    pub connection: crate::network::ConnectionSettings,
     pub model: String,
     /// Local endpoints may have none; then no auth header is sent.
     pub api_key: Option<String>,
+    /// Provider-specific request headers resolved from the system credential
+    /// store. Values are kept in memory only for the duration of a request.
+    pub extra_headers: Vec<(String, String)>,
     pub messages: Vec<SamplingMessage>,
     pub tools: Vec<ToolSpec>,
     /// Resolution order (task §3.7): an explicit request value wins; only
     /// the `anthropic_messages` adapter fills a default when `None` (the
     /// protocol makes the field mandatory).
     pub max_tokens: Option<u64>,
+}
+
+impl std::fmt::Debug for SamplingRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SamplingRequest")
+            .field("base_url", &self.base_url)
+            .field("api_format", &self.api_format)
+            .field("connection", &self.connection)
+            .field("model", &self.model)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "extra_headers",
+                &self
+                    .extra_headers
+                    .iter()
+                    .map(|(name, _)| (name, "[REDACTED]"))
+                    .collect::<Vec<_>>(),
+            )
+            .field("messages", &self.messages)
+            .field("tools", &self.tools)
+            .field("max_tokens", &self.max_tokens)
+            .finish()
+    }
+}
+
+impl SamplingRequest {
+    /// Returns the exact values that must be scrubbed from provider-controlled
+    /// errors and stream events. Header names are intentionally omitted.
+    pub(crate) fn redaction_secrets(&self) -> Vec<String> {
+        let mut secrets = Vec::with_capacity(self.extra_headers.len() + 1);
+        if let Some(key) = self.api_key.as_deref().filter(|key| !key.is_empty()) {
+            secrets.push(key.to_string());
+        }
+        secrets.extend(
+            self.extra_headers
+                .iter()
+                .filter(|(_, value)| !value.is_empty())
+                .map(|(_, value)| value.clone()),
+        );
+        secrets
+    }
 }
 
 /// Why a finished stream ended, normalized across protocols.
@@ -268,5 +313,24 @@ mod tests {
         let timeouts = Timeouts::default();
         assert_eq!(timeouts.connect_idle, Duration::from_secs(30));
         assert_eq!(timeouts.total_generate, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn request_debug_redacts_api_key_and_header_values() {
+        let request = SamplingRequest {
+            connection: Default::default(),
+            base_url: "http://localhost".into(),
+            api_format: ApiFormat::OpenaiResponses,
+            model: "model".into(),
+            api_key: Some("api-key-secret".into()),
+            extra_headers: vec![("x-route".into(), "route-secret".into())],
+            messages: vec![],
+            tools: vec![],
+            max_tokens: None,
+        };
+        let debug = format!("{request:?}");
+        assert!(!debug.contains("api-key-secret"));
+        assert!(!debug.contains("route-secret"));
+        assert!(debug.contains("[REDACTED]"));
     }
 }

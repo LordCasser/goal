@@ -1,176 +1,124 @@
-/**
- * 计划问题面板（openspec planning-issues「问题报告」，design.md §8.1/8.2）。
- *
- * 与 Agent 侧栏复用 PanelShell 外壳（424px、标题 + 关闭）。只读展示、不
- * 阻塞编辑：顶部说明行点明「不评分，只指出具体问题」（spec: 诊断而非评
- * 分），每条 PlanningIssue 一行——类型 label + detail，hover 显现忽略入口。
- * 忽略带可选原因下拉（产品可用性信号，spec: 收集产品自身的可用性信号，
- * 原因用常量字符串原样上报），成功后本地失效 issueReport 查询；后端报告
- * 已过滤被忽略项，前端不重复过滤。
- *
- * AI 未配置时语义审查在后端静默跳过（spec: 边写边审「审查不可用」）——本
- * 面板只呈现结构结果，无需对不可用做特殊降级，也把“没有问题”渲染为一行
- * 轻提示而不是大空状态。
- */
+/** Read-only diagnosis of the current plan; explicit AI status never implies a check that did not run. */
 import { useRef, useState } from "react";
-import type * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
 import { qk } from "../../lib/events";
-import {
-  dismissPlanningIssue,
-  getPlanningIssueReport,
-  isAppError,
-  type PlanningIssue,
-} from "../../lib/ipc";
-import { Popover, PopoverItem, cn } from "../../ui";
+import { dismissPlanningIssue, getPlanningIssueReport, getAiAvailability, type PlanningIssue, type PlanningIssueReport } from "../../lib/ipc";
+import { errorMessage, formatDate, useTranslation } from "../../lib/i18n";
+import { Button, Popover, PopoverItem } from "../../ui";
+import { AI_AVAILABILITY_KEY } from "./PlanWithAI";
 import { PanelShell } from "./PanelShell";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 
 export type IssuePanelProps = {
   cycleId: string;
   onClose: () => void;
+  onLocateTask?: (cycleId: string, taskId: string) => void;
+  onDiscuss?: (cycleId: string, prompt: string, taskId: string | null) => void;
+  onOpenSettings?: () => void;
 };
-
-/** issue_type → 中文 label（写死映射，spec: 问题类型六类）。 */
-const ISSUE_TYPE_LABELS: Record<PlanningIssue["issue_type"], string> = {
-  too_many_goals: "目标过多",
-  too_many_tasks: "任务过多",
-  too_much_work: "工作量过大",
-  not_sure_what_to_do_next: "不清楚下一步",
-  missing_something: "缺少必要的东西",
-  not_useful_for_needs: "对当前需求没用",
-};
-
-/** 可上报的忽略原因常量；原样落库，不做翻译（spec: 可用性信号）。 */
-const REASON_TOO_MUCH_WORK = "Planning felt like too much work";
-const REASON_NOT_SURE_HOW = "Not sure how to use it";
-
-/** 原因下拉三选：不选原因 = 纯忽略动作。 */
-const DISMISS_REASONS: Array<{ label: string; reason: string | null }> = [
-  { label: "直接忽略", reason: null },
-  { label: REASON_TOO_MUCH_WORK, reason: REASON_TOO_MUCH_WORK },
-  { label: REASON_NOT_SURE_HOW, reason: REASON_NOT_SURE_HOW },
+const REASONS = [
+  { labelKey: "issue.reasonNotApplicable", reason: null },
+  { labelKey: "issue.reasonTooMuchWork", reason: "Planning felt like too much work" },
+  { labelKey: "issue.reasonUnclear", reason: "Not sure how to use it" },
 ];
 
-export function IssuePanel({ cycleId, onClose }: IssuePanelProps): React.JSX.Element {
-  const queryClient = useQueryClient();
-
-  // 结构结果即时返回；语义审查在后端内部发生（不可用即静默跳过），这里
-  // 用 refresh=false 的已算报告，不因打开面板而阻塞编辑。
-  const report = useQuery({
-    queryKey: qk.issueReport(cycleId),
-    queryFn: () => getPlanningIssueReport(cycleId, false),
-    enabled: cycleId !== "",
+export function IssuePanel({ cycleId, onClose, onLocateTask, onDiscuss, onOpenSettings }: IssuePanelProps) {
+  const { t, i18n } = useTranslation("ai");
+  const client = useQueryClient();
+  const locale = i18n.resolvedLanguage || i18n.language;
+  // Backend caches AI findings by locale. Switching language only reads the
+  // matching report; refresh=true remains exclusive to the explicit AI check.
+  const reportKey = [...qk.issueReport(cycleId), locale] as const;
+  const report = useQuery({ queryKey: reportKey, queryFn: () => getPlanningIssueReport(cycleId, false), enabled: Boolean(cycleId) });
+  const ai = useQuery({ queryKey: AI_AVAILABILITY_KEY, queryFn: getAiAvailability });
+  const inspect = useMutation({
+    mutationFn: () => getPlanningIssueReport(cycleId, true),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.issueReport(cycleId) }),
+    // Reread the current snapshot even after a provider failure or concurrent edit.
+    onError: () => client.invalidateQueries({ queryKey: qk.issueReport(cycleId) }),
   });
-
   const dismiss = useMutation({
-    mutationFn: (input: { issueType: string; taskId: string | null; reason: string | null }) =>
-      dismissPlanningIssue(cycleId, input.issueType, input.taskId, input.reason ?? undefined),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: qk.issueReport(cycleId) });
-    },
+    mutationFn: ({ issue, reason }: { issue: PlanningIssue; reason: string | null }) => dismissPlanningIssue(cycleId, issue.issue_type, issue.task_id, reason),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.issueReport(cycleId) }),
   });
-
-  const issues = report.data ?? [];
-
-  return (
-    <PanelShell label="Plan issues" title="计划问题" onClose={onClose}>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <p className="pb-3 text-caption text-secondary">不评分，只指出具体问题。</p>
-        {report.isPending ? (
-          <p className="text-caption text-hint">正在读取问题报告…</p>
-        ) : issues.length === 0 ? (
-          // 空报告只留一行轻提示，不用大空状态（问题入口是提示不是功能块）。
-          <p className="text-body text-hint">没有发现计划问题。</p>
-        ) : (
-          <ul className="flex flex-col">
-            {issues.map((issue) => (
-              <IssueRow
-                key={`${issue.issue_type}:${issue.task_id ?? ""}`}
-                issue={issue}
-                dismissPending={dismiss.isPending}
-                onDismiss={(reason) =>
-                  dismiss.mutate({ issueType: issue.issue_type, taskId: issue.task_id, reason })
-                }
-              />
-            ))}
-          </ul>
-        )}
-        {report.isError && (
-          <p className="text-caption text-danger">{errorText(report.error)}</p>
-        )}
-        {dismiss.isError && (
-          <p className="text-caption text-danger">{errorText(dismiss.error)}</p>
-        )}
+  const data = report.data;
+  const issues = data?.issues ?? [];
+  const completed = data?.ai_status === "completed";
+  const empty = data?.ai_status === "empty";
+  const busy = inspect.isPending;
+  const scope = data
+    ? `${t(`issue.${data.cycle_type}`, { defaultValue: t("issue.currentPlan") })}${data.starts_on ? ` · ${formatDate(data.starts_on)}` : ""}`
+    : t("issue.currentPlan");
+  return <PanelShell label={t("issue.planIssues")} title={t("issue.planIssues")} onClose={onClose}
+    headerDetails={<span className="rounded bg-subtle px-1.5 py-0.5 text-caption text-secondary">{t("issue.count", { count: issues.length })}</span>}>
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+      <div className="mb-4 border-b border-light pb-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0"><p className="truncate text-menu font-medium text-primary" title={data?.cycle_title}>{scope}</p>
+            <p className="mt-1 text-caption text-secondary">{data ? t("issue.taskSummary", { count: data.task_count }) : t("issue.reading")}</p></div>
+          <Button size="compact" variant="secondary" loading={busy} disabled={!ai.data || !data || empty || busy || report.isError}
+            title={!ai.data ? t("issue.checkModelTitle") : empty ? t("issue.emptyTitle") : t("issue.checkTasksTitle")}
+            onClick={() => inspect.mutate()}>{completed || data?.ai_status === "stale" ? t("issue.recheck") : t("issue.aiCheck")}</Button>
+        </div>
+        {busy ? <div className="mt-3"><ThinkingIndicator label={t("issue.checking", { count: data?.task_count ?? 0 })}/></div>
+          : <p role="status" className="mt-3 text-caption text-hint">{empty ? t("issue.noTasks") : completed ? <>{t("issue.checked", { count: data.checked_count })}{data.checked_at ? ` · ${formatDate(data.checked_at)}` : ""}{data.model ? ` · ${data.model}` : ""}</>
+            : data?.ai_status === "stale" ? t("issue.stale") : t("issue.ruleUpdated")}</p>}
+        {!ai.isPending && !ai.data && <p className="mt-2 text-caption text-secondary">{t("issue.configureModel")}{onOpenSettings && <button className="ml-1 rounded text-focus hover:underline" onClick={onOpenSettings}>{t("issue.openSettings")}</button>}</p>}
+        {!!data?.pending_count && <p className="mt-2 text-caption text-hint">{t("issue.pendingPreview", { count: data.pending_count })}</p>}
       </div>
-    </PanelShell>
-  );
+      {inspect.isError && <div role="alert" className="mb-3 rounded-lg border border-light bg-subtle px-3 py-2 text-caption text-secondary">
+        <p className="font-medium text-primary">{t("issue.failedTitle")}</p><p className="mt-1 break-words">{errorMessage(inspect.error)}</p><p className="mt-1">{t("issue.failedKeep")}</p>
+      </div>}
+      {report.isError ? <p role="alert" className="text-caption text-danger">{t("issue.loadFailed", { message: errorMessage(report.error) })}</p>
+        : report.isPending ? <p className="text-caption text-hint">{t("issue.reading")}</p>
+        : issues.length ? <ul className="space-y-3">{issues.map((issue) => <IssueRow key={`${issue.issue_type}:${issue.task_id ?? ""}`} issue={issue}
+          disabled={dismiss.isPending} onDismiss={(reason) => dismiss.mutate({issue, reason})}
+          onLocate={issue.task_id && onLocateTask ? () => onLocateTask(cycleId, issue.task_id!) : undefined}
+          onDiscuss={onDiscuss ? () => { const text = localizedIssueText(issue, t); onDiscuss(cycleId, t("issue.discussPrompt", { target: issue.task_title ? `「${issue.task_title}」` : t("issue.currentPlan"), title: text.title, detail: text.detail }), issue.task_id); } : undefined}/>)}</ul>
+        : !busy && !inspect.isError && <div className="py-4 text-menu text-secondary">{empty ? t("issue.emptyAdd") : completed ? (data?.ignored_count ? t("issue.emptyHandled") : t("issue.emptyResult")) : t("issue.noRuleIssues")}</div>}
+      {!!data?.ignored_count && <p className="mt-4 text-caption text-hint">{t("issue.ignored", { count: data.ignored_count })}</p>}
+      {dismiss.isError && <p role="alert" className="mt-3 text-caption text-danger">{t("issue.dismissFailed", { message: errorMessage(dismiss.error) })}</p>}
+    </div>
+  </PanelShell>;
 }
 
-/** 一条问题：类型 label + detail；忽略入口 hover / 聚焦时显现（8.1 就地提示）。 */
-function IssueRow({
-  issue,
-  dismissPending,
-  onDismiss,
-}: {
-  issue: PlanningIssue;
-  dismissPending: boolean;
-  onDismiss: (reason: string | null) => void;
+function IssueRow({issue,disabled,onDismiss,onLocate,onDiscuss}:{
+  issue:PlanningIssueReport["issues"][number]; disabled:boolean; onDismiss:(reason:string|null)=>void; onLocate?:()=>void; onDiscuss?:()=>void;
 }) {
-  const anchorRef = useRef<HTMLButtonElement>(null);
-  const [reasonOpen, setReasonOpen] = useState(false);
-
-  return (
-    <li className="group flex items-start gap-3 border-b border-light py-2.5">
-      <div className="min-w-0 flex-1">
-        <p className="text-block-title font-semibold text-primary">
-          {ISSUE_TYPE_LABELS[issue.issue_type] ?? issue.issue_type}
-        </p>
-        <p className="mt-0.5 text-menu text-secondary">{issue.detail}</p>
-      </div>
-      <div className="shrink-0 opacity-0 transition-opacity duration-100 group-focus-within:opacity-100 group-hover:opacity-100">
-        <button
-          ref={anchorRef}
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={reasonOpen}
-          disabled={dismissPending}
-          onClick={() => setReasonOpen(true)}
-          className={cn(
-            "h-7 rounded-sm border border-control px-2 text-caption text-primary",
-            "transition-colors duration-100 hover:bg-hover",
-            "disabled:cursor-not-allowed disabled:opacity-45",
-          )}
-        >
-          忽略
-        </button>
-        <Popover
-          open={reasonOpen}
-          onClose={() => setReasonOpen(false)}
-          anchorRef={anchorRef}
-          label="忽略原因"
-        >
-          {DISMISS_REASONS.map(({ label, reason }) => (
-            <PopoverItem
-              key={label}
-              onSelect={() => {
-                setReasonOpen(false);
-                onDismiss(reason);
-              }}
-            >
-              {label}
-            </PopoverItem>
-          ))}
-        </Popover>
-      </div>
-    </li>
-  );
+  const { t } = useTranslation("ai");
+  const anchor = useRef<HTMLButtonElement>(null);
+  const [open,setOpen] = useState(false);
+  const { title: localizedTitle, detail: localizedDetail } = localizedIssueText(issue, t);
+  return <li className="rounded-lg border border-light px-3 py-3">
+    <div className="mb-2 flex items-center gap-2 text-[11px] text-hint"><span className={issue.source === "ai" ? "text-focus" : "text-secondary"}>{issue.source === "ai" ? t("issue.aiSuggestion") : t("issue.ruleHint")}</span><span aria-hidden="true">·</span><span>{localizedTitle}</span></div>
+    <p className="break-words text-menu font-medium text-primary">{localizedTitle}</p>
+    {issue.task_title && <p className="mt-1 truncate text-caption text-hint" title={issue.task_title}>{issue.task_title}</p>}
+    <p className="mt-2 whitespace-pre-wrap break-words text-menu leading-relaxed text-secondary">{localizedDetail}</p>
+    <div className="mt-2 flex flex-wrap items-center gap-1">
+      {onLocate && <Button size="compact" variant="ghost" className="text-caption" onClick={onLocate}>{t("issue.locateTask")} <span aria-hidden="true">↗</span></Button>}
+      {onDiscuss && <Button size="compact" variant="ghost" className="text-caption" onClick={onDiscuss}>{t("issue.discuss")}</Button>}
+      <button ref={anchor} type="button" className="ml-auto rounded-md px-2 py-1.5 text-caption text-hint transition-colors hover:bg-hover hover:text-secondary"
+        disabled={disabled} aria-haspopup="menu" aria-expanded={open} onClick={()=>setOpen(true)}>{t("issue.dismiss")}</button>
+    </div>
+    <Popover open={open} onClose={()=>setOpen(false)} anchorRef={anchor} label={t("issue.dismissReason")}>
+      {REASONS.map(item=><PopoverItem key={item.labelKey} onSelect={()=>{setOpen(false);onDismiss(item.reason);}}>{t(item.labelKey)}</PopoverItem>)}
+    </Popover>
+  </li>;
 }
 
-function errorText(error: unknown): string {
-  return isAppError(error)
-    ? error.message
-    : error instanceof Error
-      ? error.message
-      : String(error);
+function localizedIssueText(
+  issue: PlanningIssueReport["issues"][number],
+  translate: (key: string, options?: Record<string, unknown>) => string,
+): { title: string; detail: string } {
+  const title = issue.source === "structure" && issue.message_key
+    ? translate(`backend:issue.${issue.issue_type}`, { defaultValue: issue.title })
+    : issue.title;
+  const params = issue.message_params ? { ...issue.message_params } : {};
+  if (Array.isArray(params.fields)) {
+    params.fields = params.fields.map((field) => translate(`backend:field.${field}`, { defaultValue: field })).join(translate("common.listSeparator"));
+  }
+  const detail = issue.message_key
+    ? translate(`backend:${issue.message_key}`, { ...params, defaultValue: issue.detail })
+    : issue.detail;
+  return { title, detail };
 }

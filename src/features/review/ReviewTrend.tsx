@@ -12,9 +12,11 @@
 import type * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getReviewSummary, reviewQk } from "./api";
-import { formatFocusedTime, formatPercent, formatSnapshotAt } from "./format";
+import { formatPercent } from "./format";
+import { formatDate, formatDuration, useTranslation } from "../../lib/i18n";
 
 export function ReviewTrend(): React.JSX.Element {
+  const { t } = useTranslation("ai");
   const query = useQuery({
     queryKey: reviewQk.reviewSummary(),
     queryFn: getReviewSummary,
@@ -23,8 +25,8 @@ export function ReviewTrend(): React.JSX.Element {
 
   if (query.isPending) {
     return (
-      <section aria-label="Review trend" className="text-body text-secondary">
-        Loading trend…
+      <section aria-label={t("trend.label")} className="text-body text-secondary">
+        {t("trend.loading")}
       </section>
     );
   }
@@ -33,8 +35,8 @@ export function ReviewTrend(): React.JSX.Element {
 
   if (points.length === 0) {
     return (
-      <section aria-label="Review trend" className="text-body text-secondary">
-        No saved reviews yet. Review a cycle to start the trend.
+      <section aria-label={t("trend.label")} className="text-body text-secondary">
+        {t("trend.empty")}
       </section>
     );
   }
@@ -43,20 +45,20 @@ export function ReviewTrend(): React.JSX.Element {
   const single = points.length === 1 ? points[0] : undefined;
   if (single) {
     return (
-      <section aria-label="Review trend" className="flex flex-col gap-2">
-        <h3 className="text-block-title font-semibold text-primary">Review trend</h3>
+      <section aria-label={t("trend.label")} className="flex flex-col gap-2">
+        <h3 className="text-block-title font-semibold text-primary">{t("trend.label")}</h3>
         <SinglePoint point={single} />
         <p className="text-menu text-secondary">
-          Only one review so far — trends need more than one review to show.
+          {t("trend.onlyOne")}
         </p>
       </section>
     );
   }
 
   return (
-    <section aria-label="Review trend" className="flex flex-col gap-2">
-      <h3 className="text-block-title font-semibold text-primary">Review trend</h3>
-      <p className="text-caption text-hint">Oldest first, from saved snapshots.</p>
+    <section aria-label={t("trend.label")} className="flex flex-col gap-2">
+      <h3 className="text-block-title font-semibold text-primary">{t("trend.label")}</h3>
+      <p className="text-caption text-hint">{t("trend.oldestFirst")}</p>
       <ul className="flex flex-col gap-2">
         {points.map((point) => (
           <li key={point.cycle_id} className="flex flex-col gap-1">
@@ -64,9 +66,9 @@ export function ReviewTrend(): React.JSX.Element {
               <span className="truncate text-body text-primary">{point.cycle_title}</span>
               <span className="shrink-0 text-menu text-secondary">
                 {point.completion_rate == null
-                  ? "No content"
+                  ? t("trend.noContent")
                   : formatPercent(point.completion_rate)}{" "}
-                · {formatFocusedTime(point.focused_time_ms)}
+                · {formatDuration(point.focused_time_ms)}
               </span>
             </div>
             <div
@@ -81,8 +83,8 @@ export function ReviewTrend(): React.JSX.Element {
               />
             </div>
             <span className="text-caption text-hint">
-              {formatSnapshotAt(point.snapshot_at)}
-              {point.is_final ? "" : " · interim"}
+              {formatDate(point.snapshot_at, { dateStyle: "medium", timeStyle: "short" })}
+              {point.is_final ? "" : ` · ${t("trend.interim")}`}
             </span>
           </li>
         ))}
@@ -96,21 +98,22 @@ function SinglePoint({
 }: {
   point: { cycle_title: string; completion_rate: number | null; focused_time_ms: number };
 }): React.JSX.Element {
+  const { t } = useTranslation("ai");
   return (
     <dl className="rounded-sm border border-light px-3 py-2 text-body text-primary">
       <div className="flex justify-between gap-3 py-0.5">
-        <dt className="text-secondary">Cycle</dt>
+        <dt className="text-secondary">{t("trend.cycle")}</dt>
         <dd>{point.cycle_title}</dd>
       </div>
       <div className="flex justify-between gap-3 py-0.5">
-        <dt className="text-secondary">Completion</dt>
+        <dt className="text-secondary">{t("trend.completion")}</dt>
         <dd>
-          {point.completion_rate == null ? "No content" : formatPercent(point.completion_rate)}
+          {point.completion_rate == null ? t("trend.noContent") : formatPercent(point.completion_rate)}
         </dd>
       </div>
       <div className="flex justify-between gap-3 py-0.5">
-        <dt className="text-secondary">Focused time</dt>
-        <dd>{formatFocusedTime(point.focused_time_ms)}</dd>
+        <dt className="text-secondary">{t("review.focusedTime")}</dt>
+        <dd>{formatDuration(point.focused_time_ms)}</dd>
       </div>
     </dl>
   );

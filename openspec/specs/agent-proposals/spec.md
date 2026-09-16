@@ -1,6 +1,6 @@
 ## Purpose
 
-定义 AI 写入人类计划的唯一合法路径。Agent 从不直接落库修改用户的计划，而是产生「待确认的改动」（proposal）并保留原始值快照；用户显式 Keep 之后改动才成为正式数据，Revert 则完全还原。
+定义 AI 写入人类计划的唯一合法路径。Agent 从不直接落库修改用户的计划，而是产生「待确认的改动」（proposal）并保留原始值快照；用户在 Coach 确认之后改动才成为正式数据，拒绝则完全还原。
 
 ## Requirements
 
@@ -42,7 +42,7 @@
 
 #### Scenario: agent 创建一个目标
 - **WHEN** agent 调用 `create_goal`
-- **THEN** 目标以 `agent_proposal='upsert'` 插入，界面显示为待确认态，底栏出现 "You have 1 pending edit by agent"
+- **THEN** 目标以 `agent_proposal='upsert'` 插入，界面显示为待确认态，主体原位显示并锁定该任务，Coach 显示唯一确认卡
 
 #### Scenario: agent 删除一个目标
 - **WHEN** agent 调用 `delete_goal`
@@ -68,25 +68,26 @@
 - **WHEN** 预览所属周期被删除
 - **THEN** 相关快照级联清理
 
-### Requirement: 单条与批量确认
+### Requirement: 主体预览与 Coach 单一确认入口
 
-系统 SHALL 支持对单条预览做 Keep / Revert，也 SHALL 支持一次性 Keep all / Undo all。
+编辑投影 SHALL 直接显示待确认的标题、完成状态与内容，保留任务 ID、顺序和层级。受影响任务 SHALL 以轻量浅底和锁定标识区分；删除线只作用于待删除任务标题。主体 MUST NOT 出现 Keep / Revert 或第二套确认控件。Coach 关闭时，工具栏计数只负责重新打开 Coach。
 
-#### Scenario: 保留单条
-- **WHEN** 用户点击某条待确认编辑的 Keep
-- **THEN** 该任务转为正式数据，其预览快照被清除，底栏计数减一
+#### Scenario: 尚未确认
+- **WHEN** Coach 产生任务预览
+- **THEN** Workspace 和 Calendar 同步呈现预览，不把它作为已提交的统计
+- **AND** 受影响项禁止手动改名、勾选、删除、移动、归属、颜色与重排；后端服务同样拒绝这些写入
+- **AND** 删除会级联影响的关联事务也显示待删除并锁定，Coach 列出影响范围
+- **AND** 不受影响的任务仍可正常编辑
 
-#### Scenario: 还原单条
-- **WHEN** 用户点击 Revert
-- **THEN** 任务被还原为快照状态（原本不存在的则删除），快照清除
+#### Scenario: 确认修改
+- **WHEN** 用户在 Coach 点击确认
+- **THEN** 当前预览成为正式结果，快照与预览标记清除，任务解锁；确认删除则物理删除
+- **AND** 对应原工具记录由“待确认”变为“已确认”，聊天新增具体完成消息
 
-#### Scenario: 批量确认
-- **WHEN** 用户点击 Keep all
-- **THEN** 当前周期所有预览任务同时转为正式数据
-
-#### Scenario: 全部还原
-- **WHEN** 用户点击 Undo all
-- **THEN** 当前周期所有预览改动被还原，计划回到 agent 介入之前的状态
+#### Scenario: 拒绝修改
+- **WHEN** 用户在 Coach 拒绝
+- **THEN** 原标题、完成态、子步骤、位置、关系、颜色和详细内容恢复，原本不存在的任务移除
+- **AND** 主体去掉预览标记并解锁；原工具记录变为“已放弃”，聊天保存实际处理结果
 
 ### Requirement: 新建目标复用空行
 
@@ -100,14 +101,31 @@
 - **WHEN** 列表中不存在空任务行
 - **THEN** 新目标追加到列表末尾
 
-### Requirement: 待确认计数可见
+### Requirement: 待确认入口可达
 
-只要当前周期存在未处理的预览改动，界面 SHALL 持续显示待确认计数与 Keep / Revert 操作入口。
+Coach 关闭且存在未处理改动时，工具栏 SHALL 显示合计数量与打开 Coach 的入口。Coach 打开时不重复显示确认框，全部处理完后入口消失。
 
-#### Scenario: 存在待确认改动
-- **WHEN** 预览计数大于 0
-- **THEN** 底栏显示 "You have N pending edit(s) by agent" 及操作按钮
+#### Scenario: 工具栏汇总待确认改动
+- **WHEN** Coach 关闭且任一规划周期存在任务预览或 `agent_actions` 待确认记录
+- **THEN** 工具栏显示所有周期的待确认总数，并提供打开 Coach 的入口
+- **AND** 所有任务预览与操作记录处理完后，工具栏入口消失
 
-#### Scenario: 全部处理完毕
-- **WHEN** 计数回到 0
-- **THEN** 底栏消失
+### Requirement: 非任务行操作复用 Coach 确认区域
+周期、专注排期、归属、提醒、重复和设置变更 SHALL 以封闭枚举参数暂存到 agent_actions。模型仅可提出操作，Coach 确认区域提供确认 / 放弃入口。用户确认时 SHALL 复用 GUI 业务服务的校验与写入；模型不可调用该确认入口。
+
+#### Scenario: 一次移动事务
+- **WHEN** 用户确认移动事务
+- **THEN** 原任务 ID 和同周期子任务一起移动，跨周期关联事务保持原位置
+- **AND** 不生成需要分开确认的复制与删除两个提案
+
+#### Scenario: 操作期间应用意外退出
+- **WHEN** 记录停在 applying 状态
+- **THEN** 不自动重试以免重复写入；用户核对实际结果后可关闭记录
+
+### Requirement: 任务确认及其回执原子保存
+Coach 确认或放弃任务预览时，任务状态和会话回执 SHALL 在同一数据库事务内完成。写入失败 MUST NOT 留下成功回执。
+
+#### Scenario: 确认任务并保存回执
+- **WHEN** 用户在 Coach 确认或放弃一个任务预览
+- **THEN** 任务的提交或还原与 `approval_decision` 应用侧回执在同一数据库事务中完成
+- **AND** 若任一步骤失败，事务回滚且会话中不留下成功回执

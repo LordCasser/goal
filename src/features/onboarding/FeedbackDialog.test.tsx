@@ -5,6 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { applyLocale, errorMessage } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 const { writeTextMock } = vi.hoisted(() => ({ writeTextMock: vi.fn() }));
@@ -20,6 +21,7 @@ function renderDialog(onClose = vi.fn()) {
 }
 
 beforeEach(() => {
+  applyLocale("en");
   invokeMock.mockReset();
   invokeMock.mockResolvedValue(null);
   writeTextMock.mockReset();
@@ -88,7 +90,7 @@ describe("FeedbackDialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
     expect((await screen.findByRole("alert")).textContent).toBe(
-      "Couldn't send feedback. Please try again.",
+      errorMessage({ code: "db_error", message: "disk full" }),
     );
     expect(
       (screen.getByLabelText("Feedback message") as HTMLTextAreaElement).value,

@@ -42,10 +42,12 @@ impl RealProvider {
         max_tokens: Option<u64>,
     ) -> SamplingRequest {
         SamplingRequest {
+            connection: self.resolved.config.connection.clone(),
             base_url: self.resolved.config.base_url.clone(),
             api_format: sampling_api_format(self.resolved.config.api_format),
             model: self.resolved.model.model_id.clone(),
             api_key: self.resolved.api_key.clone(),
+            extra_headers: self.resolved.extra_headers.clone(),
             messages,
             tools: tool_specs,
             max_tokens: max_tokens.or(Some(self.resolved.model.max_output_tokens)),
@@ -115,10 +117,12 @@ fn build_agent_request(
         content: req.user_message,
     });
     Ok(SamplingRequest {
+        connection: resolved.config.connection.clone(),
         base_url: resolved.config.base_url.clone(),
         api_format: sampling_api_format(resolved.config.api_format),
         model: resolved.model.model_id.clone(),
         api_key: resolved.api_key.clone(),
+        extra_headers: resolved.extra_headers.clone(),
         messages,
         tools: tool_specs,
         max_tokens: req.max_tokens.or(Some(resolved.model.max_output_tokens)),
@@ -320,6 +324,7 @@ mod tests {
         };
         ResolvedProvider {
             config: crate::providers::config::ProviderConfig {
+                connection: Default::default(),
                 id: "p1".into(),
                 name: "Test".into(),
                 base_url: "http://127.0.0.1:9/v1".into(),
@@ -328,9 +333,11 @@ mod tests {
                 models: vec![model.clone()],
                 created_at: 0,
                 archived: false,
+                connection_verified_at: None,
             },
             model,
             api_key: None,
+            extra_headers: vec![],
             tools_supported,
         }
     }
@@ -546,4 +553,15 @@ mod tests {
         assert!(sampling[0].content.starts_with("Rate clarity."));
         assert!(sampling[0].content.ends_with("Goal: be fit"));
     }
+    #[test]
+    fn agent_and_json_requests_preserve_provider_connection_mode() {
+        for connection in [crate::network::ConnectionSettings::Direct,
+            crate::network::ConnectionSettings::Proxy { url: "http://localhost:7890".into() }] {
+            let mut provider = resolved(true);
+            provider.config.connection = connection.clone();
+            assert_eq!(build_agent_request(&provider, request(vec![])).unwrap().connection, connection);
+            assert_eq!(RealProvider::new(provider).base_request(vec![], vec![], None).connection, connection);
+        }
+    }
+
 }

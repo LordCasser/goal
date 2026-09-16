@@ -49,15 +49,15 @@ pub fn move_day_cycle(
 }
 
 /// Places a focus block on the timeline (epoch-ms start; duration optional
-/// and kept when omitted).
+/// and kept when omitted). A null start moves it back to Unscheduled.
 #[tauri::command]
 pub fn set_session_schedule(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
     session_id: String,
-    starts_at: i64,
+    starts_at: Option<i64>,
     duration_ms: Option<i64>,
-) -> AppResult<SessionSchedule> {
+) -> AppResult<Option<SessionSchedule>> {
     let mutation = calendar::set_session_schedule(&db, &session_id, starts_at, duration_ms)?;
     emit_mutation(&app, &mutation);
     Ok(mutation.value)

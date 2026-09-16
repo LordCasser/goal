@@ -1,129 +1,109 @@
-/**
- * IssuePanel 行为契约（openspec planning-issues「问题报告」「忽略的持久化
- * 与作用域」）：列表按类型 label + detail 渲染、忽略调用区分任务级/周期级
- * 作用域并携带所选原因、空报告只留一行轻提示。invoke 按 src/lib/ipc.test.ts
- * 的方式 mock——组件经由 lib/ipc 走真实包装，同时钉住线上的参数键。
- */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-
+import type { ComponentProps } from "react";
+import { applyLocale, formatDate } from "../../lib/i18n";
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
-
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
-
-import { commands, type PlanningIssue } from "../../lib/ipc";
+import { commands, type PlanningIssueReport } from "../../lib/ipc";
 import { IssuePanel } from "./IssuePanel";
 
-function issueFixture(over: Partial<PlanningIssue> = {}): PlanningIssue {
-  return {
-    issue_type: "too_many_goals",
-    cycle_id: "c1",
-    task_id: null,
-    title: "目标过多",
-    detail: "这个周期塞了 9 个目标。",
-    ...over,
-  };
+const finding: PlanningIssueReport["issues"][number] = {
+  issue_type: "not_sure_what_to_do_next", cycle_id: "c1", task_id: "t1",
+  title: "明确验证方式", detail: "只有项目名，请补充一个可以验证的结果。", task_title: "Prototype", source: "ai",
+};
+function report(over: Partial<PlanningIssueReport> = {}): PlanningIssueReport {
+  return { cycle_id: "c1", cycle_title: "Tuesday", cycle_type: "day", starts_on: "2026-09-15", task_count: 2,
+    pending_count: 0, ignored_count: 0, issues: [], ai_status: "not_checked", checked_at: null, checked_count: 0, model: null, ...over };
 }
-
-/** 按命令名分发固定返回值；未覆盖的命令一律返回 null。 */
-function mockBackend(issues: PlanningIssue[] = []): void {
-  invokeMock.mockImplementation((cmd: string) => {
-    switch (cmd) {
-      case commands.getPlanningIssueReport:
-        return Promise.resolve(issues);
-      default:
-        return Promise.resolve(null);
-    }
-  });
+function mockBackend(data = report(), available = true) {
+  invokeMock.mockImplementation((cmd: string) => Promise.resolve(cmd === commands.getPlanningIssueReport ? data : cmd === commands.getAiAvailability ? available : null));
 }
-
-function renderPanel(): void {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  render(
-    <QueryClientProvider client={client}>
-      <IssuePanel cycleId="c1" onClose={() => {}} />
-    </QueryClientProvider>,
-  );
+function mount(props: Partial<ComponentProps<typeof IssuePanel>> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(<QueryClientProvider client={client}><IssuePanel cycleId="c1" onClose={() => {}} {...props} /></QueryClientProvider>);
 }
+beforeEach(() => { applyLocale("zh-CN"); invokeMock.mockReset(); });
 
-/** 在某条问题行内点开忽略菜单并选择一项。 */
-async function dismissIssue(typeLabel: string, reasonLabel: string): Promise<void> {
-  const label = await screen.findByText(typeLabel);
-  const row = label.closest("li");
-  expect(row).not.toBeNull();
-  fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "忽略" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: reasonLabel }));
-}
-
-beforeEach(() => {
-  invokeMock.mockReset();
-});
-
-describe("IssuePanel", () => {
-  it("renders each issue with its Chinese type label and detail", async () => {
-    mockBackend([
-      issueFixture({ issue_type: "too_many_goals", detail: "这个周期塞了 9 个目标。" }),
-      issueFixture({
-        issue_type: "not_sure_what_to_do_next",
-        task_id: "t1",
-        title: "学英语",
-        detail: "「学英语」没有可执行的下一步。",
-      }),
-    ]);
-    renderPanel();
-
-    expect(await screen.findByText("目标过多")).toBeDefined();
-    expect(screen.getByText("这个周期塞了 9 个目标。")).toBeDefined();
-    expect(screen.getByText("不清楚下一步")).toBeDefined();
-    expect(screen.getByText("「学英语」没有可执行的下一步。")).toBeDefined();
-    // 顶部说明行：诊断而非评分（spec: 诊断而非评分）。
-    expect(screen.getByText("不评分，只指出具体问题。")).toBeDefined();
+describe("plan diagnostics", () => {
+  it("distinguishes an unchecked plan from a successful empty AI report", async () => {
+    mockBackend(); mount();
+    expect(await screen.findByText(`日计划 · ${formatDate("2026-09-15")}`)).toBeTruthy();
+    expect(screen.getByText("规则提示已更新，AI 尚未检查。")).toBeTruthy();
+    expect(screen.queryByText("本次检查未发现需要处理的问题。")).toBeNull();
+    expect(invokeMock).toHaveBeenCalledWith(commands.getPlanningIssueReport, { cycleId: "c1", refresh: false });
   });
-
-  it("dismisses a task-level issue with its task_id and no reason", async () => {
-    mockBackend([
-      issueFixture({
-        issue_type: "not_sure_what_to_do_next",
-        task_id: "t1",
-        detail: "「学英语」没有可执行的下一步。",
-      }),
-    ]);
-    renderPanel();
-
-    await dismissIssue("不清楚下一步", "直接忽略");
-    await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith(commands.dismissPlanningIssue, {
-        cycle_id: "c1",
-        issue_type: "not_sure_what_to_do_next",
-        task_id: "t1",
-        reason: null,
-      }),
-    );
+  it("requires verified AI and offers settings without hiding structural findings", async () => {
+    const settings = vi.fn();
+    mockBackend(report({ issues: [{ ...finding, source: "structure" }] }), false); mount({ onOpenSettings: settings });
+    expect(await screen.findByText("规则提示")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "AI 检查" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "打开设置" })); expect(settings).toHaveBeenCalledOnce();
   });
-
-  it("dismisses a cycle-level issue without task_id, carrying the chosen reason", async () => {
-    mockBackend([issueFixture({ issue_type: "too_much_work", task_id: null })]);
-    renderPanel();
-
-    await dismissIssue("工作量过大", "Planning felt like too much work");
-    await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith(commands.dismissPlanningIssue, {
-        cycle_id: "c1",
-        issue_type: "too_much_work",
-        task_id: null,
-        reason: "Planning felt like too much work",
-      }),
-    );
+  it("shows real pending feedback then the model, checked count and completed result", async () => {
+    let data = report(); let resolve!: (value: PlanningIssueReport) => void;
+    invokeMock.mockImplementation((cmd: string, args: { refresh?: boolean }) => cmd === commands.getPlanningIssueReport
+      ? args.refresh ? new Promise<PlanningIssueReport>(r => { resolve = r; }) : Promise.resolve(data)
+      : Promise.resolve(cmd === commands.getAiAvailability));
+    mount(); await screen.findByText(`日计划 · ${formatDate("2026-09-15")}`);
+    fireEvent.click(screen.getByRole("button", { name: "AI 检查" }));
+    expect(await screen.findByText("正在检查 2 项待办…")).toBeTruthy();
+    expect(screen.queryByText("本次检查未发现需要处理的问题。")).toBeNull();
+    data = report({ ai_status: "completed", checked_at: 1789459200000, checked_count: 2, model: "audit-model" });
+    await act(async () => resolve(data));
+    expect(await screen.findByText(/AI 已检查 2 项.*audit-model/)).toBeTruthy();
+    expect(screen.getByText("本次检查未发现需要处理的问题。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重新检查" })).toBeTruthy();
   });
-
-  it("shows a single light line when no issue was found", async () => {
-    mockBackend([]);
-    renderPanel();
-
-    expect(await screen.findByText("没有发现计划问题。")).toBeDefined();
-    expect(screen.queryByText("目标过多")).toBeNull();
+  it("never turns a provider failure into all-clear and retains earlier findings", async () => {
+    const data = report({ issues: [finding] });
+    invokeMock.mockImplementation((cmd: string, args: { refresh?: boolean }) => cmd === commands.getPlanningIssueReport
+      ? args.refresh ? Promise.reject(new Error("Network unavailable")) : Promise.resolve(data)
+      : Promise.resolve(true));
+    mount(); await screen.findAllByText(finding.title);
+    fireEvent.click(screen.getByRole("button", { name: "AI 检查" }));
+    expect(await screen.findByText("AI 检查未完成")).toBeTruthy();
+    expect(screen.getByText(/Network unavailable/)).toBeTruthy(); expect(screen.getAllByText(finding.title)[0]).toBeTruthy();
+    expect(screen.queryByText("本次检查未发现需要处理的问题。")).toBeNull();
+  });
+  it("makes stale findings and pending 助理 previews explicit", async () => {
+    mockBackend(report({ ai_status: "stale", pending_count: 1 })); mount();
+    expect(await screen.findByText("计划或模型已变化，请重新运行 AI 检查。")).toBeTruthy();
+    expect(screen.getByText(/1 项助理预览尚未确认/)).toBeTruthy();
+  });
+  it("rereads the locale-specific report without starting an AI check", async () => {
+    mockBackend(report({ issues: [finding] })); mount();
+    await screen.findAllByText(finding.title);
+    invokeMock.mockClear();
+    applyLocale("en");
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith(commands.getPlanningIssueReport, { cycleId: "c1", refresh: false }));
+    expect(invokeMock.mock.calls.some(([command, args]) => command === commands.getPlanningIssueReport && args?.refresh === true)).toBe(false);
+  });
+  it("locates the exact task and carries the diagnostic into a 助理 draft without sending", async () => {
+    const locate = vi.fn(), discuss = vi.fn();
+    mockBackend(report({ issues: [finding] })); mount({ onLocateTask: locate, onDiscuss: discuss });
+    fireEvent.click(await screen.findByRole("button", { name: /定位任务/ }));
+    expect(locate).toHaveBeenCalledWith("c1", "t1");
+    fireEvent.click(screen.getByRole("button", { name: "与助理讨论" }));
+    expect(discuss).toHaveBeenCalledWith("c1", expect.stringContaining("Prototype"), "t1");
+    expect(discuss.mock.calls[0]![1]).toContain(finding.detail);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === commands.sendAgentMessage)).toBe(false);
+  });
+  it.each([
+    ["t1", "不适用于我的情况", null],
+    [null, "规划过程太费力", "Planning felt like too much work"],
+  ])("keeps dismissal scope %s and reason", async (taskId, label, reason) => {
+    mockBackend(report({ issues: [{ ...finding, task_id: taskId }] })); mount();
+    const row = (await screen.findAllByText(finding.title))[0]!.closest("li")!;
+    fireEvent.click(within(row).getByRole("button", { name: "忽略" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: label! }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith(commands.dismissPlanningIssue, {
+      cycleId: "c1", issueType: finding.issue_type, taskId, reason,
+    }));
+  });
+  it("an empty plan cannot run an unnecessary check", async () => {
+    mockBackend(report({ ai_status: "empty", task_count: 0 })); mount();
+    expect(await screen.findByText("当前没有待检查的任务。")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "AI 检查" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

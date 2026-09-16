@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgentPanel } from "./features/agent/AgentPanel";
+import { AI_TURN_MUTATION_KEY } from "./features/agent/PlanWithAI";
 import { ExitPollDialog, type ExitPollResolution } from "./features/onboarding/ExitPollDialog";
 import { markExitPollListenerReady } from "./features/onboarding/api";
 import CalendarView from "./features/calendar/CalendarView";
@@ -8,11 +9,14 @@ import { MissedSummary } from "./features/reminders/MissedSummary";
 import { IssuePanel } from "./features/agent/IssuePanel";
 import { LaterPanel } from "./features/later/LaterPanel";
 import { PlannerWorkspace } from "./features/planner/PlannerWorkspace";
-import { ProposalsBar } from "./features/proposals/ProposalsBar";
+import { WindowBar } from "./features/desktop/WindowBar";
+import { matchesPrimaryShortcut } from "./lib/platform";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
-import { getPlannerState, getSettings, LATER_CYCLE_ID } from "./lib/ipc";
-import { initEventInvalidation, qk } from "./lib/events";
+import { getSettings, startPlanning, type AgentPageContext } from "./lib/ipc";
+import { completeAgentTurn, initEventInvalidation, invalidateAgentEffects, qk } from "./lib/events";
+import { PanelMotion } from "./ui/PanelMotion";
 import { applyTheme, isTheme } from "./lib/theme";
+import { applyLocale, isLocale } from "./lib/i18n";
 
 /**
  * Workspace shell: the unified window bar on top, the optional Later panel on
@@ -25,6 +29,8 @@ export default function App() {
   const queryClient = useQueryClient();
   const [laterOpen, setLaterOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [coachSeed, setCoachSeed] = useState<{prompt:string;taskId:string|null}|null>(null);
+  const [revealTask,setRevealTask] = useState<{cycleId:string;taskId:string;requestId:number}|null>(null);
   // Right-side context panel (design.md §3.1): the coach conversation or the
   // planning-issue report, both scoped to the cycle the workspace targets.
   const [rightPanel, setRightPanel] = useState<"agent" | "issues" | null>(null);
@@ -43,22 +49,51 @@ export default function App() {
   }, []);
 
   // Top-level view switch (calendar change §5.7): workspace or calendar grid.
-  const [view, setView] = useState<"workspace" | "calendar">(() =>
-    (localStorage.getItem("planner.preferred-view") as "workspace" | "calendar" | null) ?? "workspace",
-  );
+  const [view, setView] = useState<"workspace" | "calendar">(() => {
+    try { return localStorage.getItem("planner.preferred-view") === "calendar" ? "calendar" : "workspace"; }
+    catch { return "workspace"; }
+  });
+  const [visitedViews, setVisitedViews] = useState(() => ({
+    workspace: view === "workspace",
+    calendar: view === "calendar",
+  }));
   const switchView = (next: "workspace" | "calendar") => {
+    if (next === view) return;
+    setVisitedViews((visited) => ({ ...visited, [next]: true }));
     setView(next);
     try { localStorage.setItem("planner.preferred-view", next); } catch { /* storage optional */ }
   };
 
-  // The panel targets the plan the user is working in: the most recent day
-  // column, falling back to week, then long-term (never the Later container).
-  const { data: state } = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
-  const cycles = state?.cycles ?? [];
-  const days = cycles.filter((c) => c.type === "day");
-  const weeks = cycles.filter((c) => c.type === "week");
-  const months = cycles.filter((c) => c.type === "month" && c.id !== LATER_CYCLE_ID);
-  const activeCycleId = days.at(-1)?.id ?? weeks.at(-1)?.id ?? months.at(-1)?.id ?? null;
+  // The panel targets the current visible selection reported by the active
+  // planning surface; empty dates intentionally leave the target null.
+  const [workingCycleId, setWorkingCycleId] = useState<string | null>(null);
+  const selectActiveCycle = useCallback((id: string | null) => {
+    setWorkingCycleId(id);
+  }, []);
+  const [pageContext, setPageContext] = useState<AgentPageContext | null>(null);
+  const onPageContextChange = useCallback((context: AgentPageContext) => {
+    setPageContext(context);
+    setWorkingCycleId((current) => {
+      const visible = new Set([context.day_cycle_id, context.week_cycle_id, context.long_term_cycle_id].filter((id): id is string => id !== null));
+      return current !== null && visible.has(current) ? current : context.day_cycle_id;
+    });
+  }, []);
+  const activeCycleId = workingCycleId;
+  const planning = useMutation({
+    mutationKey: AI_TURN_MUTATION_KEY,
+    mutationFn: (input: { cycleId: string; pageContext: AgentPageContext | null }) => startPlanning(input.cycleId, input.pageContext),
+    onSuccess: (result) => completeAgentTurn(queryClient, result),
+    onSettled: (_data, _error) => {
+      invalidateAgentEffects(queryClient);
+    },
+  });
+  const planWithAI = (id: string) => {
+    if (planning.isPending || queryClient.isMutating({ mutationKey: qk.agentDecision() }) > 0) return;
+    selectActiveCycle(id);
+    setCoachSeed(null);
+    setRightPanel("agent");
+    planning.mutate({ cycleId: id, pageContext });
+  };
 
   // Backend events → react-query invalidation. The unlisten cleanup is async
   // because the listeners themselves are registered asynchronously.
@@ -85,12 +120,15 @@ export default function App() {
     if (isTheme(theme)) applyTheme(theme);
   }, [settings?.theme]);
 
-  // ⌘⇧L toggles the Do Later drawer (spec: planner-workspace, 键盘优先).
+  useEffect(() => {
+    if (isLocale(settings?.locale)) applyLocale(settings.locale);
+  }, [settings?.locale]);
+
+  // The platform primary modifier toggles Later, outside modal interactions.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const isLaterShortcut =
-        (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "l";
-      if (isLaterShortcut) {
+      if (matchesPrimaryShortcut(event, "L", true)
+        && !document.querySelector('[role="dialog"][aria-modal="true"]')) {
         event.preventDefault();
         setLaterOpen((open) => !open);
       }
@@ -102,39 +140,49 @@ export default function App() {
   return (
     <div className="flex h-full flex-col bg-canvas">
       <WindowBar
+        hasCycle={activeCycleId !== null}
         laterActive={laterOpen}
         agentActive={rightPanel === "agent"}
         issuesActive={rightPanel === "issues"}
         onToggleLater={() => setLaterOpen((open) => !open)}
-        onToggleAgent={() => setRightPanel((p) => (p === "agent" ? null : "agent"))}
+        onReviewChanges={(id) => { setCoachSeed(null); selectActiveCycle(id); setRightPanel("agent"); }}
+        onToggleAgent={() => { setCoachSeed(null); setRightPanel((p) => (p === "agent" ? null : "agent")); }}
         onToggleIssues={() => setRightPanel((p) => (p === "issues" ? null : "issues"))}
         view={view}
         onSwitchView={switchView}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <div className="flex min-h-0 flex-1">
-        {laterOpen && <LaterPanel onClose={() => setLaterOpen(false)} />}
-        <main className="flex min-w-0 flex-1 flex-col">
-          {view === "calendar" ? (
-            <div className="min-h-0 flex-1">
-              <CalendarView />
-            </div>
-          ) : (
-            <>
+        <PanelMotion open={laterOpen} side="left"><LaterPanel onClose={() => setLaterOpen(false)} /></PanelMotion>
+        <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          {/* Retain visited pages so a round trip preserves navigation and scroll.
+              The outgoing page becomes inert immediately, independent of motion. */}
+          <div id="view-workspace" role="tabpanel" aria-labelledby="tab-workspace"
+            className="view-page" data-view="workspace" data-active={view === "workspace"}
+            inert={view !== "workspace"} aria-hidden={view !== "workspace"}>
+            {visitedViews.workspace && <>
               <MissedSummary />
               <div className="min-h-0 flex-1">
-                <PlannerWorkspace />
+                <PlannerWorkspace revealTask={revealTask ?? undefined} active={view === "workspace"} onActiveCycleChange={selectActiveCycle} onPageContextChange={onPageContextChange} onReviewIssues={(id) => { selectActiveCycle(id); setRightPanel("issues"); }} onPlanWithAI={planWithAI} />
               </div>
-              <ProposalsBar />
-            </>
-          )}
+            </>}
+          </div>
+          <div id="view-calendar" role="tabpanel" aria-labelledby="tab-calendar"
+            className="view-page" data-view="calendar" data-active={view === "calendar"}
+            inert={view !== "calendar"} aria-hidden={view !== "calendar"}>
+            {visitedViews.calendar && <CalendarView active={view === "calendar"} onActiveCycleChange={selectActiveCycle} onPageContextChange={onPageContextChange} onReviewIssues={(id) => { selectActiveCycle(id); setRightPanel("issues"); }} onPlanWithAI={planWithAI} />}
+          </div>
         </main>
-        {rightPanel === "agent" && activeCycleId && (
-          <AgentPanel cycleId={activeCycleId} onClose={() => setRightPanel(null)} />
-        )}
-        {rightPanel === "issues" && activeCycleId && (
-          <IssuePanel cycleId={activeCycleId} onClose={() => setRightPanel(null)} />
-        )}
+        <PanelMotion open={rightPanel === "agent"} keepMounted>
+          <AgentPanel cycleId={activeCycleId} pageContext={pageContext} initialDraft={rightPanel === "agent" ? coachSeed?.prompt : undefined} focusedTaskId={rightPanel === "agent" ? coachSeed?.taskId : null} onClose={() => {setCoachSeed(null);setRightPanel(null);}}
+            externalPlanning={planning.isPending} planningError={planning.error} />
+        </PanelMotion>
+        <PanelMotion open={rightPanel === "issues" && activeCycleId !== null}>
+          {activeCycleId && <IssuePanel key={`issues:${activeCycleId}`} cycleId={activeCycleId} onClose={() => setRightPanel(null)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onLocateTask={(cycleId,taskId) => {switchView("workspace");selectActiveCycle(cycleId);setRevealTask({cycleId,taskId,requestId:Date.now()});}}
+            onDiscuss={(cycleId,prompt,taskId) => {selectActiveCycle(cycleId);setCoachSeed({prompt,taskId});setRightPanel("agent");}} />}
+        </PanelMotion>
       </div>
       <SettingsDialog
         open={settingsOpen}
@@ -151,134 +199,5 @@ export default function App() {
         }}
       />
     </div>
-  );
-}
-
-/**
- * Unified window bar (design.md §3.4): native traffic lights sit in the left
- * safe area, application entries follow it, the middle stays draggable. The
- * bar shares the workspace canvas color and one hairline bottom border.
- */
-function WindowBar({
-  laterActive,
-  agentActive,
-  issuesActive,
-  onToggleLater,
-  onToggleAgent,
-  onToggleIssues,
-  onOpenSettings,
-  view,
-  onSwitchView,
-}: {
-  laterActive: boolean;
-  agentActive: boolean;
-  issuesActive: boolean;
-  onToggleLater: () => void;
-  onToggleAgent: () => void;
-  onToggleIssues: () => void;
-  onOpenSettings: () => void;
-  view: "workspace" | "calendar";
-  onSwitchView: (view: "workspace" | "calendar") => void;
-}) {
-  const buttonBase =
-    "flex h-8 items-center gap-1.5 rounded-sm px-2 text-menu font-medium text-primary";
-  const active = "bg-focus-surface text-focus";
-  const hover = "hover:bg-hover";
-
-  return (
-    <header className="flex h-[var(--app-header-height)] shrink-0 items-center border-b border-light bg-canvas pr-4">
-      {/* macOS traffic lights overlay this reserved strip (design.md §3.4). */}
-      <div className="w-[104px] shrink-0" data-tauri-drag-region />
-      <button
-        type="button"
-        aria-pressed={laterActive}
-        title="Do Later (⌘⇧L)"
-        className={`${buttonBase} ${laterActive ? active : hover}`}
-        onClick={onToggleLater}
-      >
-        <ClockIcon />
-        Later
-      </button>
-      {/* The spacer keeps dragging and double-click zoom native to the window. */}
-      <div className="h-full min-w-4 flex-1" data-tauri-drag-region />
-      <button
-        type="button"
-        aria-pressed={agentActive}
-        title="Plan with AI"
-        className={`${buttonBase} ${agentActive ? active : hover}`}
-        onClick={onToggleAgent}
-      >
-        <CoachIcon />
-        Coach
-      </button>
-      <button
-        type="button"
-        aria-pressed={issuesActive}
-        title="Planning issues"
-        className={`${buttonBase} ${issuesActive ? active : hover}`}
-        onClick={onToggleIssues}
-      >
-        <FlagIcon />
-        Issues
-      </button>
-      <div className="mr-2 flex items-center rounded-sm border border-light" role="tablist" aria-label="View">
-        {(["workspace", "calendar"] as const).map((name) => (
-          <button
-            key={name}
-            type="button"
-            role="tab"
-            aria-selected={view === name}
-            className={`${buttonBase} ${view === name ? active : hover} capitalize`}
-            onClick={() => onSwitchView(name)}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        title="Settings"
-        className={`${buttonBase} ${hover}`}
-        onClick={onOpenSettings}
-      >
-        <GearIcon />
-        Settings
-      </button>
-    </header>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3.5 2" />
-    </svg>
-  );
-}
-
-function CoachIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 11.5a8.4 8.4 0 0 1-8.7 8.3 9 9 0 0 1-3.9-.9L3 20l1.2-4.1a8 8 0 0 1-1-3.9A8.4 8.4 0 0 1 12 3.7a8.4 8.4 0 0 1 9 7.8Z" />
-    </svg>
-  );
-}
-
-function FlagIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 21V4" />
-      <path d="M5 4h13l-2.5 4L18 12H5" />
-    </svg>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3.2" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03Z" />
-    </svg>
   );
 }

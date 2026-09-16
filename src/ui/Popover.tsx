@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from "react";
 import { cn } from "./cn";
+import { createPortal } from "react-dom";
 
 export type PopoverProps = {
   open: boolean;
@@ -16,6 +17,8 @@ export type PopoverProps = {
   anchorRef: RefObject<HTMLElement | null>;
   /** 菜单的可访问名称；锚点按钮自行携带 aria-haspopup/aria-expanded。 */
   label?: string;
+  /** Form editors are non-modal dialogs, not arrow-key menu navigation. */
+  role?: "menu" | "dialog";
   children?: ReactNode;
   className?: string;
 };
@@ -31,13 +34,14 @@ export type PopoverItemProps = Omit<
 /**
  * 轻量弹出菜单（design.md 9.2）：靠近触发点，Escape / 点击外部关闭，
  * 关闭后焦点回到锚点。方向键可在菜单项间移动。位置在打开时按锚点矩形
- * 计算一次；窗口滚动或缩放由调用方通过重挂载刷新。
+ * 挂到 body 避免列内滚动裁切；滚动、窗口及菜单内容变化时重新定位。
  */
 export function Popover({
   open,
   onClose,
   anchorRef,
   label,
+  role = "menu",
   className,
   children,
 }: PopoverProps) {
@@ -51,6 +55,7 @@ export function Popover({
     if (!open) return;
     const anchor = anchorRef.current;
     if (!anchor) return;
+    const update = () => {
     const rect = anchor.getBoundingClientRect();
     const panel = panelRef.current;
     const height = panel?.offsetHeight ?? 0;
@@ -67,19 +72,26 @@ export function Popover({
         Math.max(margin, window.innerWidth - width - margin),
       ),
     });
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    if (panelRef.current) observer?.observe(panelRef.current);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
   }, [open, anchorRef]);
 
   useEffect(() => {
     if (!open) return;
     const anchor = anchorRef.current;
-    const first = panelRef.current?.querySelector<HTMLElement>(
-      '[role="menuitem"]',
-    );
+    const first = panelRef.current?.querySelector<HTMLElement>(role === "menu"
+      ? '[role="menuitem"]:not([disabled])'
+      : 'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
     (first ?? panelRef.current)?.focus();
 
     // 捕获阶段处理 Escape：先于外层 Dialog 的冒泡监听，内层菜单优先关闭。
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.isComposing) return;
       e.preventDefault();
       e.stopPropagation();
       onCloseRef.current();
@@ -96,17 +108,19 @@ export function Popover({
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("mousedown", onPointerDown, true);
-      anchor?.focus();
+      anchor?.focus({ preventScroll: true });
     };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, role]);
 
   if (!open) return null;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (role !== "menu" || e.nativeEvent.isComposing) return;
+    if (e.target instanceof Element && e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const items = Array.from(
-      panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ??
+      panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ??
         [],
     );
     if (items.length === 0) return;
@@ -114,7 +128,7 @@ export function Popover({
       document.activeElement instanceof HTMLElement
         ? items.indexOf(document.activeElement)
         : -1;
-    const next =
+    const next = e.key === "Home" ? items[0] : e.key === "End" ? items.at(-1) :
       current < 0
         ? e.key === "ArrowDown"
           ? items[0]
@@ -126,21 +140,22 @@ export function Popover({
     next?.focus();
   };
 
-  return (
+  return createPortal(
     <div
       ref={panelRef}
-      role="menu"
+      role={role}
+      tabIndex={-1}
       aria-label={label}
       style={position}
       onKeyDown={onKeyDown}
       className={cn(
-        "fixed z-50 min-w-[160px] overflow-hidden rounded-sm border border-light bg-content py-1",
+        "fixed z-[100] min-w-[160px] max-w-[calc(100vw-8px)] max-h-[calc(100dvh-8px)] overflow-x-hidden overflow-y-auto rounded-lg border border-light bg-content py-1",
         "shadow-[0_8px_24px_rgba(0,0,0,0.12)] animate-pop-in",
         className,
       )}
     >
       {children}
-    </div>
+    </div>, document.body
   );
 }
 

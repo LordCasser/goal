@@ -11,8 +11,8 @@ describe("hint registry", () => {
   it("exposes stable ids with copy", () => {
     for (const hint of HINTS) {
       expect(hint.id).toMatch(/^[a-z0-9-]+$/);
-      expect(hint.title.length).toBeGreaterThan(0);
-      expect(hint.body.length).toBeGreaterThan(0);
+      expect(hint.titleKey.length).toBeGreaterThan(0);
+      expect(hint.bodyKey.length).toBeGreaterThan(0);
     }
   });
 

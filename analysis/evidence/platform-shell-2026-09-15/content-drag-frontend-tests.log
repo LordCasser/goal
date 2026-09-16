@@ -1,0 +1,82 @@
+
+> planner@0.1.0 test
+> vitest run
+
+
+ RUN  v3.2.7 /Users/lordcasser/workspace/projects/goal
+
+ ✓ src/features/reminders/ReminderSettingsSection.test.tsx (5 tests) 383ms
+ ✓ src/features/reminders/ReminderList.test.tsx (6 tests) 487ms
+stderr | src/features/onboarding/ExitPollDialog.test.tsx > ExitPollDialog > keeps the dialog open with the draft intact when the backend write fails
+An update to ExitPollDialog inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/onboarding/ExitPollDialog.test.tsx (5 tests) 551ms
+   ✓ ExitPollDialog > submits answers, records exit confirmation and reports submitted  332ms
+ ✓ src/features/review/ReviewPanel.test.tsx (7 tests) 635ms
+   ✓ ReviewPanel > continues a partially saved review and submits both answers  303ms
+ ✓ src/features/agent/IssuePanel.test.tsx (9 tests) 767ms
+ ✓ src/features/settings/SettingsDialog.test.tsx (7 tests) 809ms
+   ✓ SettingsDialog > applies and persists the gray theme on click  429ms
+ ✓ src/App.test.tsx (15 tests) 1033ms
+   ✓ workspace / calendar transitions > opens Coach for the exact month plan and starts it once  335ms
+ ✓ src/features/ai-settings/AiSettingsPage.test.tsx (11 tests) 1229ms
+ ✓ src/features/proposals/PlanApprovalCard.test.tsx (4 tests) 269ms
+ ✓ src/features/reminders/MissedSummary.test.tsx (4 tests) 230ms
+ ✓ src/features/onboarding/FeedbackDialog.test.tsx (4 tests) 325ms
+ ✓ src/features/later/LaterPanel.test.tsx (11 tests) 467ms
+ ✓ src/features/proposals/ActionApprovalCard.test.tsx (2 tests) 259ms
+ ✓ src/features/planner/PlannerWorkspace.test.tsx (5 tests) 407ms
+ ✓ src/features/calendar/CalendarContent.test.tsx (12 tests) 1708ms
+   ✓ calendar content uses the workspace tasks > completes a task directly in Week and locates the same task in the detail editor  428ms
+   ✓ calendar content uses the workspace tasks > week shows every task so busy days grow, while month keeps its summary  381ms
+ ✓ src/features/calendar/CalendarView.test.tsx (19 tests) 1843ms
+ ✓ src/features/reminders/ReminderPicker.test.tsx (4 tests) 242ms
+ ✓ src/features/onboarding/GettingStartedGuide.test.tsx (6 tests) 204ms
+ ✓ src/features/planner/ParentGoalPicker.test.tsx (4 tests) 494ms
+   ✓ parent goal selection > saves a selected goal and keeps the new relationship selected  375ms
+ ✓ src/features/agent/AgentPanel.test.tsx (21 tests) 2114ms
+   ✓ automatically clears expired history using the backend deadline  1008ms
+ ✓ src/ui/Popover.test.tsx (3 tests) 270ms
+ ✓ src/features/desktop/WindowBar.test.tsx (7 tests) 594ms
+   ✓ WindowBar platform shell > keeps the application groups and platform boundary for macos  386ms
+ ✓ src/features/agent/PlanWithAI.test.tsx (4 tests) 332ms
+ ✓ src/ui/Dialog.test.tsx (6 tests) 207ms
+ ✓ src/features/desktop/useDesktopWindow.test.tsx (5 tests) 263ms
+ ✓ src/features/agent/PanelShell.test.tsx (2 tests) 263ms
+ ✓ src/features/planner/DurationDialog.test.tsx (4 tests) 346ms
+ ✓ src/features/agent/ChatMarkdown.test.tsx (3 tests) 482ms
+ ✓ src/ui/EmptyState.test.tsx (2 tests) 315ms
+ ✓ src/features/proposals/ProposalsBar.test.tsx (2 tests) 358ms
+   ✓ aggregates pending tasks and settings into a navigation-only entry  356ms
+ ✓ src/ui/Button.test.tsx (3 tests) 283ms
+ ✓ src/features/planner/TaskList.test.tsx (18 tests) 1119ms
+ ✓ src/features/onboarding/HintCard.test.tsx (4 tests) 266ms
+ ✓ src/ui/Checkbox.test.tsx (3 tests) 239ms
+ ✓ scripts/desktop-build.test.mjs (5 tests) 39ms
+ ✓ src/features/planner/timeline.test.ts (12 tests) 13ms
+ ✓ src/features/review/ReviewTrend.test.tsx (4 tests) 143ms
+ ✓ scripts/desktop-config.test.mjs (7 tests) 6ms
+ ✓ src/features/review/useCycleReviewStatus.test.tsx (3 tests) 132ms
+ ✓ src/lib/ipc.test.ts (6 tests) 3ms
+ ✓ src/lib/events.test.ts (2 tests) 3ms
+ ✓ src/features/onboarding/hints.test.ts (5 tests) 3ms
+ ✓ src/features/agent/nextSteps.test.ts (8 tests) 13ms
+ ✓ src/features/calendar/calendar-model.test.ts (14 tests) 5ms
+ ✓ scripts/desktop-platform.test.mjs (12 tests) 5ms
+ ✓ src/lib/platform.test.ts (5 tests) 3ms
+ ✓ src/features/planner/relations.test.ts (5 tests) 6ms
+
+ Test Files  47 passed (47)
+      Tests  315 passed (315)
+   Start at  21:12:48
+   Duration  5.72s (transform 1.62s, setup 0ms, collect 9.30s, tests 20.17s, environment 21.19s, prepare 2.08s)
+

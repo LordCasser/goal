@@ -25,13 +25,26 @@ pub fn row_to_cycle(row: &rusqlite::Row<'_>) -> rusqlite::Result<Cycle> {
         ends_on: row.get("ends_on")?,
         calendar_key: row.get("calendar_key")?,
         repeat_id: row.get("repeat_id")?,
+        task_id: row.get("task_id")?,
+        progress_check: row
+            .get::<_, Option<String>>("progress_check")?
+            .map(|json| {
+                serde_json::from_str(&json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })
+            })
+            .transpose()?,
         created_at: row.get("created_at")?,
     })
 }
 
 const CYCLE_COLUMNS: &str = "id, title, type, parent_id, position, archived, started, finished, \
      started_at, finished_at, duration, focused_time, starts_on, ends_on, calendar_key, \
-     repeat_id, created_at";
+     repeat_id, task_id, progress_check, created_at";
 
 pub struct NewCycle {
     pub id: String,
@@ -45,14 +58,15 @@ pub struct NewCycle {
     pub calendar_key: Option<String>,
     /// Set on sessions generated from a repeat template.
     pub repeat_id: Option<String>,
+    pub task_id: Option<String>,
     pub created_at: i64,
 }
 
 pub fn insert(conn: &Connection, new: &NewCycle) -> AppResult<()> {
     conn.execute(
         "INSERT INTO cycles (id, title, type, parent_id, position, duration, starts_on, \
-         ends_on, calendar_key, repeat_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         ends_on, calendar_key, repeat_id, task_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             new.id,
             new.title,
@@ -64,6 +78,7 @@ pub fn insert(conn: &Connection, new: &NewCycle) -> AppResult<()> {
             new.ends_on,
             new.calendar_key,
             new.repeat_id,
+            new.task_id,
             new.created_at,
         ],
     )
@@ -147,6 +162,38 @@ pub fn list_sessions_by_day(conn: &Connection, day_cycle_id: &str) -> AppResult<
     Ok(rows)
 }
 
+/// Task time is a projection of focus records, never another mutable counter.
+pub fn focused_time_by_task(
+    conn: &Connection,
+    day_id: &str,
+) -> AppResult<std::collections::HashMap<String, i64>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT task_id, SUM(focused_time) FROM cycles
+         WHERE type = 'session' AND parent_id = ?1 AND task_id IS NOT NULL GROUP BY task_id",
+        )
+        .map_err(from_rusqlite)?;
+    let rows = statement
+        .query_map([day_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
+/// Moving an individual task retains focus history in its original day.
+pub fn unlink_task(conn: &Connection, task_id: &str) -> AppResult<Vec<String>> {
+    let mut statement = conn
+        .prepare("UPDATE cycles SET task_id = NULL WHERE task_id = ?1 RETURNING id")
+        .map_err(from_rusqlite)?;
+    let ids = statement
+        .query_map([task_id], |row| row.get(0))
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(from_rusqlite)?;
+    Ok(ids)
+}
+
 /// Ids of the cycle and all its descendants (the subtree a delete removes).
 pub fn subtree_ids(conn: &Connection, id: &str) -> AppResult<Vec<String>> {
     let mut stmt = conn
@@ -224,14 +271,14 @@ pub fn count_newer_same_type(conn: &Connection, cycle: &Cycle) -> AppResult<i64>
     .map_err(from_rusqlite)
 }
 
-/// The closest earlier dated sibling (same type, same parent) — "上一周期".
+/// The closest earlier date of the same type; week/day navigation is independent of goal containers.
 pub fn previous_dated_sibling(conn: &Connection, cycle: &Cycle) -> AppResult<Option<Cycle>> {
-    let parent = cycle.parent_id.as_deref().unwrap_or("");
+    let parent = cycle.parent_id.as_deref();
     let starts_on = cycle.starts_on.as_deref().unwrap_or("");
     conn.query_row(
         &format!(
             "SELECT {CYCLE_COLUMNS} FROM cycles \
-             WHERE type = ?1 AND parent_id = ?2 AND starts_on IS NOT NULL AND starts_on < ?3 \
+             WHERE type = ?1 AND (type IN ('week', 'day') OR parent_id IS ?2) AND archived = 0 AND starts_on IS NOT NULL AND starts_on < ?3 \
              ORDER BY starts_on DESC LIMIT 1"
         ),
         params![cycle.cycle_type.as_str(), parent, starts_on],
@@ -274,6 +321,22 @@ pub fn add_focused_time(conn: &Connection, id: &str, delta_ms: i64) -> AppResult
     conn.execute(
         "UPDATE cycles SET focused_time = focused_time + ?2 WHERE id = ?1",
         params![id, delta_ms],
+    )
+    .map_err(from_rusqlite)?;
+    conn.query_row(
+        "SELECT focused_time FROM cycles WHERE id = ?1",
+        params![id],
+        |r| r.get(0),
+    )
+    .map_err(from_rusqlite)
+}
+
+/// Removes historical focus time without allowing an inconsistent aggregate
+/// to become negative when old data is repaired or a session is deleted.
+pub fn subtract_focused_time(conn: &Connection, id: &str, delta_ms: i64) -> AppResult<i64> {
+    conn.execute(
+        "UPDATE cycles SET focused_time = MAX(0, focused_time - ?2) WHERE id = ?1",
+        params![id, delta_ms.max(0)],
     )
     .map_err(from_rusqlite)?;
     conn.query_row(
@@ -496,7 +559,7 @@ pub fn sum_scheduled_duration(conn: &Connection, day_cycle_id: &str) -> AppResul
 pub fn set_session_schedule(
     conn: &Connection,
     session_id: &str,
-    scheduled_start_at: i64,
+    scheduled_start_at: Option<i64>,
     duration: Option<i64>,
 ) -> AppResult<()> {
     conn.execute(
@@ -557,7 +620,12 @@ pub fn set_title(conn: &Connection, id: &str, title: &str) -> AppResult<()> {
 
 /// Re-parents a day cycle (and appends it at the end of the new parent's
 /// column) — used when a day takes over a date that lives in another week.
-pub fn reparent(conn: &Connection, id: &str, parent_id: &str, position: i64) -> AppResult<()> {
+pub fn reparent(
+    conn: &Connection,
+    id: &str,
+    parent_id: Option<&str>,
+    position: i64,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE cycles SET parent_id = ?2, position = ?3 WHERE id = ?1",
         params![id, parent_id, position],
@@ -619,4 +687,20 @@ pub fn move_tasks_between_cycles(
     )
     .map_err(from_rusqlite)?;
     Ok(moved as u64)
+}
+
+/// Planning intervals intersecting an inclusive analysis range. Archive is
+/// lifecycle state, not deletion: past plans remain evidence for retrospective analysis.
+pub fn list_planning_cycles_overlapping(
+    conn: &Connection,
+    start: &str,
+    end: &str,
+) -> AppResult<Vec<Cycle>> {
+    let mut stmt = conn.prepare(&format!("SELECT {CYCLE_COLUMNS} FROM cycles WHERE id != 'later' AND type != 'session' AND starts_on <= ?2 AND (ends_on > ?1 OR (ends_on IS NULL AND starts_on >= ?1)) ORDER BY starts_on, type, id")).map_err(from_rusqlite)?;
+    let result = stmt
+        .query_map(params![start, end], row_to_cycle)
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    Ok(result)
 }

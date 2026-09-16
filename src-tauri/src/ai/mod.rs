@@ -12,3 +12,9 @@ pub mod llm;
 pub mod prioritization;
 pub mod review;
 pub mod tools;
+
+pub mod actions;
+pub mod period_analysis;
+pub mod persona;
+pub mod skills;
+pub mod tool_catalog;

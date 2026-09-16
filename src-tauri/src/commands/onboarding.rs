@@ -6,7 +6,7 @@
 //! paths of the IPC surface stay covered (7.5) even though `tauri::State` /
 //! `AppHandle` cannot be constructed inside unit tests.
 
-use tauri::{Manager, State};
+use tauri::State;
 
 use crate::db::Db;
 use crate::error::AppResult;
@@ -179,14 +179,13 @@ pub enum SessionDueOutcome {
     Skipped { reason: &'static str },
 }
 
-const NOTIFY_TITLE: &str = "Focus block due";
-
 /// Called by the frontend timer when a focus block reaches its planned end
 /// (6.1). Sessions without a set duration never notify (6.3); a denied or
 /// unavailable notification permission is a silent skip (6.2).
 #[tauri::command]
 pub fn notify_session_due(
-    app: tauri::AppHandle<tauri::Wry>,
+    _app: tauri::AppHandle<tauri::Wry>,
+    db: State<'_, Db>,
     session_id: String,
     title: String,
     duration_ms: Option<i64>,
@@ -196,42 +195,22 @@ pub fn notify_session_due(
             reason: "no_duration",
         });
     }
-    send_due_notification(&app, &session_id, &title)
+    let locale = crate::i18n::for_db(&db)?;
+    let notification_title = crate::i18n::text(locale, "notification.session", &[]);
+    send_due_notification(&session_id, &notification_title, &title)
 }
 
-/// Plugin boundaries isolated here so the gate above stays testable. Requires
-/// `tauri_plugin_notification::init()` in the builder (lib.rs wiring).
 fn send_due_notification(
-    app: &tauri::AppHandle<tauri::Wry>,
     session_id: &str,
-    title: &str,
+    notification_title: &str,
+    body: &str,
 ) -> AppResult<SessionDueOutcome> {
-    use tauri_plugin_notification::{Notification, NotificationExt};
-    // The plugin state is absent until the builder registers the plugin;
-    // degrade quietly instead of panicking.
-    let Some(notification) = app.try_state::<Notification<tauri::Wry>>() else {
-        crate::logging::warn(
-            "onboarding",
-            "notification plugin not registered; skipping due notification",
-        );
-        return Ok(SessionDueOutcome::Skipped {
-            reason: "notification_unavailable",
-        });
-    };
-    // Desktop request_permission resolves synchronously; a refusal or a
-    // system-level failure surfaces from `show` below and is swallowed.
-    let _ = notification.request_permission();
-    match notification
-        .builder()
-        .title(NOTIFY_TITLE)
-        .body(title)
-        .show()
-    {
+    match crate::platform::notifications::send(notification_title, body) {
         Ok(()) => Ok(SessionDueOutcome::Notified),
         Err(error) => {
             crate::logging::warn(
                 "onboarding",
-                &format!("due notification for {session_id} not shown: {error}"),
+                &format!("due notification for {session_id} not submitted: {error}"),
             );
             Ok(SessionDueOutcome::Skipped {
                 reason: "permission_denied_or_unavailable",
@@ -311,6 +290,7 @@ mod tests {
         let session = cycles::add_session(
             db,
             &AddSessionArgs {
+                task_id: None,
                 day_cycle_id: day.into(),
                 title: "deep work".into(),
                 duration_ms: Some(50 * 60 * 1000),
@@ -360,6 +340,7 @@ mod tests {
                 ends_on: None,
                 calendar_key: None,
                 repeat_id: None,
+                task_id: None,
                 created_at: NOW,
             },
         )

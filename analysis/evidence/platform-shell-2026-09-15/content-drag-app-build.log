@@ -1,0 +1,177 @@
+
+> planner@0.1.0 tauri
+> tauri build --debug --bundles app
+
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run desktop:before-build`
+
+> planner@0.1.0 desktop:before-build
+> node scripts/desktop-build.mjs before-build
+
+
+> planner@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 425 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/desktop-build.json                                             0.03 kB │ gzip:   0.05 kB
+dist/index.html                                                     0.39 kB │ gzip:   0.26 kB
+dist/assets/ibm-plex-sans-vietnamese-400-normal-fK1oJ5dG.woff       6.39 kB
+dist/assets/ibm-plex-sans-vietnamese-700-normal-BV5B8Are.woff       6.42 kB
+dist/assets/ibm-plex-sans-vietnamese-600-normal-DgdngZtN.woff       6.58 kB
+dist/assets/ibm-plex-sans-vietnamese-500-normal-BEb3_waV.woff       6.58 kB
+dist/assets/ibm-plex-sans-vietnamese-400-normal-DG4YqDda.woff2      8.20 kB
+dist/assets/ibm-plex-sans-vietnamese-700-normal-CkEo6LDy.woff2      8.22 kB
+dist/assets/ibm-plex-sans-vietnamese-500-normal-e4dixQRQ.woff2      8.41 kB
+dist/assets/ibm-plex-sans-vietnamese-600-normal-DpPYBSTl.woff2      8.46 kB
+dist/assets/ibm-plex-sans-greek-700-normal-CkZN0sRy.woff            8.74 kB
+dist/assets/ibm-plex-sans-greek-400-normal-D9ESIMu3.woff            8.76 kB
+dist/assets/ibm-plex-sans-greek-500-normal-CuWXN6rf.woff            9.14 kB
+dist/assets/ibm-plex-sans-greek-600-normal-D-CqTdkO.woff            9.22 kB
+dist/assets/ibm-plex-sans-greek-700-normal-wyJ6jzdA.woff2           9.92 kB
+dist/assets/ibm-plex-sans-greek-400-normal-_efipK4i.woff2           9.94 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-700-normal-DCQwxkRk.woff    10.16 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-400-normal-Dsrv2Tcn.woff    10.28 kB
+dist/assets/ibm-plex-sans-greek-600-normal-DzTrcv_p.woff2          10.36 kB
+dist/assets/ibm-plex-sans-greek-500-normal-JMMifIXV.woff2          10.37 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-500-normal-DB5PtV2g.woff    10.59 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-600-normal-Bz0x94Yp.woff    10.61 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-700-normal-BmRLXWpJ.woff2   12.05 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-400-normal-g30qAdWV.woff2   12.14 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-600-normal-DUMzJB7m.woff2   12.30 kB
+dist/assets/ibm-plex-sans-cyrillic-ext-500-normal-Cs5J6C77.woff2   12.30 kB
+dist/assets/ibm-plex-sans-cyrillic-700-normal-RFb1v-CK.woff        13.32 kB
+dist/assets/ibm-plex-sans-cyrillic-400-normal-BTotfTJu.woff        13.51 kB
+dist/assets/ibm-plex-sans-cyrillic-500-normal-ByOcLdNv.woff        13.85 kB
+dist/assets/ibm-plex-sans-cyrillic-600-normal-BGq0mW3O.woff        13.88 kB
+dist/assets/ibm-plex-sans-latin-ext-400-normal-RBey6euL.woff       14.36 kB
+dist/assets/ibm-plex-sans-latin-ext-700-normal-DZH6Xh-4.woff       14.42 kB
+dist/assets/ibm-plex-sans-cyrillic-700-normal-D_uavGvn.woff2       14.57 kB
+dist/assets/ibm-plex-sans-latin-ext-500-normal-D0aIdm-b.woff       14.73 kB
+dist/assets/ibm-plex-sans-latin-ext-600-normal-DIrixKbi.woff       14.77 kB
+dist/assets/ibm-plex-sans-cyrillic-400-normal-DZqxrq2p.woff2       14.80 kB
+dist/assets/ibm-plex-sans-cyrillic-500-normal-CocWQlwt.woff2       15.00 kB
+dist/assets/ibm-plex-sans-cyrillic-600-normal-71GNu3SW.woff2       15.04 kB
+dist/assets/ibm-plex-sans-latin-ext-400-normal-C5H60-Va.woff2      15.98 kB
+dist/assets/ibm-plex-sans-latin-ext-700-normal-aMgXseD4.woff2      16.18 kB
+dist/assets/ibm-plex-sans-latin-ext-600-normal-DOrvGEcy.woff2      16.44 kB
+dist/assets/ibm-plex-sans-latin-ext-500-normal-DakdToA3.woff2      16.45 kB
+dist/assets/ibm-plex-sans-latin-400-normal-CYLoc0-x.woff           22.10 kB
+dist/assets/ibm-plex-sans-latin-700-normal-Bth3BMcD.woff           22.28 kB
+dist/assets/ibm-plex-sans-latin-400-normal-CDDApCn2.woff2          22.58 kB
+dist/assets/ibm-plex-sans-latin-700-normal-Bxkt5Cjx.woff2          22.83 kB
+dist/assets/ibm-plex-sans-latin-600-normal-Cu4Hd6ag.woff           23.87 kB
+dist/assets/ibm-plex-sans-latin-500-normal-BgVn5rGT.woff           23.91 kB
+dist/assets/ibm-plex-sans-latin-500-normal-6ng42L7E.woff2          24.18 kB
+dist/assets/ibm-plex-sans-latin-600-normal-CuJfVYMP.woff2          24.25 kB
+dist/assets/index-CG4NIHtj.css                                     82.95 kB │ gzip:  16.28 kB
+dist/assets/mermaid-HWGCJPDP-Bq3ZVCLJ.js                            0.06 kB │ gzip:   0.07 kB
+dist/assets/highlighted-body-KPVGNVTW-CEU8FFdV.js                   0.56 kB │ gzip:   0.38 kB │ map:     1.37 kB
+dist/assets/index-Cyu3spdt.js                                     949.35 kB │ gzip: 285.40 kB │ map: 3,750.15 kB
+
+✓ built in 550ms
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+desktop frontend OK: macos 0.1.0
+    Blocking waiting for file lock on build directory
+   Compiling objc2-exception-helper v0.1.1
+   Compiling aws-lc-sys v0.43.0
+   Compiling libsqlite3-sys v0.38.2
+   Compiling mac-notification-sys v0.6.15
+   Compiling objc2 v0.6.4
+   Compiling block2 v0.6.2
+   Compiling objc2-core-foundation v0.3.2
+   Compiling dispatch2 v0.3.1
+   Compiling objc2-foundation v0.3.2
+   Compiling rusqlite v0.40.2
+   Compiling r2d2_sqlite v0.35.0
+   Compiling objc2-app-kit v0.3.2
+   Compiling notify-rust v4.11.7
+   Compiling aws-lc-rs v1.17.3
+   Compiling rustls v0.23.43
+   Compiling rustls-webpki v0.103.13
+   Compiling objc2-web-kit v0.3.2
+   Compiling tao v0.35.3
+   Compiling muda v0.19.3
+   Compiling window-vibrancy v0.6.0
+   Compiling rfd v0.16.0
+   Compiling wry v0.55.1
+   Compiling tauri-runtime v2.11.3
+   Compiling tauri-runtime-wry v2.11.4
+   Compiling tauri v2.11.5
+   Compiling tokio-rustls v0.26.5
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.5
+   Compiling tauri-plugin-fs v2.5.2
+   Compiling tauri-plugin-notification v2.4.0
+   Compiling tauri-plugin-opener v2.5.5
+   Compiling tauri-plugin-dialog v2.7.3
+   Compiling planner v0.1.0 (/Users/lordcasser/workspace/projects/goal/src-tauri)
+warning: unused import: `NotificationExt`
+   --> src/commands/onboarding.rs:209:51
+    |
+209 |     use tauri_plugin_notification::{Notification, NotificationExt};
+    |                                                   ^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `reply` is never read
+   --> src/ai/agent/turn.rs:373:21
+    |
+373 |     let mut reply = String::new();
+    |                     ^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+393 |             reply = response.text.clone();
+    |             ----- `reply` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:33:23
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<Result<AgentResponse, AgentError>>;
+   |                       ^^^^^                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                       |
+   |                       the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+   = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<'_, Result<AgentResponse, AgentError>>;
+   |                                                              +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:35:22
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<Result<serde_json::Value, AgentError>>;
+   |                      ^^^^^                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                      |
+   |                      the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<'_, Result<serde_json::Value, AgentError>>;
+   |                                                           +++
+
+warning: `planner` (lib) generated 4 warnings (run `cargo fix --lib -p planner` to apply 3 suggestions)
+    Finished `dev` profile [unoptimized] target(s) in 33.92s
+       Built application at: /Users/lordcasser/workspace/projects/goal/src-tauri/target/debug/planner
+     Running beforeBundleCommand `npm run desktop:before-bundle`
+
+> planner@0.1.0 desktop:before-bundle
+> node scripts/desktop-build.mjs before-bundle
+
+desktop bundle contract OK: macos 0.1.0
+    Bundling Planner.app (/Users/lordcasser/workspace/projects/goal/src-tauri/target/debug/bundle/macos/Planner.app)
+    Finished 1 bundle at:
+        /Users/lordcasser/workspace/projects/goal/src-tauri/target/debug/bundle/macos/Planner.app
+

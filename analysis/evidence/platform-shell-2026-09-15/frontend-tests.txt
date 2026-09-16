@@ -1,0 +1,13 @@
+Frontend test evidence — 2026-09-15
+
+Command:
+  NODE_OPTIONS=--no-experimental-webstorage npm test -- --reporter=dot
+
+Result: PASS
+Test files: 47 passed, 47 total
+Tests: 295 passed, 295 total
+Failures: none
+Duration: 10.42s
+
+The run emitted one existing React act(...) warning from
+src/features/onboarding/ExitPollDialog.test.tsx; it did not fail the run.

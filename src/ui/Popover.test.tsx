@@ -18,7 +18,7 @@ function Harness({ onItemSelect }: { onItemSelect?: () => void }) {
         label="条目操作"
       >
         <PopoverItem onSelect={onItemSelect}>重命名</PopoverItem>
-        <PopoverItem>移到 Later</PopoverItem>
+        <PopoverItem>移到稍后</PopoverItem>
       </Popover>
     </>
   );
@@ -29,7 +29,7 @@ describe("Popover", () => {
     render(<Harness />);
     expect(screen.getByRole("menu")).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "重命名" })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: "移到 Later" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "移到稍后" })).toBeTruthy();
   });
 
   it("closes on Escape and restores focus to the anchor", () => {
@@ -49,5 +49,30 @@ describe("Popover", () => {
 
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("keeps menu navigation while allowing native input keys in a form popover", () => {
+    const menu = render(<Harness />);
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "重命名" }), { key: "ArrowDown" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "移到稍后" }));
+    menu.unmount();
+
+    function FormPopover() {
+      const anchor = useRef<HTMLButtonElement>(null);
+      return <><button ref={anchor}>Edit schedule</button>
+        <Popover open role="dialog" label="Schedule" anchorRef={anchor} onClose={() => {}}>
+          <input aria-label="Time" type="time" defaultValue="09:00" />
+          <input aria-label="Duration" type="number" defaultValue="25" />
+        </Popover></>;
+    }
+    render(<FormPopover />);
+    expect(screen.getByRole("dialog", { name: "Schedule" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText("Time"));
+    for (const field of ["Time", "Duration"]) {
+      for (const key of ["ArrowUp", "ArrowDown", "Home", "End"]) {
+        // true means the event was not canceled: native editing stays available.
+        expect(fireEvent.keyDown(screen.getByLabelText(field), { key })).toBe(true);
+      }
+    }
   });
 });

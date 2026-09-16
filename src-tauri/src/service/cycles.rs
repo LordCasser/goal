@@ -58,6 +58,10 @@ pub struct CreateCycleArgs {
     pub parent_id: Option<String>,
     /// Long-term only: 1, 3 or 6 product months (28 days each).
     pub duration_months: Option<i64>,
+    /// Explicit bounds are mutually exclusive with preset product months.
+    pub starts_on: Option<String>,
+    pub ends_on: Option<String>,
+    pub progress_check: Option<crate::domain::cycle::ProgressCheck>,
     /// Optional title; dated cycles derive one from their bounds when absent.
     pub title: Option<String>,
     /// Day cycles: `YYYY-MM-DD`. Defaults to today (local).
@@ -93,29 +97,40 @@ pub fn create_planning_cycle(
 
     let (parent_id, position, starts_on, ends_on, duration, key, title) = match kind {
         CycleType::Month => {
-            let months = args.duration_months.ok_or_else(|| {
-                AppError::validation(
-                    "long_term_duration_required",
-                    "A long-term cycle needs a duration of 1, 3 or 6 months",
-                )
-            })?;
-            if !LONG_TERM_DURATIONS_MONTHS.contains(&months) {
-                return Err(AppError::validation(
-                    "unsupported_long_term_duration",
-                    "Long-term cycles last 1, 3 or 6 months (28 days per month)",
-                ));
-            }
             if args.parent_id.is_some() {
                 return Err(AppError::validation(
                     "invalid_parent_type",
                     "A long-term cycle is a root and cannot have a parent",
                 ));
             }
-            let starts_on = today;
-            let ends_on = calculate_ends_on(starts_on, months);
-            let duration = crate::domain::cycle::long_term_duration_ms(months);
+            let (starts_on, ends_on) = match (&args.starts_on, &args.ends_on, args.duration_months)
+            {
+                (Some(start), Some(end), None) => calendar::custom_long_term_bounds(start, end)?,
+                (None, None, Some(months)) if LONG_TERM_DURATIONS_MONTHS.contains(&months) => {
+                    (today, calculate_ends_on(today, months))
+                }
+                (None, None, Some(_)) => {
+                    return Err(AppError::validation(
+                        "unsupported_long_term_duration",
+                        "Choose a preset duration or custom dates.",
+                    ))
+                }
+                (None, None, None) => {
+                    return Err(AppError::validation(
+                        "long_term_duration_required",
+                        "Choose a preset duration or custom dates.",
+                    ))
+                }
+                _ => {
+                    return Err(AppError::validation(
+                        "invalid_cycle_range",
+                        "Provide both custom dates, without a preset duration.",
+                    ))
+                }
+            };
+            let duration = (ends_on - starts_on).num_days() * crate::domain::cycle::MS_PER_DAY;
             let key = long_term_key(starts_on, ends_on);
-            let position = next_root_position(&tx)?;
+            let position = next_cycle_position(&tx, None)?;
             (
                 None,
                 position,
@@ -126,77 +141,58 @@ pub fn create_planning_cycle(
                 args.title.clone().unwrap_or_else(|| "Long-term".into()),
             )
         }
-        CycleType::Week => {
-            let parent_id = args.parent_id.clone().ok_or_else(|| {
-                AppError::validation(
-                    "weekly_requires_parent",
-                    "Weekly planning cycles require a parent",
-                )
-            })?;
-            let parent = repo::require(&tx, &parent_id)?;
-            if parent.cycle_type != CycleType::Month {
+        CycleType::Week | CycleType::Day => {
+            if args.starts_on.is_some() || args.ends_on.is_some() || args.progress_check.is_some() {
                 return Err(AppError::validation(
-                    "invalid_parent_type",
-                    "A weekly cycle must live under a Long-term cycle",
+                    "unsupported_cycle_type",
+                    "Custom bounds and progress checks belong to long-term cycles.",
                 ));
             }
-            if parent.finished {
-                return Err(AppError::conflict(
-                    "parent_cycle_ended",
-                    "Cannot create a weekly planning cycle under an ended long-term cycle",
-                ));
+
+            // Calendar containers may stand alone. Goal ownership belongs to
+            // task.parent_id, not to the container's optional parent.
+            let parent_id = args.parent_id.clone();
+            if let Some(id) = &parent_id {
+                let parent = repo::require(&tx, id)?;
+                let expected = if kind == CycleType::Week {
+                    CycleType::Month
+                } else {
+                    CycleType::Week
+                };
+                if parent.cycle_type != expected || parent.id == LATER_CYCLE_ID {
+                    return Err(AppError::validation(
+                        "invalid_parent_type",
+                        "Choose a parent at the preceding time level",
+                    ));
+                }
+                if parent.finished {
+                    return Err(AppError::conflict(
+                        "parent_cycle_ended",
+                        "Cannot create a planning cycle under an ended parent",
+                    ));
+                }
             }
-            let (starts_on, ends_on) =
-                dated_cycle_bounds(today, CycleType::Week, week_start_day as u32, 0)
-                    .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
-            let position = repo::max_position(&tx, &parent_id)? + 1;
-            (
-                Some(parent_id),
-                position,
-                Some(starts_on),
-                Some(ends_on),
-                Some(WEEK_DURATION_MS),
-                Some(week_key(starts_on)),
-                args.title.clone().unwrap_or_else(|| format_date(starts_on)),
-            )
-        }
-        CycleType::Day => {
-            let parent_id = args.parent_id.clone().ok_or_else(|| {
-                AppError::validation(
-                    "day_requires_parent",
-                    "A day cycle must live under a weekly cycle",
-                )
-            })?;
-            let parent = repo::require(&tx, &parent_id)?;
-            if parent.cycle_type != CycleType::Week {
-                return Err(AppError::validation(
-                    "invalid_parent_type",
-                    "A day cycle must live under a weekly cycle",
-                ));
-            }
-            if parent.finished {
-                return Err(AppError::conflict(
-                    "parent_cycle_ended",
-                    "Cannot create a day cycle under an ended weekly cycle",
-                ));
-            }
-            let starts_on = match &args.date {
+            let date = match &args.date {
                 Some(raw) => parse_date(raw).ok_or_else(|| {
                     AppError::validation("invalid_date", "date must be YYYY-MM-DD")
                 })?,
                 None => today,
             };
-            let (starts_on, ends_on) =
-                dated_cycle_bounds(starts_on, CycleType::Day, week_start_day as u32, 0)
-                    .ok_or_else(|| AppError::Internal("day bounds missing".into()))?;
-            let position = repo::max_position(&tx, &parent_id)? + 1;
+            let (starts_on, ends_on) = dated_cycle_bounds(date, kind, week_start_day as u32, 0)
+                .ok_or_else(|| AppError::Internal("dated cycle bounds missing".into()))?;
+            let position = next_cycle_position(&tx, parent_id.as_deref())?;
+            let (duration, key) = if kind == CycleType::Week {
+                (WEEK_DURATION_MS, week_key(starts_on))
+            } else {
+                (crate::domain::cycle::DAY_DURATION_MS, day_key(starts_on))
+            };
             (
-                Some(parent_id),
+                parent_id,
                 position,
                 Some(starts_on),
                 Some(ends_on),
-                Some(crate::domain::cycle::DAY_DURATION_MS),
-                Some(day_key(starts_on)),
+                Some(duration),
+                Some(key),
                 args.title.clone().unwrap_or_else(|| format_date(starts_on)),
             )
         }
@@ -214,9 +210,26 @@ pub fn create_planning_cycle(
         ends_on: ends_on.map(format_date),
         calendar_key: key,
         repeat_id: None,
+        task_id: None,
         created_at: now,
     };
     repo::insert(&tx, &new)?;
+    if kind == CycleType::Month {
+        let start = starts_on.expect("long-term start validated");
+        let end = ends_on.expect("long-term end validated");
+        let check = args.progress_check.clone().unwrap_or_else(|| {
+            crate::domain::cycle::ProgressCheck::Once {
+                date: format_date(calendar::add_days(start, (end - start).num_days() / 2)),
+            }
+        });
+        calendar::validate_progress_check(&check, start, end)?;
+        let json = serde_json::to_string(&check).map_err(|e| AppError::Internal(e.to_string()))?;
+        tx.execute(
+            "UPDATE cycles SET progress_check = ?1 WHERE id = ?2",
+            rusqlite::params![json, new.id],
+        )
+        .map_err(crate::error::from_rusqlite)?;
+    }
     let created = repo::require(&tx, &new.id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
@@ -228,93 +241,97 @@ pub fn create_planning_cycle(
     Ok(mutation)
 }
 
-fn next_root_position(conn: &Connection) -> AppResult<i64> {
+pub(crate) fn next_cycle_position(conn: &Connection, parent_id: Option<&str>) -> AppResult<i64> {
     conn.query_row(
-        "SELECT COALESCE(MAX(position), -1) + 1 FROM cycles \
-         WHERE parent_id IS NULL AND type = 'month' AND id != 'later' AND archived = 0",
-        [],
-        |r| r.get(0),
-    )
-    .map_err(|e| AppError::Db(e.to_string()))
+        "SELECT COALESCE(MAX(position), -1) + 1 FROM cycles WHERE parent_id IS ?1 AND archived = 0 AND id != 'later'",
+        [parent_id], |r| r.get(0),
+    ).map_err(|e| AppError::Db(e.to_string()))
 }
 
-/// Finds-or-creates the week cycle containing `date` under the long-term cycle
-/// that covers it, then the day cycle for `date`, then materializes repeat
-/// templates into the day (spec: 模板自动出现).
+/// Opening a date works without a long-term goal; reuse its day and week
+/// identities. A newly needed week is independent from long-term containers.
 pub fn get_or_create_day(db: &Db, date: NaiveDate, now: i64) -> AppResult<Mutation<Cycle>> {
     let mut conn = db.pool().get()?;
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
     let week_start_day = settings_service::week_start_day_or_default(&tx)?;
-    let date_str = format_date(date);
-
-    let week = match find_covering_cycle(&tx, CycleType::Week, &date_str)? {
-        Some(week) => week,
-        None => {
-            let month =
-                find_covering_cycle(&tx, CycleType::Month, &date_str)?.ok_or_else(|| {
-                    AppError::validation(
-                        "no_covering_long_term_cycle",
-                        "No active long-term cycle covers this date",
-                    )
-                })?;
-            let (starts_on, ends_on) =
-                dated_cycle_bounds(date, CycleType::Week, week_start_day as u32, 0)
-                    .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
-            let new = repo::NewCycle {
-                id: uuid::Uuid::new_v4().to_string(),
-                title: format_date(starts_on),
-                cycle_type: CycleType::Week,
-                parent_id: Some(month.id.clone()),
-                position: repo::max_position(&tx, &month.id)? + 1,
-                duration: Some(WEEK_DURATION_MS),
-                starts_on: Some(format_date(starts_on)),
-                ends_on: Some(format_date(ends_on)),
-                calendar_key: Some(week_key(starts_on)),
-                repeat_id: None,
-                created_at: now,
-            };
-            repo::insert(&tx, &new)?;
-            repo::require(&tx, &new.id)?
-        }
-    };
-
-    let day = match get_day_by_date(&tx, &date_str)? {
-        Some(day) => day,
-        None => {
-            let new = repo::NewCycle {
-                id: uuid::Uuid::new_v4().to_string(),
-                title: date_str.clone(),
-                cycle_type: CycleType::Day,
-                parent_id: Some(week.id.clone()),
-                position: repo::max_position(&tx, &week.id)? + 1,
-                duration: Some(crate::domain::cycle::DAY_DURATION_MS),
-                starts_on: Some(date_str.clone()),
-                ends_on: Some(format_date(calendar::add_days(date, 1))),
-                calendar_key: Some(day_key(date)),
-                repeat_id: None,
-                created_at: now,
-            };
-            repo::insert(&tx, &new)?;
-            repo::require(&tx, &new.id)?
-        }
-    };
-
+    let day = get_or_create_day_in_tx(&tx, date, week_start_day as u32, now)?;
     let generated = crate::service::repeats::generate_for_day_in_tx(&tx, &day.id, now)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
-
-    let day_id = day.id.clone();
-    let day_parent = day.parent_id.clone();
-    let mut mutation = Mutation::new(day);
-    mutation.cycles.push(day_id.clone());
-    if let Some(parent) = day_parent {
+    let mut mutation = Mutation::new(day.clone()).touching_cycle(day.id.clone());
+    if let Some(parent) = day.parent_id {
         mutation.cycles.push(parent);
     }
     if !generated.is_empty() {
-        mutation.tasks.push(day_id);
+        mutation.tasks.push(day.id);
     }
     Ok(mutation)
+}
+
+/// Shared with Calendar moves, inside the caller's transaction.
+pub(crate) fn get_or_create_day_in_tx(
+    conn: &Connection,
+    date: NaiveDate,
+    week_start_day: u32,
+    now: i64,
+) -> AppResult<Cycle> {
+    let date_str = format_date(date);
+    if let Some(day) = get_day_by_date(conn, &date_str)? {
+        return Ok(day);
+    }
+    let week = match find_covering_cycle(conn, CycleType::Week, &date_str)? {
+        Some(week) => week,
+        None => get_or_create_week_in_tx(conn, date, week_start_day, now)?,
+    };
+    let new = repo::NewCycle {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: date_str.clone(),
+        cycle_type: CycleType::Day,
+        parent_id: Some(week.id.clone()),
+        position: next_cycle_position(conn, Some(&week.id))?,
+        duration: Some(crate::domain::cycle::DAY_DURATION_MS),
+        starts_on: Some(date_str),
+        ends_on: Some(format_date(calendar::add_days(date, 1))),
+        calendar_key: Some(day_key(date)),
+        repeat_id: None,
+        task_id: None,
+        created_at: now,
+    };
+    repo::insert(conn, &new)?;
+    repo::require(conn, &new.id)
+}
+
+/// Resolve the configured natural week without creating a day as a side effect.
+/// The caller owns the transaction so a failed task move also rolls this back.
+pub(crate) fn get_or_create_week_in_tx(
+    conn: &Connection,
+    date: NaiveDate,
+    week_start_day: u32,
+    now: i64,
+) -> AppResult<Cycle> {
+    let (start, end) = dated_cycle_bounds(date, CycleType::Week, week_start_day, 0)
+        .ok_or_else(|| AppError::Internal("week bounds missing".into()))?;
+    let key = week_key(start);
+    if let Some(week) = repo::get_by_calendar_key(conn, &key)? {
+        return Ok(week);
+    }
+    let new = repo::NewCycle {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: format_date(start),
+        cycle_type: CycleType::Week,
+        parent_id: None,
+        position: next_cycle_position(conn, None)?,
+        duration: Some(WEEK_DURATION_MS),
+        starts_on: Some(format_date(start)),
+        ends_on: Some(format_date(end)),
+        calendar_key: Some(key),
+        repeat_id: None,
+        task_id: None,
+        created_at: now,
+    };
+    repo::insert(conn, &new)?;
+    repo::require(conn, &new.id)
 }
 
 fn find_covering_cycle(conn: &Connection, kind: CycleType, date: &str) -> AppResult<Option<Cycle>> {
@@ -338,6 +355,7 @@ fn get_day_by_date(conn: &Connection, date: &str) -> AppResult<Option<Cycle>> {
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct AddSessionArgs {
+    pub task_id: Option<String>,
     pub day_cycle_id: String,
     pub title: String,
     /// Milliseconds; `None` leaves the focus block without a set duration.
@@ -358,6 +376,16 @@ pub fn add_session(db: &Db, args: &AddSessionArgs, now: i64) -> AppResult<Mutati
         ));
     }
     ensure_cycle_mutable(&day)?;
+    if let Some(task_id) = &args.task_id {
+        let task = tasks_repo::require(&tx, task_id)?;
+        if task.cycle_id != day.id || task.title.trim().is_empty() || task.proposal.is_some() {
+            return Err(AppError::validation(
+                "invalid_focus_task",
+                "Choose a committed task with a title in this day",
+            ));
+        }
+        crate::service::tasks::ensure_task_editable(&tx, task_id, false)?;
+    }
     let position = match args.position {
         Some(p) => p,
         None => repo::max_position(&tx, &day.id)? + 1,
@@ -373,6 +401,7 @@ pub fn add_session(db: &Db, args: &AddSessionArgs, now: i64) -> AppResult<Mutati
         ends_on: None,
         calendar_key: None,
         repeat_id: None,
+        task_id: args.task_id.clone(),
         created_at: now,
     };
     repo::insert(&tx, &new)?;
@@ -502,6 +531,7 @@ pub fn finish_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cyc
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
     let target = repo::require(&tx, cycle_id)?;
+    crate::service::proposals::ensure_cycle_tree_unlocked(&tx, cycle_id)?;
     let state = target
         .lifecycle()
         .ok_or_else(|| AppError::Internal("cycle in impossible lifecycle state".into()))?;
@@ -530,6 +560,11 @@ pub fn finish_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cyc
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
     let mut mutation = Mutation::new(updated);
+    if target.task_id.is_some() {
+        if let Some(day_id) = &target.parent_id {
+            mutation.tasks.push(day_id);
+        }
+    }
     for id in touched {
         mutation.cycles.push(id);
     }
@@ -544,6 +579,8 @@ pub struct CycleDeletionPreview {
     pub descendant_cycles: i64,
     pub tasks: i64,
     pub started_sessions: i64,
+    pub total_focus_blocks: i64,
+    pub confirmation_token: String,
 }
 
 /// The deletion guards, in evaluation order. `None` = deletable.
@@ -553,6 +590,12 @@ fn deletion_guard(conn: &Connection, target: &Cycle) -> AppResult<Option<(String
             "protected_container".into(),
             "The Later list can't be deleted.".into(),
         )));
+    }
+    // A focus block is an event record, not a planning container. Its own
+    // finished/started state must not inherit the container deletion guards;
+    // deleting it is handled as a timer/session removal in the same tx below.
+    if target.cycle_type == CycleType::Session {
+        return Ok(None);
     }
     if target.finished {
         return Ok(Some((
@@ -583,43 +626,64 @@ pub fn get_cycle_deletion_preview(db: &Db, cycle_id: &str) -> AppResult<CycleDel
     let conn = db.pool().get()?;
     let target = repo::require(&conn, cycle_id)?;
     let guard = deletion_guard(&conn, &target)?;
+    let impact = crate::service::deletion::cycle_impact(&conn, cycle_id)?;
     Ok(CycleDeletionPreview {
         cycle_id: cycle_id.to_string(),
         guard_code: guard.as_ref().map(|(code, _)| code.clone()),
         guard_message: guard.map(|(_, message)| message),
-        descendant_cycles: repo::count_descendant_cycles(&conn, cycle_id)?,
-        tasks: repo::count_tasks(&conn, cycle_id)?,
-        started_sessions: repo::count_started_sessions(&conn, cycle_id)?,
+        descendant_cycles: impact.descendant_cycles,
+        tasks: impact.task_ids.len() as i64,
+        started_sessions: impact.started_focus_count,
+        total_focus_blocks: impact.total_focus_blocks,
+        confirmation_token: impact.token,
     })
 }
 
 pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
+    delete_cycle_inner(db, cycle_id, None, false)
+}
+
+/// GUI deletion entry point.  The impact is recomputed inside the same
+/// transaction as the mutation, so a preview cannot authorize a changed
+/// subtree.  Coach and other trusted internal callers use `delete_cycle`.
+pub fn delete_cycle_confirmed(
+    db: &Db,
+    cycle_id: &str,
+    confirmation_token: Option<&str>,
+) -> AppResult<Mutation<()>> {
+    delete_cycle_inner(db, cycle_id, confirmation_token, true)
+}
+
+fn delete_cycle_inner(
+    db: &Db,
+    cycle_id: &str,
+    confirmation_token: Option<&str>,
+    require_confirmation: bool,
+) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
     let target = repo::require(&tx, cycle_id)?;
+    crate::service::proposals::ensure_cycle_tree_unlocked(&tx, cycle_id)?;
     if let Some((code, message)) = deletion_guard(&tx, &target)? {
         return Err(AppError::conflict(code, message));
     }
-    let subtree = repo::subtree_ids(&tx, cycle_id)?;
-    let parent = target.parent_id.clone();
-    // Reminders are polymorphic (no FK to the cycles subtree); clean every
-    // reminder attached to the deleted pages and their tasks BEFORE the
-    // delete — the FK cascade would remove the subtree rows and orphan the
-    // lookup (change: add-reminders-notifications §1.3).
-    crate::service::reminders::purge_for_cycle(&tx, cycle_id)?;
+    let impact = crate::service::deletion::cycle_impact(&tx, cycle_id)?;
+    crate::service::deletion::require_confirmation(
+        confirmation_token,
+        &impact.token,
+        require_confirmation,
+    )?;
+    // `ensure_cycle_tree_unlocked` covers the cycle subtree.  The explicit
+    // pass also covers task descendants linked from another cycle.
+    for task_id in &impact.task_ids {
+        crate::service::tasks::ensure_task_editable(&tx, task_id, true)?;
+    }
+    let mutation = crate::service::deletion::prepare_deletion(&tx, &impact)?;
     repo::delete(&tx, cycle_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
-    let mut mutation = Mutation::new(());
-    mutation.cycles.push(cycle_id.to_string());
-    if let Some(parent) = parent {
-        mutation.cycles.push(parent);
-    }
-    for id in subtree {
-        mutation.cycles.push(id);
-    }
     Ok(mutation)
 }
 

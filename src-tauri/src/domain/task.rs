@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use super::proposal::ProposalKind;
+use super::cycle::{CycleType, LATER_CYCLE_ID};
 
 /// Clarity flags are tri-state: `None` means "never evaluated".
 /// `Some(false)` means "evaluated and fine" — the two states mean different
@@ -32,6 +33,7 @@ pub fn is_valid_root_color_key(key: &str) -> bool {
 /// The flat form `[{"title","completed"}]` from `docs/architecture.md` stays
 /// valid; `children` is omitted while empty.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Subtask {
     pub title: String,
     pub completed: bool,
@@ -64,6 +66,9 @@ pub struct Task {
     pub needs_breakdown: Option<bool>,
     pub root_color_key: Option<String>,
     pub copied_from_task_id: Option<String>,
+    /// Original planning level while parked in Later; absent elsewhere.
+    #[serde(default)]
+    pub later_plan_type: Option<CycleType>,
     /// `Some` marks a pending agent proposal; committed data is always `None`.
     pub proposal: Option<ProposalKind>,
     pub created_at: i64,
@@ -77,6 +82,8 @@ pub struct TaskNode {
     pub children: Vec<TaskNode>,
     /// `subtasks` rendered as Markdown for AI context and sessions.
     pub subtasks_markdown: String,
+    /// Derived sum of this task's linked focus blocks, in milliseconds.
+    pub focused_time: i64,
 }
 
 /// Builds the forest for one cycle. Tasks whose `parent_id` is absent from the
@@ -87,10 +94,19 @@ pub fn build_tree(tasks: Vec<Task>) -> Vec<TaskNode> {
     let mut sorted = tasks;
     sorted.sort_by_key(|t| t.position);
 
-    let ids: HashSet<&str> = sorted.iter().map(|t| t.id.as_str()).collect();
+    let by_id: HashMap<&str, &Task> = sorted.iter().map(|t| (t.id.as_str(), t)).collect();
+    // Later is shared storage, not a planning level: a parked weekly task
+    // linked to a parked long-term goal remains an independent visible root.
+    let tree_parent = |task: &Task| {
+        task.parent_id.as_deref().and_then(|id| by_id.get(id)).filter(|parent| {
+            task.cycle_id != LATER_CYCLE_ID
+                || task.later_plan_type.unwrap_or(CycleType::Month)
+                    == parent.later_plan_type.unwrap_or(CycleType::Month)
+        }).map(|parent| parent.id.as_str())
+    };
     let mut children_of: HashMap<&str, Vec<usize>> = HashMap::new();
     for (idx, task) in sorted.iter().enumerate() {
-        if let Some(parent) = task.parent_id.as_deref() {
+        if let Some(parent) = tree_parent(task) {
             children_of.entry(parent).or_default().push(idx);
         }
     }
@@ -107,6 +123,7 @@ pub fn build_tree(tasks: Vec<Task>) -> Vec<TaskNode> {
             task,
             children: Vec::new(),
             subtasks_markdown: markdown,
+            focused_time: 0,
         };
         visited.insert(idx);
         if let Some(kids) = children_of.get(sorted[idx].id.as_str()) {
@@ -123,10 +140,7 @@ pub fn build_tree(tasks: Vec<Task>) -> Vec<TaskNode> {
     let mut roots = Vec::new();
     let mut visited = HashSet::new();
     for (idx, task) in sorted.iter().enumerate() {
-        let is_root = match task.parent_id.as_deref() {
-            None => true,
-            Some(parent) => !ids.contains(parent),
-        };
+        let is_root = tree_parent(task).is_none();
         if is_root && !visited.contains(&idx) {
             roots.push(attach(idx, &sorted, &children_of, &mut visited));
         }
@@ -316,6 +330,7 @@ mod tests {
             needs_breakdown: None,
             root_color_key: None,
             copied_from_task_id: None,
+            later_plan_type: None,
             proposal: None,
             created_at: 0,
         }

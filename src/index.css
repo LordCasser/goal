@@ -5,6 +5,11 @@
 @import "@fontsource/ibm-plex-sans/700.css";
 @import "tailwindcss";
 
+/* WKWebView needs a stable element drag target, including button handles. */
+[draggable="true"] { -webkit-user-drag: element; }
+.task-drag-handle { user-select: none; }
+@source "../node_modules/streamdown/dist/*.js";
+
 /*
  * 设计 token（design.md §4）。两个浅色主题——白底与灰底——通过 <html
  * data-theme="white|gray"> 切换；组件只消费下面的语义 token 或其 Tailwind
@@ -39,8 +44,58 @@
   --surface-danger: #fff0ee;
   --surface-proposal: #fdf3ec;
 
-  /* 布局（3.3/3.4）：统一窗口栏 52px、辅助面板 424px、计划内容面 512px */
-  --app-header-height: 52px;
+  /* The native title bar, where present, sits outside this client height. */
+  --app-header-height: 44px;
+}
+
+:root[data-platform="macos"] { --app-header-height: 52px; }
+
+.window-bar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: var(--app-header-height);
+  min-width: 0;
+  padding-right: 16px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--surface-canvas);
+  user-select: none;
+}
+.window-bar > button, .window-bar > [role="tablist"], .window-bar > [role="group"] { flex-shrink: 0; }
+.window-safe-area { width: 16px; height: 100%; flex-shrink: 0; }
+.window-bar[data-platform="macos"] { height: 52px; }
+.window-bar[data-platform="macos"][data-fullscreen="false"] .window-safe-area { width: 104px; }
+.window-drag-area { height: 100%; min-width: 64px; flex: 1; }
+.window-bar[data-platform="windows"]:not([data-shell="native"]) { padding-right: 0; }
+.window-controls { display: flex; height: 44px; margin-left: 16px; align-self: flex-start; }
+.window-controls button {
+  display: flex; width: 46px; height: 44px; align-items: center; justify-content: center;
+  flex-shrink: 0; padding: 0; border: 0; border-radius: 0;
+  color: var(--text-primary); background: transparent;
+  transition: color 100ms, background-color 100ms;
+}
+.window-controls svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1; }
+.window-controls button:hover, .window-controls button[data-hovered="true"] { background: var(--surface-hover); }
+.window-controls button:active, .window-controls button[data-pressed="true"] { background: var(--border-light); }
+.window-controls .window-close:hover { background: #c42b1c; color: white; }
+.window-controls .window-close:active { background: #a92317; color: white; }
+.window-controls button:focus-visible { outline-offset: -3px; }
+.window-bar[data-focused="false"] .window-controls button { color: var(--text-hint); }
+.window-bar[data-focused="false"] .window-close:hover { color: white; }
+.window-pending { max-width: 132px; white-space: nowrap; }
+@media (max-width: 1099px) {
+  .window-bar[data-platform="windows"] .window-tool-label { display: none; }
+}
+@media (forced-colors: active) {
+  .window-bar .window-controls button { color: ButtonText; background: Canvas; }
+  .window-bar .window-controls button:hover,
+  .window-bar .window-controls button[data-hovered="true"],
+  .window-bar .window-controls button[data-pressed="true"] {
+    color: HighlightText; background: Highlight; forced-color-adjust: none;
+  }
+  .window-bar[data-focused="false"] .window-controls button { color: GrayText; }
+  .window-bar[data-focused="false"] .window-controls button:hover { color: HighlightText; }
+  .window-controls button:focus-visible { outline-color: Highlight; }
 }
 
 /* 灰底主题只覆盖画布、轻量表面、hover、提示文字与边界；内容面、文字主色、
@@ -57,7 +112,7 @@
 /* 静态主题：字体、字号、间距节奏与动画命名。 */
 @theme {
   --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
   /* 字号 / 行高（4.2），行高按中文阅读调整 */
@@ -165,4 +220,172 @@
       scroll-behavior: auto !important;
     }
   }
+}
+
+@layer components {
+  .cycle-nav-add {
+    @apply shrink-0 rounded-md px-2 py-2 text-left text-caption text-secondary transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-45;
+  }
+}
+
+/* One first-line alignment for the handle, checkbox, ownership slot and title. */
+.task-check { height: 28px; padding: 0; align-items: center; }
+.task-check > span:first-child { margin-top: 0; }
+.task-color-control { display: inline-flex; flex-shrink: 0; width: 20px; height: 28px; align-items: center; justify-content: center; border-radius: 4px; }
+button.task-color-control:hover { background: var(--surface-hover); }
+.task-color-slot { width: 6px; height: 14px; border: 1px solid var(--border-control); border-radius: 3px; transition: background-color 150ms, border-color 150ms; }
+.task-row[data-related] { background: color-mix(in srgb, var(--task-color) 7%, var(--surface-content)); }
+.task-row[data-selected] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--task-color) 22%, transparent); }
+.plan-enter, .connection-bar { animation: ui-fade-in 180ms ease-out; }
+.plan-card { min-height: min(360px, 100%); max-height: 100%; }
+[data-workspace-scroll-pane][data-wheel-active="true"] {
+  overscroll-behavior-y: contain;
+}
+/* Override the icon's inline-flex when the wheel router hides it. */
+[data-workspace-scroll-hint][hidden] { display: none; }
+.cycle-week-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-hint) 38%, transparent) transparent;
+}
+.cycle-week-scroll::-webkit-scrollbar { width: 4px; }
+.cycle-week-scroll::-webkit-scrollbar-track { background: transparent; }
+.cycle-week-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-hint) 38%, transparent);
+}
+.planner-horizontal-scroll,
+.connection-bar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-hint) 38%, transparent) transparent;
+}
+.planner-horizontal-scroll:hover,
+.connection-bar-scroll:hover {
+  scrollbar-color: color-mix(in srgb, var(--text-secondary) 72%, transparent) transparent;
+}
+.planner-horizontal-scroll::-webkit-scrollbar,
+.connection-bar-scroll::-webkit-scrollbar { height: 6px; }
+.planner-horizontal-scroll::-webkit-scrollbar-track,
+.connection-bar-scroll::-webkit-scrollbar-track { background: transparent; }
+.planner-horizontal-scroll::-webkit-scrollbar-thumb,
+.connection-bar-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-hint) 38%, transparent);
+}
+.planner-horizontal-scroll::-webkit-scrollbar-thumb:hover,
+.connection-bar-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-secondary) 72%, transparent);
+}
+.plan-ai-entry { visibility: hidden; opacity: 0; transform: translateY(2px); transition: opacity 150ms ease, transform 150ms ease, visibility 150ms; }
+.plan-ai-scope:hover .plan-ai-entry, .plan-ai-scope:focus-within .plan-ai-entry { visibility: visible; opacity: 1; transform: none; }
+/* Keep dates readable; native scroll boundaries leave Monday/Sunday at the edge. */
+.calendar-week-grid {
+  --calendar-day-width: 280px;
+  width: max-content;
+  grid-template-columns: repeat(7, var(--calendar-day-width));
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 8px;
+  padding-inline: 16px;
+}
+.view-switch-thumb {
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: calc((100% - 4px) / 2);
+  border-radius: 6px;
+  background: var(--surface-content);
+  box-shadow: 0 1px 3px #0000000d;
+  transition: transform 220ms cubic-bezier(.2,.75,.25,1);
+  pointer-events: none;
+}
+.view-switch[data-view="calendar"] .view-switch-thumb { transform: translateX(100%); }
+.view-page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-canvas);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-8px);
+  transition: opacity 160ms ease-out, transform 220ms cubic-bezier(.2,.75,.25,1), visibility 0s 220ms;
+}
+.view-page[data-view="calendar"] { transform: translateX(8px); }
+.view-page[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  z-index: 1;
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .view-page, .view-switch-thumb { transition: none; }
+  .view-page { transform: none; }
+}
+.relation-line { animation: ui-fade-in 180ms ease-out; }
+.panel-motion { display: grid; grid-template-columns: 0fr; flex-shrink: 0; transition: grid-template-columns 200ms cubic-bezier(.2,.7,.2,1); }
+.panel-motion[data-open="true"] { grid-template-columns: 1fr; }
+.panel-motion-content { opacity: 0; transform: translateX(12px); transition: opacity 160ms ease, transform 200ms cubic-bezier(.2,.7,.2,1); }
+.panel-motion[data-side="left"] .panel-motion-content { transform: translateX(-12px); }
+.panel-motion[data-open="true"] .panel-motion-content { opacity: 1; transform: translateX(0); }
+
+.coach-prose { overflow-wrap: anywhere; font-size: var(--text-body); line-height: 1.65; }
+.coach-prose > * + * { margin-top: 10px; }
+.coach-prose strong, .coach-prose :is(h1, h2, h3, h4, h5, h6) { font-weight: 600; }
+.coach-prose :is(h1, h2, h3, h4, h5, h6) { line-height: 1.4; margin-top: 18px; }
+.coach-prose > :first-child { margin-top: 0; }
+.coach-prose h1 { font-size: 17px; }
+.coach-prose h2 { font-size: 16px; }
+.coach-prose :is(h3, h4, h5, h6) { font-size: 14px; }
+.coach-prose ul, .coach-prose ol { padding-left: 20px; }
+.coach-prose ul { list-style: disc; }
+.coach-prose ol { list-style: decimal; }
+.coach-prose li + li { margin-top: 4px; }
+.coach-prose li > :is(p, ul, ol) + * { margin-top: 4px; }
+.coach-prose .contains-task-list { padding-left: 0; list-style: none; }
+.coach-prose .task-list-item input { margin-right: 7px; vertical-align: -1px; accent-color: var(--color-focus); }
+.coach-prose code { border-radius: 3px; background: var(--surface-subtle); padding: 1px 4px; font-size: 12px; }
+.coach-prose pre { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-light); border-radius: 6px; background: var(--surface-subtle); padding: 12px; line-height: 1.6; }
+.coach-prose pre code { padding: 0; }
+.coach-prose blockquote { border-left: 2px solid var(--border-control); padding-left: 12px; color: var(--text-secondary); }
+.coach-prose hr { margin-block: 16px; border-color: var(--border-light); }
+.coach-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-light); border-radius: 6px; overscroll-behavior-x: contain; }
+.coach-table-scroll table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.55; }
+.coach-table-scroll :is(th, td) { min-width: 100px; max-width: 240px; padding: 9px 12px; text-align: left; vertical-align: top; overflow-wrap: break-word; border-bottom: 1px solid var(--border-light); }
+.coach-table-scroll th { font-weight: 500; color: var(--text-secondary); background: var(--surface-subtle); }
+.coach-table-scroll tr:last-child td { border-bottom: 0; }
+.coach-table-scroll :is(th, td) + :is(th, td) { border-left: 1px solid var(--border-light); }
+.coach-table-scroll:focus-visible, .coach-prose pre:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* Chat motion adapted from UI by Halaska (MIT; public/licenses/halaska-ui.txt). */
+@keyframes coach-thinking-dot {
+  0%, 80%, 100% { transform: scale(.55); opacity: .35; }
+  40% { transform: scale(1); opacity: 1; }
+}
+@keyframes coach-message-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.coach-thinking-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: coach-thinking-dot 1.2s cubic-bezier(.4,0,.2,1) infinite both; }
+.coach-message, .coach-thinking, .coach-approval { animation: coach-message-in 250ms cubic-bezier(.2,0,0,1) both; }
+.coach-tool-details { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 250ms cubic-bezier(.2,0,0,1), opacity 150ms ease, visibility 250ms; }
+.coach-tool-details[data-expanded="true"] { grid-template-rows: 1fr; opacity: 1; visibility: visible; }
+@media (prefers-reduced-motion: reduce) {
+  .coach-message, .coach-thinking, .coach-thinking-dot, .coach-approval { animation: none; }
+  .coach-tool-details { transition: none; }
+}
+
+/* Chronological drums: a fixed window, quiet center band and soft edge fade. */
+.date-drum-viewport { height: 240px; }
+.date-drum-selection, .date-drum-row { top: 96px; height: 48px; }
+.date-drum-row { will-change: transform, opacity; }
+
+/* Only the card's contents dissolve. Its opaque surface and fixed top edge
+   anchor navigation; PlanTransition interpolates differing natural heights. */
+.plan-transition { display: flex; height: 100%; flex-shrink: 0; align-items: flex-start; }
+.plan-transition .plan-enter { animation: none; }
+.plan-transition:is([data-phase="leaving"], [data-phase="entering"]) > .plan-card > * { will-change: opacity; }
+@media (prefers-reduced-motion: reduce) {
+  .plan-transition > .plan-card > * { will-change: auto; }
+  .date-drum-row { will-change: auto; }
 }

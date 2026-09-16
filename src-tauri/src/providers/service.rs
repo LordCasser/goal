@@ -26,6 +26,9 @@ use crate::sampling::ApiFormat as SamplingApiFormat;
 pub struct AiSettingsState {
     pub store: ProviderStore,
     pub credentials: Credentials,
+    /// Serialize probe/commit and credential changes so stale tests cannot
+    /// certify a configuration changed by another settings command.
+    pub mutations: futures_util::lock::Mutex<()>,
 }
 
 impl AiSettingsState {
@@ -36,8 +39,25 @@ impl AiSettingsState {
         Ok(Self {
             store: ProviderStore::load(dir)?,
             credentials: Credentials::new(),
+            mutations: futures_util::lock::Mutex::new(()),
         })
     }
+}
+
+/// Shared by the settings selector and a human-approved Coach action.
+/// Callers hold `mutations` while validating and activating the exact pair.
+pub fn activate_model(ai: &AiSettingsState, provider_id: &str, model_id: &str) -> AppResult<()> {
+    let provider = ai
+        .store
+        .get(provider_id)
+        .ok_or_else(|| crate::error::AppError::not_found("provider", provider_id))?;
+    if provider.connection_verified_at.is_none() {
+        return Err(crate::error::AppError::validation(
+            "provider_not_verified",
+            "Test the provider connection before activating it.",
+        ));
+    }
+    ai.store.set_active_model(provider_id, model_id)
 }
 
 /// Converts the persisted wire-format enum onto the sampling layer's enum.
@@ -84,6 +104,7 @@ mod tests {
         assert!(state.store.list().is_empty());
 
         let provider = crate::providers::config::ProviderConfig {
+            connection: Default::default(),
             id: String::new(),
             name: "State test".into(),
             base_url: "http://127.0.0.1:1234".into(),
@@ -99,6 +120,7 @@ mod tests {
             }],
             created_at: 0,
             archived: false,
+            connection_verified_at: None,
         };
         state.store.add(provider).expect("add");
         assert!(

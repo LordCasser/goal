@@ -4,6 +4,7 @@
  * 关闭经 dismiss_hint 持久化，之后不再出现。
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "../../lib/i18n";
 import { dismissHint, getDismissedHints } from "./api";
 import { hintById } from "./hints";
 
@@ -20,6 +21,7 @@ export type HintCardProps = {
  * card never flashes back while the write is in flight.
  */
 export function HintCard({ hintId, onDismissed }: HintCardProps) {
+  const { t } = useTranslation("shell");
   const queryClient = useQueryClient();
   const dismissed = useQuery({
     queryKey: dismissedHintsKey(),
@@ -39,21 +41,23 @@ export function HintCard({ hintId, onDismissed }: HintCardProps) {
   const hint = hintById(hintId);
   if (!hint) return null;
 
+  const title = t(hint.titleKey);
+  const body = t(hint.bodyKey);
   return (
-    <section
+      <section
       data-hint-id={hint.id}
-      aria-label={hint.title}
+      aria-label={title}
       className="mb-3 rounded-sm border border-light bg-subtle p-3"
     >
       <header className="flex items-start justify-between gap-2">
         <h3 className="text-caption font-semibold uppercase tracking-[0.08em] text-secondary">
-          {hint.title}
+          {title}
         </h3>
         <button
           type="button"
           className="h-7 w-7 shrink-0 rounded-sm text-secondary hover:bg-hover hover:text-primary"
-          aria-label="Dismiss hint"
-          title="Won't show again"
+          aria-label={t("onboarding.hint.dismiss")}
+          title={t("onboarding.hint.dismissTitle")}
           onClick={() => hide.mutate()}
         >
           <svg
@@ -69,7 +73,7 @@ export function HintCard({ hintId, onDismissed }: HintCardProps) {
           </svg>
         </button>
       </header>
-      <p className="mt-1 text-menu text-secondary">{hint.body}</p>
+      <p className="mt-1 text-menu text-secondary">{body}</p>
     </section>
   );
 }

@@ -9,7 +9,7 @@ export function Input({ type = "text", className, ...rest }: InputProps) {
     <input
       type={type}
       className={cn(
-        "h-8 w-full rounded-sm border border-control bg-content px-2",
+        "h-9 w-full min-w-0 rounded-md border border-control bg-content px-3",
         "text-[14px] text-primary placeholder:text-hint",
         "transition-colors duration-100",
         "disabled:cursor-not-allowed disabled:bg-subtle disabled:text-hint",

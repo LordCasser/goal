@@ -8,13 +8,14 @@
  * 因为「拖到几点」本质是本地墙钟问题。
  */
 import { addDaysISO, parseISODay } from "../planner/dates";
+import { LATER_CYCLE_ID, type Cycle, type TaskNode } from "../../lib/ipc";
 
 import type { CalendarDay, CalendarRange, ScheduleOverlap, TimeBudget } from "./api";
 
 export type CalendarViewMode = "month" | "week";
 
 /** spec（calendar-view「记住偏好」）：重启后默认打开上次选择的视图。 */
-export const PREFERRED_VIEW_KEY = "planner.preferred-view";
+export const PREFERRED_VIEW_KEY = "planner.calendar-density";
 
 export function loadPreferredView(): CalendarViewMode {
   try {
@@ -31,6 +32,26 @@ export function savePreferredView(view: CalendarViewMode): void {
   } catch {
     // 同上：记忆失败不影响功能，只是下次启动回到默认。
   }
+}
+
+/** Read the same editor content as Workspace, scoped to the visible dates and their ancestors. */
+export function calendarPlanCycleIds(cycles: Cycle[], start: string, end: string): string[] {
+  const byId = new Map(cycles.map((cycle) => [cycle.id, cycle]));
+  const ids = new Set<string>();
+  const include = (cycle: Cycle) => {
+    if (ids.has(cycle.id) || cycle.id === LATER_CYCLE_ID || cycle.archived) return;
+    ids.add(cycle.id);
+    const parent = cycle.parent_id ? byId.get(cycle.parent_id) : undefined;
+    if (parent) include(parent);
+  };
+  cycles.filter((cycle) => cycle.type === "month" || (cycle.type !== "session" && cycle.starts_on !== null && cycle.ends_on !== null
+    && cycle.starts_on <= end && cycle.ends_on > start)).forEach(include);
+  return [...ids].sort();
+}
+
+/** Preview rows share the editor projection; the card labels and locks them. */
+export function calendarTasks(tasks: TaskNode[]): TaskNode[] {
+  return tasks.filter((task) => task.title.trim() !== "");
 }
 
 const MS_PER_DAY = 86_400_000;
@@ -123,6 +144,61 @@ export function overlapIds(overlaps: ScheduleOverlap[]): Set<string> {
     ids.add(pair.second.session_id);
   }
   return ids;
+}
+
+export interface ScheduleOverlapLane {
+  lane: number;
+  lanes: number;
+}
+
+/**
+ * Assign scheduled sessions to horizontal lanes without changing their times.
+ * Intervals that touch at an endpoint do not overlap; transitive overlaps stay
+ * in one connected group so each group can use its own full available width.
+ * Ties are stable by session id, making the layout deterministic across query
+ * refreshes.
+ */
+export function scheduleOverlapLanes(
+  sessions: CalendarDay["sessions"],
+): Map<string, ScheduleOverlapLane> {
+  const intervals = sessions
+    .filter((item): item is CalendarDay["sessions"][number] & { schedule: NonNullable<CalendarDay["sessions"][number]["schedule"]> } => item.schedule !== null)
+    .map((item) => ({
+      id: item.session.id,
+      startsAt: item.schedule.starts_at,
+      endsAt: Math.max(item.schedule.ends_at, item.schedule.starts_at),
+    }))
+    .sort((a, b) => a.startsAt - b.startsAt || a.id.localeCompare(b.id));
+
+  const result = new Map<string, ScheduleOverlapLane>();
+  let group: typeof intervals = [];
+  let groupEndsAt = Number.NEGATIVE_INFINITY;
+
+  const assignGroup = (items: typeof intervals) => {
+    if (items.length === 0) return;
+    const laneEndsAt: number[] = [];
+    const assignments: Array<{ id: string; lane: number }> = [];
+    for (const item of items) {
+      let lane = laneEndsAt.findIndex((endsAt) => endsAt <= item.startsAt);
+      if (lane === -1) lane = laneEndsAt.length;
+      laneEndsAt[lane] = item.endsAt;
+      assignments.push({ id: item.id, lane });
+    }
+    const lanes = laneEndsAt.length;
+    for (const assignment of assignments) result.set(assignment.id, { lane: assignment.lane, lanes });
+  };
+
+  for (const interval of intervals) {
+    if (group.length > 0 && interval.startsAt >= groupEndsAt) {
+      assignGroup(group);
+      group = [];
+      groupEndsAt = Number.NEGATIVE_INFINITY;
+    }
+    group.push(interval);
+    groupEndsAt = Math.max(groupEndsAt, interval.endsAt);
+  }
+  assignGroup(group);
+  return result;
 }
 
 /**

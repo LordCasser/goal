@@ -22,8 +22,9 @@ export interface HintContext {
 export interface HintDefinition {
   /** Stable id persisted in the backend dismissed list. */
   id: string;
-  title: string;
-  body: string;
+  /** Translation keys; resolve them in the component render, never at module load. */
+  titleKey: string;
+  bodyKey: string;
   /** Trigger condition over the current workspace facts. */
   when: (context: HintContext) => boolean;
 }
@@ -31,26 +32,20 @@ export interface HintDefinition {
 export const HINTS: HintDefinition[] = [
   {
     id: "later-explainer",
-    title: "Park now, plan later",
-    body:
-      "Capture a goal the moment it shows up — nothing here needs a date " +
-      "or a plan. Promote parked items into a long-term cycle when you are ready.",
+    titleKey: "onboarding.hint.later.title",
+    bodyKey: "onboarding.hint.later.body",
     when: (context) => (context.laterCount ?? 0) === 0,
   },
   {
     id: "session-duration-explainer",
-    title: "Durations power the timer",
-    body:
-      "A focus block with a set duration counts down to a notification when " +
-      "time is up, and its focus time rolls up into your day, week and month.",
+    titleKey: "onboarding.hint.sessionDuration.title",
+    bodyKey: "onboarding.hint.sessionDuration.body",
     when: (context) => context.showedDurationlessSession === true,
   },
   {
     id: "cross-link-explainer",
-    title: "Link the levels",
-    body:
-      "Drag a weekly item under a long-term goal, or a daily task under a " +
-      "weekly item, so every small step visibly serves the bigger plan.",
+    titleKey: "onboarding.hint.crossLink.title",
+    bodyKey: "onboarding.hint.crossLink.body",
     when: (context) => (context.linkedItemCount ?? 0) === 0 && context.guideNearComplete === true,
   },
 ];

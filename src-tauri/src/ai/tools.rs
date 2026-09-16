@@ -17,34 +17,27 @@
 //!   Every write tool requires a `rationale`, and — per spec (工具结果对模型
 //!   报告成功) — reports success with `status: "proposed"`; the pending
 //!   confirm/revert loop belongs to the human interface, never to the model.
-//! * §5.5 move validation mirrors `service::tasks::move_task`'s pure checks
-//!   (source/target usability, `cycle_ended`, focus-block target, colour
-//!   constraint). The write itself is deliberately **two independent
-//!   previews**: an upsert preview in the target cycle plus a delete preview
-//!   on the source row ("copy + delete"). A single atomic previewed move does
-//!   not exist in the preview layer, and two-step pre-validating into one
-//!   transaction would bypass `service::proposals` and break the per-row
-//!   Keep/Revert contract; this trade-off is owned by change question Q02.
-//!   Subtask child rows and cross-cycle parent links are not carried by the
-//!   copy — the full move UI remains the way to relocate a whole subtree.
+//! * Task transfers and non-task writes use typed, human-approved actions.
+//!   Domain services execute them only after a GUI decision, preserving IDs.
 //! * §5.6 tool arguments deserialize strictly (`deny_unknown_fields` on every
 //!   args struct): an unknown field or a mistyped value is a tool **error
 //!   result**, never a panic and never a silently ignored field. The nested
 //!   `GoalBreakdownUpdate` stays intentionally lenient about unknown keys (it
 //!   is the §6 engine's wire type); a no-op update is rejected downstream as
 //!   `empty_update`, so nothing silent survives.
-//! * Prioritization (`update_prioritization_breakdown`) is **not** a task
-//!   write: the five-bucket document is whole-row state on `cycles`
-//!   (design D6) and is persisted directly through
-//!   [`prioritization::store_for_cycle`], bypassing the preview layer on
-//!   purpose. `start_prioritization` recomputes `pending_review` from the
-//!   cycle's visible tasks so a stale pending list can never leak out.
+//! * Prioritization (`update_prioritization_breakdown`) stages a typed action:
+//!   the five-bucket document is whole-row state on `cycles` (design D6), so
+//!   the action carries the incremental update and applies the same merge and
+//!   validation only after GUI approval. `start_prioritization` recomputes
+//!   `pending_review` from the cycle's visible tasks so a stale pending list
+//!   can never leak out.
 
 use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::ai::actions::{self, Action, PrioritizationAction};
 use crate::ai::agent::context::{load_context, render};
 use crate::ai::agent::prompt::planning_skill_for_cycle;
 use crate::ai::agent::turn::{ToolExecutor, ToolOutcome};
@@ -56,15 +49,9 @@ use crate::domain::cycle::{Cycle, CycleType};
 use crate::domain::task::{render_subtasks_markdown, Task};
 use crate::error::{AppError, AppResult};
 use crate::repository::{cycles as cycles_repo, tasks as tasks_repo};
-use crate::service::cycles as cycles_service;
 use crate::service::now_ms;
 use crate::service::proposals::{self, TaskInput};
 use crate::service::reviews as reviews_service;
-
-/// Sentinel addressing the session-bound cycle. This is the only cycle the
-/// §5 tools can address: `day:`/`week:`/`long-term:` key resolution is the
-/// documented extension point (task 5.1 keeps the first cut minimal).
-const CURRENT: &str = "current";
 
 /// The stateless planning tool registry. All state lives in the database; the
 /// session-bound `cycle_id` arrives per call.
@@ -78,7 +65,7 @@ pub struct ToolRegistry;
 #[serde(deny_unknown_fields)]
 struct GetCycleContextArgs {
     #[serde(default)]
-    cycle_key: Option<String>,
+    cycle_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +77,12 @@ struct GetTaskDetailsArgs {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StartPlanningArgs {}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoadSkillArgs {
+    name: String,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -108,10 +101,9 @@ struct StartReviewArgs {}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateGoalArgs {
-    /// Must be absent/null (or the literal `current`): the write lands in the
-    /// session-bound cycle.
+    /// Omit to use the focused cycle; otherwise use an ID from list_cycles.
     #[serde(default)]
-    cycle_key: Option<String>,
+    cycle_id: Option<String>,
     title: String,
     /// Contract-required; consumed by the proposal audit trail, not read here.
     #[allow(dead_code)]
@@ -125,6 +117,8 @@ struct UpdateGoalArgs {
     /// Absent keeps the current title.
     #[serde(default)]
     title: Option<String>,
+    completed: Option<bool>,
+    subtasks: Option<Vec<crate::domain::task::Subtask>>,
     /// Contract-required; consumed by the proposal audit trail, not read here.
     #[allow(dead_code)]
     rationale: String,
@@ -134,19 +128,6 @@ struct UpdateGoalArgs {
 #[serde(deny_unknown_fields)]
 struct DeleteGoalArgs {
     task_id: String,
-    /// Contract-required; consumed by the proposal audit trail, not read here.
-    #[allow(dead_code)]
-    rationale: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MoveGoalArgs {
-    task_id: String,
-    /// Must be absent/null (or `current`): the target is the session-bound
-    /// cycle. Full cross-cycle goal selection belongs to the move UI.
-    #[serde(default)]
-    target_cycle_key: Option<String>,
     /// Contract-required; consumed by the proposal audit trail, not read here.
     #[allow(dead_code)]
     rationale: String,
@@ -178,45 +159,36 @@ struct UpdatePrioritizationBreakdownArgs {
 // ---------------------------------------------------------------------------
 
 impl ToolExecutor for ToolRegistry {
-    /// Definition sets (5.7 policy, chosen per the task recommendation):
-    ///
-    /// * `tools_supported = false` — conversation mode, no tools at all.
-    /// * `AgentSkill::None` — only the three `start_*` entry tools; the
-    ///   `none` system prompt tells the model to activate a skill first and
-    ///   must not be undermined by write tools being reachable pre-activation.
-    /// * any activated skill — the full non-activation set (2 read + 6
-    ///   write/analysis tools + `start_review`). Per-skill narrowing would
-    ///   duplicate the prompts' behavioural constraints; the prompts stay the
-    ///   single place that steers which tools a skill uses. `start_review`
-    ///   (add-review-retrospective §5.1) joins this shared set: it is an
-    ///   activation-style pivot reachable once a skill is active, and reviews
-    ///   the session-bound cycle.
+    /// Every tool-capable model can choose a workflow. Planning skills
+    /// expose proposal tools; analysis/diagnosis expose only reads and loading.
+    /// The executor checks this same list before running any model call.
     fn definitions(&self, skill: AgentSkill, tools_supported: bool) -> Vec<ToolDef> {
         if !tools_supported {
             return Vec::new();
         }
+        let mut definitions = vec![def_get_cycle_context(), def_get_task_details()];
         match skill {
-            AgentSkill::None => vec![
-                def_start_planning(),
-                def_start_goal_setting(),
-                def_start_prioritization(),
-            ],
-            AgentSkill::GoalSetting
-            | AgentSkill::LongTermPlanning
-            | AgentSkill::ShortTermPlanning
-            | AgentSkill::Prioritization
-            | AgentSkill::Review => vec![
-                def_get_cycle_context(),
-                def_get_task_details(),
-                def_create_goal(),
-                def_update_goal(),
-                def_delete_goal(),
-                def_move_goal(),
-                def_update_goal_breakdown(),
-                def_update_prioritization_breakdown(),
-                def_start_review(),
-            ],
+            AgentSkill::None => {}
+            AgentSkill::PeriodAnalysis => definitions.push(def_get_period_context()),
+            AgentSkill::PlanningIssues => definitions.push(def_get_planning_issues()),
+            _ => {
+                definitions.extend([
+                    def_create_goal(),
+                    def_update_goal(),
+                    def_delete_goal(),
+                    def_update_goal_breakdown(),
+                ]);
+                if skill == AgentSkill::Prioritization {
+                    definitions.push(def_update_prioritization_breakdown());
+                }
+                if skill == AgentSkill::Review {
+                    definitions.push(def_start_review());
+                }
+            }
         }
+        definitions.extend(crate::ai::tool_catalog::definitions(skill));
+        definitions.push(def_load_skill());
+        definitions
     }
 
     /// Runs one call. Model-supplied arguments are untrusted input: every
@@ -252,7 +224,55 @@ impl ToolRegistry {
         cycle_id: &str,
         call: &ToolCallRecord,
     ) -> AppResult<(serde_json::Value, Option<AgentSkill>)> {
+        if [
+            "create_goal",
+            "update_goal",
+            "delete_goal",
+            "update_goal_breakdown",
+            "update_prioritization_breakdown",
+        ]
+        .contains(&call.name.as_str())
+            && call
+                .arguments
+                .get("rationale")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|r| r.trim().is_empty())
+        {
+            return Err(AppError::validation(
+                "missing_reason",
+                "A nonempty rationale is required",
+            ));
+        }
         match call.name.as_str() {
+            "load_skill" => {
+                let args: LoadSkillArgs = parse_args(call)?;
+                let skill = crate::ai::skills::Skill::parse(&args.name).ok_or_else(|| {
+                    AppError::validation(
+                        "unknown_skill",
+                        "Choose a skill name from the tool catalog.",
+                    )
+                })?;
+                let instructions = crate::ai::skills::load(skill)?;
+                Ok((
+                    json!({ "skill": skill.name(), "instructions": instructions }),
+                    Some(skill.agent_skill()),
+                ))
+            }
+            "get_period_context" => {
+                let args: crate::ai::period_analysis::PeriodRequest = parse_args(call)?;
+                Ok((
+                    serde_json::to_value(crate::ai::period_analysis::facts(db, &args)?)
+                        .map_err(|e| AppError::Internal(e.to_string()))?,
+                    None,
+                ))
+            }
+            "get_planning_issues" => {
+                let _: StartPlanningArgs = parse_args(call)?;
+                Ok((
+                    json!({ "issues": crate::ai::review::review_cycle(db, cycle_id) }),
+                    None,
+                ))
+            }
             // -- read (5.1) ------------------------------------------------
             "get_cycle_context" => {
                 let args: GetCycleContextArgs = parse_args(call)?;
@@ -308,10 +328,6 @@ impl ToolRegistry {
                 let args: DeleteGoalArgs = parse_args(call)?;
                 Ok((delete_goal(db, &args)?, None))
             }
-            "move_goal" => {
-                let args: MoveGoalArgs = parse_args(call)?;
-                Ok((move_goal(db, cycle_id, &args)?, None))
-            }
             "update_goal_breakdown" => {
                 let args: UpdateGoalBreakdownArgs = parse_args(call)?;
                 Ok((update_goal_breakdown(db, &args)?, None))
@@ -320,10 +336,7 @@ impl ToolRegistry {
                 let args: UpdatePrioritizationBreakdownArgs = parse_args(call)?;
                 Ok((update_prioritization_breakdown(db, cycle_id, &args)?, None))
             }
-            other => Err(AppError::validation(
-                "unknown_tool",
-                format!("tool '{other}' is not available"),
-            )),
+            _ => Ok((crate::ai::tool_catalog::execute(db, cycle_id, call)?, None)),
         }
     }
 }
@@ -361,19 +374,6 @@ fn error_payload(error: &AppError) -> serde_json::Value {
         AppError::Internal(_) => "internal".to_string(),
     };
     json!({ "error": error.to_string(), "code": code })
-}
-
-/// The bound cycle is the only addressable one: an absent/null key or the
-/// literal `current` is accepted, anything else is a tool error carrying the
-/// contract message. Used by every tool with a cycle-key parameter.
-fn require_bound_cycle_key(value: Option<&str>) -> AppResult<()> {
-    match value {
-        None | Some(CURRENT) => Ok(()),
-        Some(other) => Err(AppError::validation(
-            "only_current_cycle_supported",
-            format!("only the current cycle context is available (got cycle key '{other}')"),
-        )),
-    }
 }
 
 /// The full per-task detail block shared by `get_task_details` and
@@ -444,17 +444,14 @@ fn carry_over_input(task: &Task) -> TaskInput {
 // §5.1 read tools
 // ---------------------------------------------------------------------------
 
-/// `get_cycle_context` — renders the bound cycle's `<context>` block via the
-/// §4 loader/renderer unchanged. Simplified scope (task 5.1): only the bound
-/// cycle is addressable; prefix-based key resolution (`day:`/`week:`/
-/// `long-term:`) is the extension point and currently answers with a tool
-/// error instead of a wrong-cycle read.
+/// Render a focused or explicitly identified cycle through the shared context loader.
+/// Calendar labels are display data; only real cycle IDs are accepted.
 fn get_cycle_context(
     db: &Db,
     cycle_id: &str,
     args: &GetCycleContextArgs,
 ) -> AppResult<serde_json::Value> {
-    require_bound_cycle_key(args.cycle_key.as_deref())?;
+    let cycle_id = args.cycle_id.as_deref().unwrap_or(cycle_id);
     let conn = db.pool().get()?;
     let context = load_context(&conn, cycle_id)?;
     Ok(json!({ "context": render(&context, None) }))
@@ -473,8 +470,7 @@ fn get_task_details(db: &Db, args: &GetTaskDetailsArgs) -> AppResult<serde_json:
 // ---------------------------------------------------------------------------
 
 /// `start_planning` — dispatches on the bound cycle's type through
-/// [`planning_skill_for_cycle`]: `month` → `long_term_planning`, `week|day`
-/// → `short_term_planning`, `session` → the `unsupported_cycle_type` error
+/// [`planning_skill_for_cycle`]: month/week/day each activate their workflow; `session` → the `unsupported_cycle_type` error
 /// whose text is the spec's exact sentence. Success carries the rendered
 /// context block plus `activated_skill`; the turn executor (not this module)
 /// persists the skill on the conversation.
@@ -559,7 +555,7 @@ fn start_prioritization(db: &Db, cycle_id: &str) -> AppResult<serde_json::Value>
 // §5.3 write tools — all through the preview layer (design D3)
 // ---------------------------------------------------------------------------
 
-/// `create_goal` — stages a goal in the bound cycle via
+/// `create_goal` — stages a goal in the focused or explicitly identified cycle via
 /// [`proposals::apply_upsert_preview`]. The trailing-empty-row reuse (§5.4)
 /// lives inside that service function: an empty visible row at the end of the
 /// list is snapshotted and replaced instead of appending a new row. Clarity
@@ -569,7 +565,7 @@ fn start_prioritization(db: &Db, cycle_id: &str) -> AppResult<serde_json::Value>
 /// task id — the confirm step belongs to the interface, never to the model
 /// (spec: 工具结果对模型报告成功).
 fn create_goal(db: &Db, cycle_id: &str, args: &CreateGoalArgs) -> AppResult<serde_json::Value> {
-    require_bound_cycle_key(args.cycle_key.as_deref())?;
+    let cycle_id = args.cycle_id.as_deref().unwrap_or(cycle_id);
     let long_term = {
         let conn = db.pool().get()?;
         cycles_repo::require(&conn, cycle_id)?.cycle_type == CycleType::Month
@@ -615,12 +611,14 @@ fn update_goal(db: &Db, args: &UpdateGoalArgs) -> AppResult<serde_json::Value> {
     if let Some(title) = &args.title {
         input.title = title.clone();
     }
+    if let Some(completed) = args.completed {
+        input.completed = completed;
+    }
+    if let Some(subtasks) = &args.subtasks {
+        input.subtasks = subtasks.clone();
+    }
     let mutation = proposals::apply_update_preview(db, &args.task_id, &input)?;
-    Ok(json!({
-        "status": "proposed",
-        "task_id": mutation.value.id,
-        "title": mutation.value.title,
-    }))
+    Ok(json!({"status":"proposed", "task_id":mutation.value.id, "title":mutation.value.title}))
 }
 
 /// `delete_goal` — stages a deletion via [`proposals::apply_delete_preview`];
@@ -630,74 +628,6 @@ fn update_goal(db: &Db, args: &UpdateGoalArgs) -> AppResult<serde_json::Value> {
 fn delete_goal(db: &Db, args: &DeleteGoalArgs) -> AppResult<serde_json::Value> {
     proposals::apply_delete_preview(db, &args.task_id)?;
     Ok(json!({ "status": "proposed", "task_id": args.task_id }))
-}
-
-/// `move_goal` — moves a goal into the session-bound cycle as **two
-/// independent previews** (see the module docs for why this is not one atomic
-/// preview): an upsert preview row in the target cycle plus a delete preview
-/// on the source row. Each can be Kept/Reverted on its own, which is the
-/// known Q02 trade-off. Validation mirrors `service::tasks::move_task`'s
-/// checks and reuses the service layer's mutability rule:
-///
-/// * unknown source row → `task_not_found` ("任务不在源");
-/// * source or target cycle ended → `cycle_ended`;
-/// * focus-block target → `unsupported_cycle_type`;
-/// * coloured goal into a non-long-term cycle →
-///   `root_color_key_requires_long_term_cycle`;
-/// * source == target → `invalid_target` (a same-cycle move is a no-op, not
-///   a duplicate).
-fn move_goal(db: &Db, cycle_id: &str, args: &MoveGoalArgs) -> AppResult<serde_json::Value> {
-    require_bound_cycle_key(args.target_cycle_key.as_deref())?;
-    let (existing, target) = {
-        let conn = db.pool().get()?;
-        let existing = tasks_repo::require(&conn, &args.task_id)?;
-        let source = cycles_repo::require(&conn, &existing.cycle_id)?;
-        cycles_service::ensure_cycle_mutable(&source)?;
-        let target = cycles_repo::require(&conn, cycle_id)?;
-        if target.cycle_type == CycleType::Session {
-            return Err(AppError::validation(
-                "unsupported_cycle_type",
-                "Tasks cannot move into a focus block",
-            ));
-        }
-        cycles_service::ensure_cycle_mutable(&target)?;
-        // Colored goals must stay inside long-term cycles — the same rule as
-        // the service move, reported with the stable code.
-        if existing.root_color_key.is_some() && target.cycle_type != CycleType::Month {
-            return Err(AppError::conflict(
-                "root_color_key_requires_long_term_cycle",
-                "Colors can only be used on goals inside a Long-term cycle.",
-            ));
-        }
-        (existing, target)
-    };
-    if existing.cycle_id == target.id {
-        return Err(AppError::validation(
-            "invalid_target",
-            "The goal is already in the target cycle",
-        ));
-    }
-
-    // The copy is a fresh top-level row in the target cycle: same-cycle child
-    // rows and cross-cycle parent links are not carried (module docs).
-    let input = TaskInput {
-        parent_id: None,
-        ..carry_over_input(&existing)
-    };
-    let created = proposals::apply_upsert_preview(db, &target.id, &input, now_ms())?;
-    if let Err(error) = proposals::apply_delete_preview(db, &existing.id) {
-        // Compensation: don't leave the copy preview dangling when the source
-        // delete failed (e.g. the row vanished under us).
-        let _ = proposals::undo_task_preview(db, &created.value.id);
-        return Err(error);
-    }
-    Ok(json!({
-        "status": "proposed",
-        "task_id": created.value.id,
-        "source_task_id": existing.id,
-        "target_cycle_id": target.id,
-        "message": "Move staged as two proposals: a copy in the target cycle and a deletion in the source cycle. Keep or revert each independently.",
-    }))
 }
 
 /// `update_goal_breakdown` (§6.5) — merges the submitted partial update onto
@@ -750,15 +680,10 @@ fn update_goal_breakdown(db: &Db, args: &UpdateGoalBreakdownArgs) -> AppResult<s
     }))
 }
 
-/// `update_prioritization_breakdown` (§7.4) — merges the per-bucket update
-/// onto the persisted document with the cycle's visible task ids as the
-/// candidate set ([`prioritization::merge`] validates: `unknown_task`,
-/// `missing_reason` — every placed item needs a reason in the user's own
-/// words — and `task_in_multiple_buckets`), then persists it with
-/// [`prioritization::store_for_cycle`]. This is deliberately **not** a
-/// preview: the breakdown is whole-document state on the cycle row (design
-/// D6), there is no per-row Keep/Revert to offer, and the spec's sorting
-/// conclusion is read/written as a whole.
+/// `update_prioritization_breakdown` (§7.4) — validates the per-bucket update
+/// against the cycle's visible task ids using [`prioritization::merge`], then
+/// stages the typed whole-document action. The cycle row is written only by
+/// the existing GUI approval path; no model call can commit the conclusion.
 fn update_prioritization_breakdown(
     db: &Db,
     cycle_id: &str,
@@ -770,14 +695,20 @@ fn update_prioritization_breakdown(
     let candidates: HashSet<String> = tasks.iter().map(|task| task.id.clone()).collect();
     let existing = prioritization::load_for_cycle(&conn, cycle_id)?.unwrap_or_default();
     let merged = prioritization::merge(&existing, &args.update, &candidates)?;
-    prioritization::store_for_cycle(&conn, cycle_id, &merged)?;
     let rendered =
         prioritization::render_for_model(&merged, &titles_of(&tasks), &cycle_key_label(&cycle));
-    Ok(json!({
-        "status": "saved",
-        "breakdown": prioritization::to_value(&merged),
-        "rendered": rendered,
-    }))
+    let mut result = actions::stage(
+        db,
+        cycle_id,
+        Action::Prioritization(PrioritizationAction::Update {
+            cycle_id: cycle_id.to_string(),
+            update: args.update.clone(),
+        }),
+        &args.rationale,
+    )?;
+    result["breakdown"] = prioritization::to_value(&merged);
+    result["rendered"] = json!(rendered);
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -799,11 +730,9 @@ fn object_schema(properties: serde_json::Value, required: &[&str]) -> serde_json
 fn def_get_cycle_context() -> ToolDef {
     ToolDef::new(
         "get_cycle_context",
-        "Read the current planning cycle's machine-readable context block (cycle \
-         metadata, parent/child keys, task list). Only the session-bound cycle can \
-         be read; omit cycle_key or pass \"current\".",
+        "Read a cycle context including task IDs and parent/child links. Omit cycle_id for the focused cycle; otherwise use an ID returned by list_cycles.",
         object_schema(
-            json!({ "cycle_key": { "type": ["string", "null"], "description": "omit or \"current\" for the bound cycle" } }),
+            json!({ "cycle_id": { "type": ["string", "null"], "description": "Omit for the focused cycle, or pass an existing cycle ID" } }),
             &[],
         ),
     )
@@ -816,34 +745,6 @@ fn def_get_task_details() -> ToolDef {
          the raw goal_breakdown value, the computed missing_fields list and the \
          clarity flags.",
         object_schema(json!({ "task_id": { "type": "string" } }), &["task_id"]),
-    )
-}
-
-fn def_start_planning() -> ToolDef {
-    ToolDef::new(
-        "start_planning",
-        "Activate the planning skill for this cycle (long-term for month cycles, \
-         short-term for week/day cycles). Focus blocks (sessions) do not support \
-         agent planning.",
-        object_schema(json!({}), &[]),
-    )
-}
-
-fn def_start_goal_setting() -> ToolDef {
-    ToolDef::new(
-        "start_goal_setting",
-        "Activate goal clarification for one existing task: fill its structured \
-         breakdown by asking the user one question at a time.",
-        object_schema(json!({ "task_id": { "type": "string" } }), &["task_id"]),
-    )
-}
-
-fn def_start_prioritization() -> ToolDef {
-    ToolDef::new(
-        "start_prioritization",
-        "Activate prioritization: load the cycle's five-bucket breakdown and the \
-         tasks still awaiting classification.",
-        object_schema(json!({}), &[]),
     )
 }
 
@@ -862,12 +763,11 @@ fn def_start_review() -> ToolDef {
 fn def_create_goal() -> ToolDef {
     ToolDef::new(
         "create_goal",
-        "Propose a new goal in the current cycle. The change is staged as a \
-         proposal the user confirms in the interface; report it as done. An empty \
+        "Propose a new goal in the focused or explicitly identified cycle. Report it as pending GUI confirmation. An empty \
          trailing row in the list is reused instead of appending.",
         object_schema(
             json!({
-                "cycle_key": { "type": ["string", "null"], "description": "omit or \"current\"; the goal is created in the bound cycle" },
+                "cycle_id": { "type": ["string", "null"], "description": "Omit for the focused cycle, or pass an existing cycle ID from list_cycles" },
                 "title": { "type": "string", "description": "the goal's title, in the user's language" },
                 "rationale": { "type": "string", "description": "why this goal, naming what the user said" },
             }),
@@ -877,19 +777,22 @@ fn def_create_goal() -> ToolDef {
 }
 
 fn def_update_goal() -> ToolDef {
-    ToolDef::new(
+    let mut def = ToolDef::new(
         "update_goal",
-        "Propose a new title for an existing goal. The change is staged as a \
-         proposal; report it as done. Omit title to re-stage the row unchanged.",
+        "Propose title, completion state or a replacement checklist. Omitted fields are preserved. Read task details first. Report pending GUI confirmation, not an applied change.",
         object_schema(
             json!({
                 "task_id": { "type": "string" },
-                "title": { "type": "string", "description": "the refined title; omit to keep the current one" },
+                "title": { "type": "string", "minLength":1, "description": "Refined title; omit to preserve" },
+                "completed": {"type":"boolean", "description":"Explicit desired completion state; never a toggle"},
+                "subtasks": {"type":"array","maxItems":100,"items":{"$ref":"#/$defs/subtask"},"description":"Full replacement checklist; [] clears. Read details before editing."},
                 "rationale": { "type": "string", "description": "what prompted the rename" },
             }),
             &["task_id", "rationale"],
         ),
-    )
+    );
+    def.input_schema["$defs"] = json!({"subtask":{"type":"object","properties":{"title":{"type":"string"},"completed":{"type":"boolean"},"children":{"type":"array","maxItems":100,"items":{"$ref":"#/$defs/subtask"}}},"required":["title","completed"],"additionalProperties":false}});
+    def
 }
 
 fn def_delete_goal() -> ToolDef {
@@ -901,24 +804,6 @@ fn def_delete_goal() -> ToolDef {
             json!({
                 "task_id": { "type": "string" },
                 "rationale": { "type": "string", "description": "why the goal should go" },
-            }),
-            &["task_id", "rationale"],
-        ),
-    )
-}
-
-fn def_move_goal() -> ToolDef {
-    ToolDef::new(
-        "move_goal",
-        "Propose moving a goal into the current cycle. Lands as two independent \
-         proposals (a copy in the target cycle, a deletion in the source cycle) \
-         the user confirms separately. Rejected when the source or target cycle \
-         has ended.",
-        object_schema(
-            json!({
-                "task_id": { "type": "string" },
-                "target_cycle_key": { "type": ["string", "null"], "description": "omit or \"current\"; the bound cycle is the target" },
-                "rationale": { "type": "string", "description": "why the goal belongs there now" },
             }),
             &["task_id", "rationale"],
         ),
@@ -954,9 +839,11 @@ fn def_update_goal_breakdown() -> ToolDef {
 fn def_update_prioritization_breakdown() -> ToolDef {
     ToolDef::new(
         "update_prioritization_breakdown",
-        "Save prioritization conclusions. Send only the buckets that change — \
-         omitted buckets keep their content, an empty array clears one. Every \
-         placed task needs a reason in the user's own words; never invent one.",
+        "Propose prioritization conclusions for GUI approval. Send only the \
+         buckets that change — omitted buckets keep their content, an empty \
+         array clears one. Every placed task needs a reason in the user's own \
+         words; never invent one. The result is pending until the user confirms \
+         it in Coach.",
         object_schema(
             json!({
                 "update": {
@@ -1084,6 +971,7 @@ mod tests {
         add_session(
             db,
             &AddSessionArgs {
+                task_id: None,
                 day_cycle_id: day,
                 title: "focus".into(),
                 ..Default::default()
@@ -1127,7 +1015,7 @@ mod tests {
     // -- 5.1 read tools ------------------------------------------------------
 
     #[test]
-    fn get_cycle_context_renders_the_bound_cycle_only() {
+    fn get_cycle_context_defaults_to_focus_and_accepts_explicit_ids() {
         let (_dir, db) = db();
         let cycle = month_cycle(&db);
 
@@ -1144,7 +1032,7 @@ mod tests {
             &db,
             &cycle,
             "get_cycle_context",
-            json!({ "cycle_key": "current" }),
+            json!({ "cycle_id": cycle }),
         );
         assert!(!outcome.is_error);
 
@@ -1153,13 +1041,9 @@ mod tests {
             &db,
             &cycle,
             "get_cycle_context",
-            json!({ "cycle_key": "week:2026-W38" }),
+            json!({ "cycle_id": "week:2026-W38" }),
         );
-        assert_eq!(error_code(&outcome), "only_current_cycle_supported");
-        assert!(outcome.result["error"]
-            .as_str()
-            .unwrap()
-            .contains("only the current cycle context is available"));
+        assert_eq!(error_code(&outcome), "cycle_not_found");
     }
 
     #[test]
@@ -1220,11 +1104,11 @@ mod tests {
 
         let week = week_cycle(&db, &month);
         let outcome = run(&db, &week, "start_planning", json!({}));
-        assert_eq!(outcome.activated_skill, Some(AgentSkill::ShortTermPlanning));
+        assert_eq!(outcome.activated_skill, Some(AgentSkill::WeeklyPlanning));
 
         let day = day_cycle(&db, &week);
         let outcome = run(&db, &day, "start_planning", json!({}));
-        assert_eq!(outcome.activated_skill, Some(AgentSkill::ShortTermPlanning));
+        assert_eq!(outcome.activated_skill, Some(AgentSkill::DailyPlanning));
     }
 
     #[test]
@@ -1444,103 +1328,6 @@ mod tests {
         assert_eq!(snapshot.title.as_deref(), Some("Doomed goal"));
     }
 
-    // -- 5.5 move_goal --------------------------------------------------------
-
-    #[test]
-    fn move_goal_stages_two_previews() {
-        let (_dir, db) = db();
-        let source = month_cycle(&db);
-        // Distinct duration so the two long-term cycles don't collide on the
-        // UNIQUE calendar identity (see `month_cycle_of`).
-        let target = month_cycle_of(&db, 3);
-        let task_id = task(&db, &source, "Migrating goal");
-
-        let outcome = run(
-            &db,
-            &target,
-            "move_goal",
-            json!({ "task_id": task_id, "rationale": "用户决定放到当前周期做" }),
-        );
-        assert!(!outcome.is_error);
-        assert_eq!(outcome.result["status"], "proposed");
-        let copy_id = outcome.result["task_id"].as_str().unwrap().to_string();
-        assert_ne!(copy_id, task_id, "the copy is a fresh preview row");
-
-        // Target cycle: one staged copy, nothing committed.
-        assert!(visible_titles(&db, &target).is_empty());
-        let copy = row(&db, &copy_id);
-        assert_eq!(copy.cycle_id, target);
-        assert_eq!(copy.title, "Migrating goal");
-        assert_eq!(copy.proposal, Some(ProposalKind::Upsert));
-        // Source row: staged for deletion, still present for Revert.
-        let staged_source = row(&db, &task_id);
-        assert_eq!(staged_source.cycle_id, source);
-        assert_eq!(staged_source.proposal, Some(ProposalKind::Delete));
-        // Both rows carry snapshots so each preview reverts independently.
-        let conn = db.pool().get().unwrap();
-        assert!(
-            !proposals_repo::get_snapshot(&conn, &copy_id)
-                .unwrap()
-                .unwrap()
-                .original_exists
-        );
-        assert_eq!(
-            proposals_repo::get_snapshot(&conn, &task_id)
-                .unwrap()
-                .unwrap()
-                .title
-                .as_deref(),
-            Some("Migrating goal")
-        );
-    }
-
-    #[test]
-    fn move_goal_validates_source_and_target() {
-        let (_dir, db) = db();
-        let source = month_cycle(&db);
-        let target = month_cycle_of(&db, 6);
-
-        // Unknown task → task_not_found ("任务不在源").
-        let outcome = run(
-            &db,
-            &target,
-            "move_goal",
-            json!({ "task_id": "ghost", "rationale": "r" }),
-        );
-        assert_eq!(error_code(&outcome), "task_not_found");
-
-        // Ended target cycle → cycle_ended.
-        {
-            let conn = db.pool().get().unwrap();
-            crate::repository::cycles::set_lifecycle(&conn, &target, true, true, Some(1), Some(1))
-                .unwrap();
-        }
-        let task_id = task(&db, &source, "Too late");
-        let outcome = run(
-            &db,
-            &target,
-            "move_goal",
-            json!({ "task_id": task_id, "rationale": "r" }),
-        );
-        assert_eq!(error_code(&outcome), "cycle_ended");
-
-        // Same-cycle move → invalid_target.
-        {
-            let conn = db.pool().get().unwrap();
-            crate::repository::cycles::set_lifecycle(&conn, &target, false, false, None, None)
-                .unwrap();
-        }
-        let outcome = run(
-            &db,
-            &source,
-            "move_goal",
-            json!({ "task_id": task_id, "rationale": "r" }),
-        );
-        assert_eq!(error_code(&outcome), "invalid_target");
-        // Nothing was staged by the failed attempts.
-        assert_eq!(row(&db, &task_id).proposal, None);
-    }
-
     // -- update_goal_breakdown (6.5) ------------------------------------------
 
     #[test]
@@ -1613,9 +1400,9 @@ mod tests {
 
     // -- update_prioritization_breakdown (7.4) --------------------------------
 
-    #[test]
-    fn update_prioritization_breakdown_persists_buckets_and_rejects_blank_reasons() {
-        let (_dir, db) = db();
+    #[tokio::test]
+    async fn update_prioritization_breakdown_requires_approval_and_reject_preserves_state() {
+        let (dir, db) = db();
         let cycle = month_cycle(&db);
         let t1 = task(&db, &cycle, "first");
         let t2 = task(&db, &cycle, "second");
@@ -1630,7 +1417,8 @@ mod tests {
             }),
         );
         assert!(!outcome.is_error);
-        assert_eq!(outcome.result["status"], "saved");
+        assert_eq!(outcome.result["status"], "proposed");
+        let action_id = outcome.result["action_id"].as_str().unwrap();
         assert_eq!(
             outcome.result["breakdown"]["big_wins"][0]["task_id"],
             t1.as_str()
@@ -1640,7 +1428,42 @@ mod tests {
             .unwrap()
             .contains("big_wins"));
 
-        // Persisted on the cycle row (not a preview — design D6).
+        // A direct model tool call only stages a typed action; it cannot write
+        // the whole-cycle document before the user confirms it.
+        let conn = db.pool().get().unwrap();
+        let stored = prioritization::load_for_cycle(&conn, &cycle).unwrap();
+        assert!(
+            stored.is_none(),
+            "model call must not persist prioritization"
+        );
+        drop(conn);
+
+        // Rejecting the pending action leaves the committed document empty.
+        crate::ai::actions::claim(&db, &cycle, action_id, false).unwrap();
+        let conn = db.pool().get().unwrap();
+        assert!(prioritization::load_for_cycle(&conn, &cycle)
+            .unwrap()
+            .is_none());
+        drop(conn);
+
+        // A new valid proposal can be approved through the same generic
+        // action path; only that path writes the cycle row.
+        let outcome = run(
+            &db,
+            &cycle,
+            "update_prioritization_breakdown",
+            json!({
+                "update": { "big_wins": [ { "task_id": t1, "reason": "用户说这是最能改变现状的一件事" } ] },
+                "rationale": "第一轮排序",
+            }),
+        );
+        let action_id = outcome.result["action_id"].as_str().unwrap();
+        let item = crate::ai::actions::claim(&db, &cycle, action_id, true).unwrap();
+        let ai = crate::providers::service::AiSettingsState::load(dir.path()).unwrap();
+        crate::ai::actions::apply(&db, &ai, &item.action)
+            .await
+            .unwrap();
+        crate::ai::actions::finish(&db, action_id, true).unwrap();
         let conn = db.pool().get().unwrap();
         let stored = prioritization::load_for_cycle(&conn, &cycle)
             .unwrap()
@@ -1651,8 +1474,32 @@ mod tests {
         // Task data is untouched by the prioritization write.
         assert_eq!(row(&db, &t1).proposal, None);
 
-        // An empty reason is the engine's write-side backstop: missing_reason,
-        // and nothing is persisted for the failed round.
+        // A rejected valid proposal preserves the approved document. An empty
+        // reason is rejected before an action is staged at all.
+        let outcome = run(
+            &db,
+            &cycle,
+            "update_prioritization_breakdown",
+            json!({
+                "update": { "bottlenecks": [ { "task_id": t2, "reason": "用户说这会堵住交付" } ] },
+                "rationale": "补充瓶颈",
+            }),
+        );
+        assert!(!outcome.is_error);
+        let action_id = outcome.result["action_id"].as_str().unwrap();
+        crate::ai::actions::claim(&db, &cycle, action_id, false).unwrap();
+        let conn = db.pool().get().unwrap();
+        let stored = prioritization::load_for_cycle(&conn, &cycle)
+            .unwrap()
+            .unwrap();
+        assert!(
+            stored.bottlenecks.is_empty(),
+            "reject must preserve approved state"
+        );
+        drop(conn);
+
+        // An empty reason remains a validation error and must not create an
+        // action or alter the approved document.
         let outcome = run(
             &db,
             &cycle,
@@ -1663,14 +1510,7 @@ mod tests {
             }),
         );
         assert_eq!(error_code(&outcome), "missing_reason");
-        let conn = db.pool().get().unwrap();
-        let stored = prioritization::load_for_cycle(&conn, &cycle)
-            .unwrap()
-            .unwrap();
-        assert!(
-            stored.bottlenecks.is_empty(),
-            "failed write persists nothing"
-        );
+        assert!(crate::ai::actions::list(&db, &cycle).unwrap().is_empty());
     }
 
     // -- start_review (add-review-retrospective §5) ----------------------------
@@ -1767,7 +1607,7 @@ mod tests {
     fn start_review_arguments_are_strict() {
         let (_dir, db) = db();
         let cycle = month_cycle(&db);
-        let outcome = run(&db, &cycle, "start_review", json!({ "cycle_key": "x" }));
+        let outcome = run(&db, &cycle, "start_review", json!({ "cycle_id": "x" }));
         assert_eq!(error_code(&outcome), "invalid_arguments");
     }
 
@@ -1814,72 +1654,77 @@ mod tests {
         assert_eq!(error_code(&outcome), "unknown_tool");
     }
 
+    #[test]
+    fn model_loads_workflows_on_demand_and_analysis_tools_are_read_only() {
+        let (_dir, db) = db();
+        let cycle = month_cycle(&db);
+        let outcome = run(&db, &cycle, "load_skill", json!({"name":"period-analysis"}));
+        assert_eq!(outcome.activated_skill, Some(AgentSkill::PeriodAnalysis));
+        assert!(outcome.result["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"));
+        let outcome = run(&db, &cycle, "load_skill", json!({"name":"daily-planning"}));
+        assert_eq!(outcome.activated_skill, Some(AgentSkill::DailyPlanning));
+        let bad = run(&db, &cycle, "load_skill", json!({"name":"../../outside"}));
+        assert!(bad.is_error);
+        assert!(bad.activated_skill.is_none());
+        for skill in [AgentSkill::PeriodAnalysis, AgentSkill::PlanningIssues] {
+            let tools = ToolRegistry.definitions(skill, true);
+            assert!(tools.iter().any(|t| t.name == "load_skill"));
+            assert!(!tools
+                .iter()
+                .any(|t| t.name == "create_goal" || t.name == "delete_goal"));
+        }
+    }
+
     // -- definitions ------------------------------------------------------------
 
     #[test]
     fn definitions_match_the_skill_state() {
         let registry = ToolRegistry;
-        let start_tools = [
-            "start_planning",
-            "start_goal_setting",
-            "start_prioritization",
-        ];
-
-        // No skill yet: exactly the three entry tools.
-        let none = registry.definitions(AgentSkill::None, true);
-        let names: Vec<&str> = none.iter().map(|def| def.name.as_str()).collect();
-        assert_eq!(names.len(), 3);
-        for name in start_tools {
-            assert!(names.contains(&name), "none must offer {name}");
-        }
-
-        // Every activated skill gets the full non-activation set. §5.1
-        // (add-review-retrospective): start_review joins the shared set for
-        // every skill except None.
-        let expected = [
-            "get_cycle_context",
-            "get_task_details",
-            "create_goal",
-            "update_goal",
-            "delete_goal",
-            "move_goal",
-            "update_goal_breakdown",
-            "update_prioritization_breakdown",
-            "start_review",
-        ];
-        for skill in [
+        let skills = [
+            AgentSkill::None,
             AgentSkill::GoalSetting,
             AgentSkill::LongTermPlanning,
             AgentSkill::ShortTermPlanning,
+            AgentSkill::WeeklyPlanning,
+            AgentSkill::DailyPlanning,
             AgentSkill::Prioritization,
             AgentSkill::Review,
-        ] {
+            AgentSkill::PeriodAnalysis,
+            AgentSkill::PlanningIssues,
+        ];
+        let mut all = std::collections::BTreeSet::new();
+        for skill in skills {
             let defs = registry.definitions(skill, true);
-            let names: Vec<&str> = defs.iter().map(|def| def.name.as_str()).collect();
-            assert_eq!(names.len(), expected.len(), "{skill:?} set");
-            for name in expected {
-                assert!(names.contains(&name), "{skill:?} must offer {name}");
-            }
-            for name in start_tools {
-                assert!(!names.contains(&name), "{skill:?} must not re-offer {name}");
-            }
-        }
-
-        // Tool-less models always degrade to conversation mode.
-        for skill in [
-            AgentSkill::None,
-            AgentSkill::GoalSetting,
-            AgentSkill::Prioritization,
-        ] {
+            assert!(defs.len() <= 19);
             assert!(registry.definitions(skill, false).is_empty());
+            let names: Vec<_> = defs.iter().map(|d| d.name.as_str()).collect();
+            assert!(names.contains(&"load_skill"));
+            assert!(!names.contains(&"move_goal"));
+            assert!(!names.contains(&"resolve_agent_action"));
+            assert_eq!(
+                names.contains(&"propose_settings"),
+                skill == AgentSkill::None
+            );
+            if matches!(
+                skill,
+                AgentSkill::PeriodAnalysis | AgentSkill::PlanningIssues
+            ) {
+                assert!(!names.iter().any(|n| n.starts_with("propose_")
+                    || n.starts_with("update_")
+                    || n.starts_with("create_")
+                    || n.starts_with("delete_")));
+            }
+            for def in defs {
+                assert!(!def.description.is_empty());
+                assert_eq!(def.input_schema["type"], "object");
+                assert_eq!(def.input_schema["additionalProperties"], false);
+                all.insert(def.name);
+            }
         }
-
-        // Definitions are valid JSON Schema objects with names and copy.
-        for def in registry.definitions(AgentSkill::GoalSetting, true) {
-            assert!(!def.description.is_empty());
-            assert_eq!(def.input_schema["type"], "object");
-            assert_eq!(def.input_schema["additionalProperties"], false);
-        }
+        assert_eq!(all.len(), 24);
     }
 
     // -- write tools respect ended cycles via the service rule -----------------
@@ -1906,4 +1751,14 @@ mod tests {
         );
         assert_eq!(error_code(&outcome), "cycle_ended");
     }
+}
+
+fn def_load_skill() -> ToolDef {
+    ToolDef::new("load_skill", "Load the workflow that fits the user's current request. You may switch skills during a conversation. This changes the following turn's instructions and tools, not the selected plan or any task.", json!({"type":"object", "properties":{"name":{"type":"string", "enum":["coach","goal-clarification","long-term-planning","weekly-planning","daily-planning","prioritization","cycle-review","period-analysis","planning-issues"]}}, "required":["name"], "additionalProperties":false}))
+}
+fn def_get_period_context() -> ToolDef {
+    ToolDef::new("get_period_context", "Read exact inclusive calendar dates for a quarter, half-year, year or custom period, across all plans including archived ones. Ask first when boundaries are ambiguous. Facts are current snapshots, not past completion events. No plans are changed.", json!({"type":"object", "properties":{"start_date":{"type":"string","description":"YYYY-MM-DD inclusive"},"end_date":{"type":"string","description":"YYYY-MM-DD inclusive"},"question":{"type":"string","description":"The user's requested analysis dimensions"}},"required":["start_date","end_date","question"],"additionalProperties":false}))
+}
+fn def_get_planning_issues() -> ToolDef {
+    ToolDef::new("get_planning_issues", "Read deterministic issues in the focused plan. Follow with context-based diagnosis using the planning-issues skill; do not score the user.", json!({"type":"object","properties":{},"additionalProperties":false}))
 }

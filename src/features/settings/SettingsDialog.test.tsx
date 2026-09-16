@@ -8,9 +8,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
+import { qk } from "../../lib/events";
 
 const mocks = vi.hoisted(() => ({
   getSettings: vi.fn(),
+  setLocale: vi.fn(),
   setTheme: vi.fn(),
   setWeekStartDay: vi.fn(),
   setLogLevel: vi.fn(),
@@ -23,6 +26,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/ipc")>()),
   getSettings: mocks.getSettings,
+  setLocale: mocks.setLocale,
   setTheme: mocks.setTheme,
   setWeekStartDay: mocks.setWeekStartDay,
   setLogLevel: mocks.setLogLevel,
@@ -40,16 +44,19 @@ function renderDialog(open: boolean) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <SettingsDialog open={open} onClose={() => {}} />
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 beforeEach(() => {
+  applyLocale("zh-CN");
   vi.clearAllMocks();
-  mocks.getSettings.mockResolvedValue({ week_start_day: 1, theme: "white" });
+  mocks.getSettings.mockResolvedValue({ locale: "zh-CN", week_start_day: 1, theme: "white" });
+  mocks.setLocale.mockResolvedValue(undefined);
   mocks.setTheme.mockResolvedValue(undefined);
   mocks.setWeekStartDay.mockResolvedValue(undefined);
   mocks.setLogLevel.mockResolvedValue(undefined);
@@ -69,7 +76,9 @@ describe("SettingsDialog", () => {
 
   it("applies and persists the gray theme on click", async () => {
     renderDialog(true);
-    fireEvent.click(await screen.findByRole("button", { name: "灰底" }));
+    const gray = await screen.findByRole("button", { name: "灰底" });
+    await waitFor(() => expect((gray as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(gray);
     // applyTheme 同步生效；setTheme 经 react-query 的异步 mutation 路径，
     // mutationFn 会附带收到第二个上下文参数（v5 行为）。
     expect(document.documentElement.dataset.theme).toBe("gray");
@@ -86,19 +95,50 @@ describe("SettingsDialog", () => {
 
   it("persists the week start day on change", async () => {
     renderDialog(true);
-    fireEvent.change(await screen.findByLabelText("周起始日"), {
-      target: { value: "7" },
-    });
+    const weekStart = await screen.findByRole("combobox", { name: "周起始日" });
+    await waitFor(() => expect((weekStart as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(weekStart);
+    fireEvent.click(await screen.findByRole("option", { name: "周日" }));
     await waitFor(() =>
       expect(mocks.setWeekStartDay).toHaveBeenCalledWith(7, expect.anything()),
     );
   });
 
+  it("applies the selected language only after the setting is saved", async () => {
+    let resolveSave!: () => void;
+    mocks.setLocale.mockReturnValue(new Promise<void>((resolve) => { resolveSave = resolve; }));
+    const { client } = renderDialog(true);
+    const language = await screen.findByRole("combobox", { name: "语言" }) as HTMLButtonElement;
+    await waitFor(() => expect(language.disabled).toBe(false));
+    fireEvent.click(language);
+    fireEvent.click(await screen.findByRole("option", { name: "English" }));
+    await waitFor(() => expect(language.disabled).toBe(true));
+    expect(document.documentElement.lang).toBe("zh-CN");
+    // App subscribes to this cache too; publishing an optimistic language
+    // would change the mounted application even while the save is pending.
+    expect(client.getQueryData<{ locale: string }>(qk.settings())?.locale).toBe("zh-CN");
+    mocks.getSettings.mockResolvedValue({ locale: "en", week_start_day: 1, theme: "white" });
+    resolveSave();
+    await waitFor(() => expect(document.documentElement.lang).toBe("en"));
+    expect(mocks.setLocale).toHaveBeenCalledWith("en");
+  });
+
+  it("rolls the language select back and shows a localized error when saving fails", async () => {
+    mocks.setLocale.mockRejectedValue({ code: "invalid_locale", message: "invalid" });
+    renderDialog(true);
+    const language = await screen.findByRole("combobox", { name: "语言" });
+    await waitFor(() => expect((language as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(language);
+    fireEvent.click(await screen.findByRole("option", { name: "English" }));
+    await waitFor(() => expect(language.textContent).toContain("简体中文"));
+    expect(await screen.findByText("请选择简体中文或 English。"));
+  });
+
   it("persists the log level on change", async () => {
     renderDialog(true);
-    fireEvent.change(await screen.findByLabelText("日志级别"), {
-      target: { value: "debug" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /^诊断/ }));
+    fireEvent.click(await screen.findByRole("combobox", { name: "日志级别" }));
+    fireEvent.click(await screen.findByRole("option", { name: "debug" }));
     await waitFor(() =>
       expect(mocks.setLogLevel).toHaveBeenCalledWith("debug", expect.anything()),
     );
@@ -106,6 +146,7 @@ describe("SettingsDialog", () => {
 
   it("reveals the debug log directory and shows its path", async () => {
     renderDialog(true);
+    fireEvent.click(screen.getByRole("button", { name: /^诊断/ }));
     fireEvent.click(
       await screen.findByRole("button", { name: "打开日志目录" }),
     );
@@ -118,6 +159,7 @@ describe("SettingsDialog", () => {
 
   it("shows the schema version", async () => {
     renderDialog(true);
-    expect(await screen.findByText("Schema v3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^诊断/ }));
+    expect(await screen.findByText("数据版本 v3")).toBeTruthy();
   });
 });

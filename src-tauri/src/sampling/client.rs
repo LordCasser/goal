@@ -12,7 +12,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures_util::{Stream, StreamExt};
-use reqwest::StatusCode;
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    StatusCode,
+};
 
 use crate::logging;
 
@@ -111,19 +114,72 @@ fn truncate(text: &str) -> String {
     }
 }
 
-/// Replaces the API key inside provider-controlled text before it enters an
-/// error message (defense in depth on top of log-side redaction).
-fn redact_secret(text: &str, api_key: Option<&str>) -> String {
-    match api_key.filter(|key| !key.is_empty()) {
-        Some(key) if text.contains(key) => text.replace(key, "[REDACTED]"),
-        _ => text.to_string(),
-    }
-}
-
 /// Prepares provider-supplied text for an error message: key redaction plus
 /// a length cap.
 pub(crate) fn sanitize_message(text: &str, api_key: Option<&str>) -> String {
-    truncate(&redact_secret(text, api_key))
+    let secrets = api_key
+        .filter(|key| !key.is_empty())
+        .map(str::to_string)
+        .into_iter()
+        .collect::<Vec<_>>();
+    sanitize_message_with_secrets(text, &secrets)
+}
+
+/// Redacts every exact value sent on the current request before truncation.
+/// Sorting longest-first prevents a short token from partially consuming a
+/// longer one and keeps this safe for overlapping credentials.
+pub(crate) fn sanitize_message_with_secrets(text: &str, secrets: &[String]) -> String {
+    let mut redacted = text.to_string();
+    let mut values = secrets
+        .iter()
+        .filter(|secret| !secret.is_empty())
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    values.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+    for secret in values {
+        redacted = redacted.replace(secret, "[REDACTED]");
+    }
+    truncate(&redacted)
+}
+
+fn invalid_headers() -> SamplingError {
+    SamplingError::InvalidRequest {
+        message: "invalid request headers".into(),
+    }
+}
+
+/// Merges protocol defaults with provider headers. `HeaderMap` replacement is
+/// deliberately used for both sets so names override case-insensitively.
+pub(crate) fn merge_headers(
+    defaults: &[(&'static str, String)],
+    custom: &[(String, String)],
+) -> Result<HeaderMap, SamplingError> {
+    crate::providers::headers::validate_headers(custom).map_err(|_| invalid_headers())?;
+    let names = custom
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let names =
+        crate::providers::headers::normalize_names(&names).map_err(|_| invalid_headers())?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        reqwest::header::ACCEPT,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    for (name, value) in defaults {
+        let name = HeaderName::from_static(name);
+        let mut value = HeaderValue::from_str(value).map_err(|_| invalid_headers())?;
+        value.set_sensitive(true);
+        headers.insert(name, value);
+    }
+    for ((_, value), name) in custom.iter().zip(names) {
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| invalid_headers())?;
+        let mut value = HeaderValue::from_str(value).map_err(|_| invalid_headers())?;
+        value.set_sensitive(true);
+        headers.insert(name, value);
+    }
+    Ok(headers)
 }
 
 /// Joins a base URL (scheme + optional path prefix) with an endpoint path
@@ -146,10 +202,11 @@ pub async fn sample(
     request: SamplingRequest,
     timeouts: Timeouts,
 ) -> Result<SamplingStream, SamplingError> {
-    if let Some(key) = request.api_key.as_deref().filter(|key| !key.is_empty()) {
-        // Registered before anything can log, so even a key echoed back by a
-        // hostile provider is masked on disk.
-        logging::register_secret(key);
+    let secrets = request.redaction_secrets();
+    for secret in &secrets {
+        // Registered before anything can log, so even a secret echoed back by
+        // a hostile provider is masked on disk.
+        logging::register_secret(secret);
     }
     logging::debug(
         MODULE,
@@ -166,31 +223,33 @@ pub async fn sample(
         ApiFormat::OpenaiChatCompletions => super::openai_chat::prepare(&request),
         ApiFormat::OpenaiResponses => super::openai_responses::prepare(&request),
     }?;
+    let headers = merge_headers(&prepared.headers, &request.extra_headers)?;
 
     // Layered deadlines (design D5): the short budget bounds the connect
     // phase and idle gaps between chunks, the long one the whole request
     // from connect until the body is fully read.
-    let client = reqwest::Client::builder()
+    let client_builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(timeouts.connect_idle)
         .read_timeout(timeouts.connect_idle)
-        .timeout(timeouts.total_generate)
+        .timeout(timeouts.total_generate);
+    let client_builder = request.connection.apply(client_builder, &prepared.url)
+        .map_err(|error| SamplingError::InvalidRequest { message: error.to_string() })?;
+    let client = client_builder
         .build()
         .map_err(|e| SamplingError::ProviderUnreachable {
-            message: e.to_string(),
+            message: sanitize_message_with_secrets(&e.to_string(), &secrets),
         })?;
 
-    let mut builder = client
+    let builder = client
         .post(&prepared.url)
-        .header(reqwest::header::ACCEPT, "text/event-stream")
+        .headers(headers)
         .json(&prepared.body);
-    for (name, value) in &prepared.headers {
-        builder = builder.header(*name, value.as_str());
-    }
 
     let response = match builder.send().await {
         Ok(response) => response,
         Err(error) => {
-            let classified = classify_transport(error);
+            let classified = classify_transport(error, &secrets);
             log_failure(&classified);
             return Err(classified);
         }
@@ -199,7 +258,7 @@ pub async fn sample(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        let classified = classify_http_status(status, &body, request.api_key.as_deref());
+        let classified = classify_http_status(status, &body, &secrets);
         log_failure(&classified);
         return Err(classified);
     }
@@ -210,6 +269,7 @@ pub async fn sample(
     Ok(SamplingStream {
         inner: Box::pin(inner),
         decoder: prepared.decoder,
+        secrets,
         pending: VecDeque::new(),
         terminated: false,
     })
@@ -221,6 +281,7 @@ pub async fn sample(
 pub struct SamplingStream {
     inner: Pin<Box<dyn Stream<Item = Result<Vec<u8>, reqwest::Error>> + Send>>,
     decoder: Box<dyn ProtocolDecoder + Send>,
+    secrets: Vec<String>,
     pending: VecDeque<Result<SamplingEvent, SamplingError>>,
     /// Set once the upstream body ended or failed; the stream yields `None`
     /// after the pending tail (including a possible error) is drained.
@@ -259,7 +320,7 @@ impl Stream for SamplingStream {
                 Poll::Ready(Some(Ok(chunk))) => this.decoder.feed(&chunk, &mut this.pending),
                 Poll::Ready(Some(Err(error))) => {
                     this.terminated = true;
-                    let classified = classify_transport(error);
+                    let classified = classify_transport(error, &this.secrets);
                     log_failure(&classified);
                     this.pending.push_back(Err(classified));
                 }
@@ -274,17 +335,17 @@ impl Stream for SamplingStream {
 
 /// Maps a reqwest failure onto design-D3 classes: timeouts, connection
 /// failures and remaining transport faults.
-fn classify_transport(error: reqwest::Error) -> SamplingError {
+fn classify_transport(error: reqwest::Error, secrets: &[String]) -> SamplingError {
     if error.is_timeout() {
         SamplingError::Timeout
     } else if error.is_builder() {
         // e.g. an unusable base_url — rejected before any bytes hit the wire.
         SamplingError::InvalidRequest {
-            message: sanitize_message(&error.to_string(), None),
+            message: sanitize_message_with_secrets(&error.to_string(), secrets),
         }
     } else {
         SamplingError::ProviderUnreachable {
-            message: error.to_string(),
+            message: sanitize_message_with_secrets(&error.to_string(), secrets),
         }
     }
 }
@@ -292,7 +353,7 @@ fn classify_transport(error: reqwest::Error) -> SamplingError {
 /// Maps a non-2xx response onto design-D3 classes. Anthropic and both OpenAI
 /// shapes nest the human-readable text under `error.message`; unknown bodies
 /// fall back to raw (truncated) text.
-fn classify_http_status(status: StatusCode, body: &str, api_key: Option<&str>) -> SamplingError {
+fn classify_http_status(status: StatusCode, body: &str, secrets: &[String]) -> SamplingError {
     if status.is_server_error() {
         return SamplingError::ProviderUnreachable {
             message: format!("server error: HTTP {status}"),
@@ -311,7 +372,7 @@ fn classify_http_status(status: StatusCode, body: &str, api_key: Option<&str>) -
         401 | 403 => SamplingError::AuthFailed,
         429 => SamplingError::RateLimited,
         _ => SamplingError::InvalidRequest {
-            message: sanitize_message(&provider_message, api_key),
+            message: sanitize_message_with_secrets(&provider_message, secrets),
         },
     }
 }
@@ -368,6 +429,27 @@ mod tests {
         assert_eq!(sanitized.chars().count(), MESSAGE_LIMIT);
         // Unrelated messages pass through untouched.
         assert_eq!(sanitize_message("plain", Some(key)), "plain");
+    }
+
+    #[test]
+    fn sanitize_message_redacts_all_current_header_values_before_truncation() {
+        let secrets = vec!["short".into(), "header-secret".into()];
+        let message = format!("prefix header-secret and short {}", "x".repeat(400));
+        let sanitized = sanitize_message_with_secrets(&message, &secrets);
+        assert!(!sanitized.contains("header-secret"));
+        assert!(!sanitized.contains("short"));
+        assert_eq!(sanitized.chars().count(), MESSAGE_LIMIT);
+    }
+
+    #[test]
+    fn merge_headers_replaces_defaults_case_insensitively() {
+        let headers = merge_headers(
+            &[("authorization", "Bearer default".into())],
+            &[("Authorization".into(), "custom".into())],
+        )
+        .unwrap();
+        assert_eq!(headers.get("authorization").unwrap(), "custom");
+        assert_eq!(headers.get_all("authorization").iter().count(), 1);
     }
 
     #[test]

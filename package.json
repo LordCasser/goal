@@ -1,23 +1,35 @@
 {
-  "name": "planner",
+  "name": "goal",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.5",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "desktop:config:check": "node scripts/desktop-config.mjs",
+    "desktop:build:check": "node scripts/desktop-build.mjs check",
+    "desktop:before-dev": "node scripts/desktop-build.mjs before-dev",
+    "desktop:before-build": "node scripts/desktop-build.mjs before-build",
+    "desktop:before-bundle": "node scripts/desktop-build.mjs before-bundle"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@radix-ui/react-select": "^2.3.7",
     "@tanstack/react-query": "^5.102.8",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-opener": "^2.5.5",
+    "i18next": "^26.4.2",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "react-i18next": "^17.0.14",
+    "streamdown": "^2.6.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -30,6 +42,6 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.0",
     "vite": "^8.3.0",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.11"
   }
 }

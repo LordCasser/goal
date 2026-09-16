@@ -3,11 +3,13 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { initTheme } from "./lib/theme";
+import { platform } from "./lib/platform";
 import "./index.css";
 
 // Restore the stored theme before the first paint to avoid flashing the
 // wrong one (design.md §4.4); app_settings reconciles once loaded.
 initTheme();
+document.documentElement.dataset.platform = platform;
 
 const queryClient = new QueryClient({
   defaultOptions: {

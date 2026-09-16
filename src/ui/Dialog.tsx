@@ -2,10 +2,18 @@ import {
   useEffect,
   useId,
   useRef,
+  useContext,
+  createContext,
   type ReactNode,
   type RefObject,
 } from "react";
 import { cn } from "./cn";
+import { createPortal } from "react-dom";
+import { useTranslation } from "../lib/i18n";
+
+// Only the uppermost dialog owns Escape and Tab; provider/model dialogs may nest.
+const DialogDepth = createContext(0);
+const dialogStack: { token: symbol; depth: number }[] = [];
 
 export type DialogProps = {
   open: boolean;
@@ -19,6 +27,7 @@ export type DialogProps = {
   /** 关闭后焦点还给该元素；不传则还给打开前的焦点元素（3.3）。 */
   returnFocusTo?: RefObject<HTMLElement | null>;
   className?: string;
+  bodyClassName?: string;
 };
 
 const FOCUSABLE = [
@@ -44,10 +53,16 @@ export function Dialog({
   wide = false,
   returnFocusTo,
   className,
+  bodyClassName,
 }: DialogProps) {
+  const { t } = useTranslation("shell");
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
+  const token = useRef(Symbol("dialog"));
+  const depth = useContext(DialogDepth);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -56,27 +71,33 @@ export function Dialog({
         ? document.activeElement
         : null;
     restoreRef.current = previous;
-    panelRef.current?.focus();
+    const id = token.current;
+    dialogStack.push({ token: id, depth });
+    dialogStack.sort((a, b) => a.depth - b.depth);
+    if (dialogStack.at(-1)?.token === id) panelRef.current?.focus({ preventScroll: true });
 
     // Escape 挂在 document 上：焦点在任意子控件时都能关闭。弹层内的菜单
     // 在捕获阶段先消费 Escape，不会连带关闭弹窗（design.md 6.2）。
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.isComposing || e.defaultPrevented || dialogStack.at(-1)?.token !== id) return;
       e.preventDefault();
       e.stopPropagation();
-      onClose();
+      closeRef.current();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      (returnFocusTo?.current ?? restoreRef.current)?.focus();
+      const index = dialogStack.findIndex((item) => item.token === id);
+      if (index >= 0) dialogStack.splice(index, 1);
+      const target = returnFocusTo?.current ?? restoreRef.current;
+      if (target?.isConnected) target.focus({ preventScroll: true });
     };
-  }, [open, onClose, returnFocusTo]);
+  }, [open, returnFocusTo, depth]);
 
   if (!open) return null;
 
   const trapTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "Tab") return;
+    if (e.key !== "Tab" || dialogStack.at(-1)?.token !== token.current) return;
     const panel = panelRef.current;
     if (!panel) return;
     const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
@@ -96,10 +117,11 @@ export function Dialog({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+  return createPortal(
+    <DialogDepth.Provider value={depth + 1}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 50 + depth * 10 }}>
       <div
-        className="absolute inset-0 animate-fade-in bg-black/30"
+        className="absolute inset-0 animate-fade-in bg-black/15"
         aria-hidden="true"
       />
       <div
@@ -110,29 +132,31 @@ export function Dialog({
         tabIndex={-1}
         onKeyDown={trapTab}
         className={cn(
-          "relative flex max-h-full w-full flex-col overflow-hidden",
-          "rounded-sm border border-light bg-content",
-          "shadow-[0_16px_48px_rgba(0,0,0,0.16)] animate-pop-in",
+          "relative flex max-h-full w-full flex-col overflow-hidden outline-none",
+          "rounded-xl border border-light bg-content",
+          "shadow-[0_20px_80px_rgba(25,30,40,0.14)] animate-pop-in",
           wide ? "max-w-[640px]" : "max-w-[420px]",
           className,
         )}
       >
         {title !== undefined && (
-          <h2
-            id={titleId}
-            className="px-5 pb-3 pt-4 text-dialog-title font-semibold text-primary"
-          >
-            {title}
-          </h2>
+          <header className="flex shrink-0 items-center justify-between gap-4 px-6 pb-4 pt-5">
+            <h2 id={titleId} className="text-dialog-title font-semibold text-primary">{title}</h2>
+            <button type="button" aria-label={t("dialog.close")} onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-secondary hover:bg-hover">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+            </button>
+          </header>
         )}
         {/* 长内容在正文中滚动，底部操作始终可达（3.3） */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">{children}</div>
+        <div className={cn("min-h-0 flex-1 overflow-y-auto px-6 pb-6", bodyClassName)}>{children}</div>
         {footer !== undefined && (
-          <div className="flex justify-end gap-2 border-t border-light px-5 py-3">
+          <div className="flex shrink-0 justify-end gap-2 border-t border-light px-6 py-4">
             {footer}
           </div>
         )}
       </div>
     </div>
+    </DialogDepth.Provider>, document.body
   );
 }

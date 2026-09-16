@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
@@ -29,6 +30,7 @@ function renderCard(onDismissed?: () => void) {
 }
 
 beforeEach(() => {
+  applyLocale("en");
   invokeMock.mockReset();
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === commands.getDismissedHints) return Promise.resolve([]);
@@ -41,7 +43,7 @@ describe("HintCard", () => {
     renderCard();
     expect(await screen.findByText("Park now, plan later")).toBeTruthy();
     expect(
-      screen.getByText(/Capture a goal the moment it shows up/),
+      screen.getByText(/Capture ideas or park plans/),
     ).toBeTruthy();
   });
 
@@ -66,7 +68,7 @@ describe("HintCard", () => {
       expect(screen.queryByText("Park now, plan later")).toBeNull(),
     );
     expect(invokeMock).toHaveBeenCalledWith(commands.dismissHint, {
-      hint_id: "later-explainer",
+      hintId: "later-explainer",
     });
   });
 

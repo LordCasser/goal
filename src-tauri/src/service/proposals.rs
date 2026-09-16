@@ -1,8 +1,7 @@
 //! Agent proposal use cases: preview writes, snapshots, Keep/Revert.
 //!
 //! Behaviour contract: `openspec/specs/agent-proposals/spec.md`.
-//! No AI is wired up in this change — the future agent loop calls these same
-//! functions, so the preview contract is already enforceable.
+//! Agent tools and UI confirmation share this preview contract.
 
 use rusqlite::Connection;
 
@@ -26,6 +25,16 @@ pub struct TaskInput {
     pub needs_breakdown: Option<bool>,
     pub root_color_key: Option<String>,
     pub parent_id: Option<String>,
+}
+
+/// Structural page changes must not invalidate snapshots waiting in Coach.
+pub(crate) fn ensure_cycle_tree_unlocked(conn: &Connection, cycle_id: &str) -> AppResult<()> {
+    for id in cycles_repo::subtree_ids(conn, cycle_id)? {
+        for task in tasks_repo::list_with_proposals_by_cycle(conn, &id)? {
+            crate::service::tasks::ensure_task_editable(conn, &task.id, true)?;
+        }
+    }
+    Ok(())
 }
 
 fn require_mutable_goal_cycle(conn: &Connection, cycle_id: &str) -> AppResult<()> {
@@ -74,7 +83,12 @@ pub fn apply_upsert_preview(
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
+    let cycle = cycles_repo::require(&tx, cycle_id)?;
     require_mutable_goal_cycle(&tx, cycle_id)?;
+    crate::service::tasks::validate_root_color_key(
+        cycle.cycle_type,
+        input.root_color_key.as_deref(),
+    )?;
 
     let task_id;
     match tasks_repo::last_empty_visible_row(&tx, cycle_id)? {
@@ -108,7 +122,18 @@ pub fn apply_upsert_preview(
             task_id = new.id;
         }
     }
-    write_row(&tx, &task_id, input)?;
+    let existing = tasks_repo::require(&tx, &task_id)?;
+    let mut staged_input = input.clone();
+    if staged_input.root_color_key.is_none() {
+        staged_input.root_color_key = if staged_input.parent_id.is_some() {
+            None
+        } else if let Some(color) = existing.root_color_key {
+            Some(color)
+        } else {
+            crate::service::tasks::default_root_color(&tx, cycle_id, cycle.cycle_type, None)?
+        };
+    }
+    write_row(&tx, &task_id, &staged_input)?;
     let task = tasks_repo::require(&tx, &task_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     Ok(Mutation::new(task)
@@ -162,6 +187,7 @@ pub fn apply_delete_preview(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
     let existing = tasks_repo::require(&tx, task_id)?;
+    require_mutable_goal_cycle(&tx, &existing.cycle_id)?;
     if existing.proposal.is_none() {
         repo::save_snapshot(
             &tx,
@@ -185,23 +211,73 @@ pub struct PreviewSummary {
     pub count: usize,
     /// Pending rows (with their proposed content) for the highlight pass.
     pub tasks: Vec<Task>,
+    /// Original values make frontend confirmation reviewable, without a second
+    /// proposal store or reconstruction from the model's prose.
+    pub originals: std::collections::BTreeMap<String, TaskSnapshot>,
+    pub deletion_impacts: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+pub fn pending_cycle_ids(db: &Db) -> AppResult<Vec<String>> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT cycle_id FROM tasks WHERE proposal IS NOT NULL ORDER BY cycle_id")
+        .map_err(|e| AppError::Db(e.to_string()))?;
+    let ids = stmt
+        .query_map([], |r| r.get(0))
+        .map_err(|e| AppError::Db(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Db(e.to_string()))?;
+    Ok(ids)
 }
 
 pub fn get_preview_summary(db: &Db, cycle_id: &str) -> AppResult<PreviewSummary> {
-    let conn = db.pool().get()?;
-    let tasks = tasks_repo::list_with_proposals_by_cycle(&conn, cycle_id)?
+    let mut conn = db.pool().get()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Db(e.to_string()))?;
+    let tasks = tasks_repo::list_with_proposals_by_cycle(&tx, cycle_id)?
         .into_iter()
         .filter(|t| t.proposal.is_some())
         .collect::<Vec<_>>();
     let count = tasks.len();
+    let mut originals = std::collections::BTreeMap::new();
+    let mut deletion_impacts = std::collections::BTreeMap::new();
+    for task in &tasks {
+        if task.proposal == Some(ProposalKind::Delete) {
+            let mut statement = tx.prepare("WITH RECURSIVE descendants(id) AS (
+                SELECT id FROM tasks WHERE parent_id = ?1
+                UNION SELECT t.id FROM tasks t JOIN descendants d ON t.parent_id = d.id
+            ) SELECT title FROM tasks WHERE id IN (SELECT id FROM descendants) ORDER BY cycle_id, position")
+                .map_err(|e| AppError::Db(e.to_string()))?;
+            let mut titles = statement
+                .query_map([&task.id], |row| row.get::<_, String>(0))
+                .map_err(|e| AppError::Db(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::Db(e.to_string()))?;
+            let impact = crate::service::deletion::task_impact(&tx, &task.id)?;
+            for id in impact.cycle_ids {
+                titles.push(cycles_repo::require(&tx, &id)?.title);
+            }
+            deletion_impacts.insert(task.id.clone(), titles);
+        }
+        if let Some(snapshot) = repo::get_snapshot(&tx, &task.id)? {
+            originals.insert(task.id.clone(), snapshot);
+        }
+    }
     Ok(PreviewSummary {
         cycle_id: cycle_id.to_string(),
         count,
         tasks,
+        originals,
+        deletion_impacts,
     })
 }
 
-fn keep_one(conn: &Connection, task_id: &str) -> AppResult<Option<Task>> {
+pub(crate) fn keep_one(
+    conn: &Connection,
+    task_id: &str,
+    mutation: &mut Mutation<()>,
+) -> AppResult<Option<Task>> {
     let task = match tasks_repo::get(conn, task_id)? {
         Some(t) => t,
         None => return Ok(None),
@@ -213,6 +289,8 @@ fn keep_one(conn: &Connection, task_id: &str) -> AppResult<Option<Task>> {
         // A confirmed deletion physically removes the row — no tombstones
         // (spec: 已确认的删除).
         Some(ProposalKind::Delete) => {
+            let impact = crate::service::deletion::task_impact(conn, task_id)?;
+            mutation.merge(crate::service::deletion::prepare_deletion(conn, &impact)?);
             tasks_repo::delete(conn, task_id)?;
         }
         // A confirmed upsert becomes committed data; the snapshot is cleared.
@@ -233,15 +311,19 @@ pub fn keep_task_preview(db: &Db, task_id: &str) -> AppResult<Mutation<Task>> {
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Db(e.to_string()))?;
-    let task = keep_one(&tx, task_id)?.ok_or_else(|| AppError::not_found("task", task_id))?;
+    let mut affected = Mutation::new(());
+    let task = keep_one(&tx, task_id, &mut affected)?
+        .ok_or_else(|| AppError::not_found("task", task_id))?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     let cycle_id = task.cycle_id.clone();
-    Ok(Mutation::new(task)
+    let mut mutation = Mutation::new(task)
         .touching_tasks(cycle_id.clone())
-        .touching_proposals(cycle_id))
+        .touching_proposals(cycle_id);
+    mutation.merge(affected);
+    Ok(mutation)
 }
 
-fn undo_one(conn: &Connection, task_id: &str) -> AppResult<Option<String>> {
+pub(crate) fn undo_one(conn: &Connection, task_id: &str) -> AppResult<Option<String>> {
     let snapshot = repo::get_snapshot(conn, task_id)?;
     let task = tasks_repo::get(conn, task_id)?;
     let cycle_id = task.as_ref().map(|t| t.cycle_id.clone());
@@ -290,16 +372,19 @@ pub fn keep_all_previews(db: &Db, cycle_id: &str) -> AppResult<Mutation<usize>> 
         .map_err(|e| AppError::Db(e.to_string()))?;
     let entries = repo::list_entries_by_cycle(&tx, cycle_id)?;
     let mut kept = 0;
+    let mut affected = Mutation::new(());
     for entry in entries {
         if entry.task.proposal.is_some() {
-            keep_one(&tx, &entry.task.id)?;
+            keep_one(&tx, &entry.task.id, &mut affected)?;
             kept += 1;
         }
     }
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
-    Ok(Mutation::new(kept)
+    let mut mutation = Mutation::new(kept)
         .touching_tasks(cycle_id)
-        .touching_proposals(cycle_id))
+        .touching_proposals(cycle_id);
+    mutation.merge(affected);
+    Ok(mutation)
 }
 
 pub fn undo_all_previews(db: &Db, cycle_id: &str) -> AppResult<Mutation<usize>> {

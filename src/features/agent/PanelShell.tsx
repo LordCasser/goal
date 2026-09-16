@@ -4,9 +4,10 @@
  * 与 AI 会话复用同一外壳；Escape 关面板（输入法组合中的 Escape 不当作
  * 退出），面板自身的边界用 1px 轻描边表达，无阴影。
  */
-import type { KeyboardEvent, ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import type * as React from "react";
 
+import { useTranslation } from "../../lib/i18n";
 import { Button } from "../../ui";
 
 export type PanelShellProps = {
@@ -15,6 +16,8 @@ export type PanelShellProps = {
   title: string;
   /** 标题下的状态小字（如当前技能名）；缺省时不占位。 */
   subtitle?: string;
+  /** Compact inline metadata, used by Coach to keep one header row. */
+  headerDetails?: ReactNode;
   onClose: () => void;
   /** 外壳自管 Escape；调用方可追加自己的按键处理（如候选回答 ⌘1…⌘9）。 */
   onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
@@ -25,37 +28,65 @@ export function PanelShell({
   label,
   title,
   subtitle,
+  headerDetails,
   onClose,
   onKeyDown,
   children,
 }: PanelShellProps): React.JSX.Element {
+  const { t } = useTranslation("ai");
+  const panelRef = useRef<HTMLElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    returnFocus.current = previous;
+    // Agent panels can stay mounted while hidden. An inert ancestor must not
+    // claim focus during initial mount.
+    if (panel?.closest("[inert]")) return;
+    // Changing the contextual cycle while typing must leave the task cursor intact.
+    const editingTask = previous instanceof HTMLTextAreaElement && previous.closest("[data-task-id]");
+    if (!panel?.contains(previous) && !editingTask) panel?.focus({ preventScroll: true });
+    return () => {
+      if (panel?.contains(document.activeElement) && previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, []);
+  const close = () => {
+    if (panelRef.current?.contains(document.activeElement) && returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true });
+    onClose();
+  };
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     onKeyDown?.(event);
-    if (event.key === "Escape" && !event.nativeEvent.isComposing) onClose();
+    if (event.key === "Escape" && !event.nativeEvent.isComposing && !event.defaultPrevented) {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    }
   };
 
   return (
     <aside
+      ref={panelRef}
+      tabIndex={-1}
       aria-label={label}
       onKeyDown={handleKeyDown}
-      className="flex h-full w-panel shrink-0 flex-col border-l border-light bg-content"
+      className="flex h-full w-panel shrink-0 flex-col border-l border-light bg-content outline-none"
     >
-      <header className="flex items-start justify-between gap-2 px-4 pb-3 pt-4">
-        <div className="min-w-0">
+      <header className={`flex justify-between gap-2 px-4 ${headerDetails ? "h-12 shrink-0 items-center" : "items-start pb-3 pt-4"}`}>
+        <div className={headerDetails ? "flex min-w-0 flex-1 items-center gap-2" : "min-w-0"}>
           <h2 className="text-caption font-semibold uppercase tracking-[0.08em] text-secondary">
             {title}
           </h2>
+          {headerDetails}
           {subtitle !== undefined && subtitle !== "" && (
             <p className="mt-0.5 text-caption text-secondary">{subtitle}</p>
           )}
         </div>
         <Button
           variant="ghost"
-          size="compact"
-          className="h-7 w-7 justify-center px-0"
-          onClick={onClose}
-          aria-label={`Close ${label} panel`}
-          title="Close (Esc)"
+          size="icon"
+          onClick={close}
+          aria-label={t("common.closePanel", { label })}
+          title={t("common.closeEsc")}
         >
           <CloseIcon />
         </Button>

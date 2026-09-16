@@ -1,17 +1,29 @@
 import { defineConfig, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import packageJson from "./package.json" with { type: "json" };
+import { resolveBuildPlatform } from "./scripts/desktop-platform.mjs";
 
 // vitest 自带一份 vite 类型（rollup 系），与工作区 vite 8 的 rolldown 插件
 // 类型不兼容，无法直接从 vitest/config 导入 defineConfig；test 字段在
 // 这里用本地类型补充，vitest 运行时会照常读取。
 type ViteConfigWithTests = UserConfig & {
-  test?: { environment?: "node" | "jsdom" | "happy-dom"; globals?: boolean };
+  test?: {
+    environment?: "node" | "jsdom" | "happy-dom";
+    globals?: boolean;
+    setupFiles?: string | string[];
+    include?: string[];
+  };
 };
 
 const config: ViteConfigWithTests = {
   plugins: [react(), tailwindcss()],
   clearScreen: false,
+  // Tauri supplies TAURI_ENV_PLATFORM for native builds. A plain Vite build
+  // intentionally resolves to `web`; no browser UA or host OS is consulted.
+  define: {
+    __DESKTOP_PLATFORM__: JSON.stringify(resolveBuildPlatform()),
+  },
   // Tauri 期望固定端口；占用则直接失败，避免 devUrl 与真实端口不一致。
   server: {
     port: 1420,
@@ -19,13 +31,30 @@ const config: ViteConfigWithTests = {
     watch: { ignored: ["**/src-tauri/**"] },
   },
   build: {
-    target: "safari16",
+    // Shared UI uses Tailwind v4's documented browser baseline.
+    target: ["safari16.4", "chrome111", "firefox128"],
     sourcemap: true,
+    rollupOptions: {
+      plugins: [
+        {
+          name: "desktop-build-manifest",
+          generateBundle() {
+            this.emitFile({
+              type: "asset",
+              fileName: "desktop-build.json",
+              source: `${JSON.stringify({ platform: resolveBuildPlatform(), version: packageJson.version })}\n`,
+            });
+          },
+        },
+      ],
+    },
   },
   // 组件测试跑在 jsdom；globals 供 @testing-library 自动 cleanup。
   test: {
     environment: "jsdom",
     globals: true,
+    setupFiles: ["./vitest.setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
   },
 };
 

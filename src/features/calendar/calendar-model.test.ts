@@ -14,6 +14,7 @@ import {
   loadPreferredView,
   monthBounds,
   overlapIds,
+  scheduleOverlapLanes,
   savePreferredView,
   weekBounds,
 } from "./calendar-model";
@@ -149,6 +150,46 @@ describe("overlapIds", () => {
       { first: schedule("b"), second: schedule("c") },
     ]);
     expect([...ids].sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("scheduleOverlapLanes", () => {
+  const scheduled = (id: string, starts_at: number, ends_at: number) => ({
+    session: makeCycle({ id, type: "session" }),
+    schedule: {
+      session_id: id,
+      day_cycle_id: "day-a",
+      starts_at,
+      ends_at,
+      duration_ms: ends_at - starts_at,
+      truncated: false,
+    },
+  });
+
+  it("greedily reuses lanes inside a transitive overlap group", () => {
+    const lanes = scheduleOverlapLanes([
+      scheduled("a", 9, 10),
+      scheduled("b", 9.5, 11),
+      scheduled("c", 10, 10.5),
+      scheduled("isolated", 12, 13),
+      { session: makeCycle({ id: "staged", type: "session" }), schedule: null },
+    ]);
+    expect(lanes.get("a")).toEqual({ lane: 0, lanes: 2 });
+    expect(lanes.get("b")).toEqual({ lane: 1, lanes: 2 });
+    expect(lanes.get("c")).toEqual({ lane: 0, lanes: 2 });
+    expect(lanes.get("isolated")).toEqual({ lane: 0, lanes: 1 });
+    expect(lanes.has("staged")).toBe(false);
+  });
+
+  it("uses stable id order for equal starts and treats touching intervals as separate groups", () => {
+    const lanes = scheduleOverlapLanes([
+      scheduled("z", 0, 10),
+      scheduled("a", 0, 10),
+      scheduled("next", 10, 20),
+    ]);
+    expect(lanes.get("a")).toEqual({ lane: 0, lanes: 2 });
+    expect(lanes.get("z")).toEqual({ lane: 1, lanes: 2 });
+    expect(lanes.get("next")).toEqual({ lane: 0, lanes: 1 });
   });
 });
 

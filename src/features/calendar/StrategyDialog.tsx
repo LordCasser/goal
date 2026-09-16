@@ -5,6 +5,7 @@
  */
 import { Button, Dialog } from "../../ui";
 import type { MoveStrategy } from "./api";
+import { useTranslation, formatDate } from "../../lib/i18n";
 
 export interface StrategyChoice {
   sourceDayId: string;
@@ -24,21 +25,24 @@ export function StrategyDialog({
   onPick: (strategy: Exclude<MoveStrategy, "move">) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("planning");
+  const sourceDate = choice ? formatDate(choice.sourceDate, { year: "numeric", month: "short", day: "numeric" }) : "";
+  const targetDate = choice ? formatDate(choice.targetDate, { year: "numeric", month: "short", day: "numeric" }) : "";
   return (
     <Dialog
       open={choice !== null}
       onClose={onClose}
-      title="This date already has a plan"
+      title={t("calendar.planConflict")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("calendar.cancel")}
           </Button>
           <Button onClick={() => onPick("swap")} disabled={busy || !choice}>
-            Swap days
+            {t("calendar.swapDays")}
           </Button>
           <Button variant="primary" onClick={() => onPick("merge")} disabled={busy || !choice}>
-            Merge into {choice?.targetDate ?? ""}
+            {t("calendar.mergeInto", { date: targetDate })}
           </Button>
         </>
       }
@@ -47,15 +51,12 @@ export function StrategyDialog({
         <p>
           {choice ? (
             <>
-              Moving <span className="font-medium text-primary">{choice.sourceDate}</span> onto{" "}
-              <span className="font-medium text-primary">{choice.targetDate}</span>, which already
-              has a day plan. Choose how to combine them — nothing is discarded silently.
+            {t("calendar.moving", { source: sourceDate, target: targetDate })}
             </>
           ) : null}
         </p>
         <p className="text-caption text-hint">
-          Merge folds the source entries into the target day and removes the source column. Swap
-          exchanges the two dates, each keeping its own content.
+          {t("calendar.mergeHelp")}
         </p>
       </div>
     </Dialog>

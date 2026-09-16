@@ -7,10 +7,8 @@
  * ones are `not_found` / `db_error` / `internal`, everything else comes from
  * the use case (e.g. `past_cycle`, `calendar_key_taken`, `cycle_ended`).
  *
- * Invoke argument keys keep the exact Rust parameter names (snake_case):
- * Tauri 2 matches invoke keys against parameter names without any case
- * conversion. Parameters that are whole structs (`args`, `patch`) are passed
- * as one nested object under the parameter's own name.
+ * Tauri command arguments use camelCase keys by default. Nested serde structs
+ * (`args`, `patch`, `config`) retain their Rust snake_case field names.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -23,10 +21,11 @@ import type {
   CreateCycleArgs,
   Cycle,
   CycleDeletionPreview,
+  TaskDeletionPreview,
   Dismissal,
   EditorWorkspace,
   LogLevel,
-  PlanningIssue,
+  PlanningIssueReport,
   PlannerState,
   PreviewSummary,
   ProviderConfig,
@@ -53,6 +52,10 @@ export function isAppError(e: unknown): e is AppError {
 }
 
 export const commands = {
+  // Window shell; these commands exist only in the Windows build.
+  desktopShellState: "desktop_shell_state",
+  desktopShellReady: "desktop_shell_ready",
+  desktopShellRegions: "desktop_shell_regions",
   // cycles
   getPlannerState: "get_planner_state",
   listSessions: "list_sessions",
@@ -71,6 +74,7 @@ export const commands = {
   updateTask: "update_task",
   patchTask: "patch_task",
   deleteTask: "delete_task",
+  getTaskDeletionPreview: "get_task_deletion_preview",
   moveTask: "move_task",
   reorderTasks: "reorder_tasks",
   setTaskParentLink: "set_task_parent_link",
@@ -95,11 +99,13 @@ export const commands = {
   getSettings: "get_settings",
   setWeekStartDay: "set_week_start_day",
   setTheme: "set_theme",
+  setLocale: "set_locale",
   setLogLevel: "set_log_level",
   getAppFlag: "get_app_flag",
   setAppFlag: "set_app_flag",
   // ai settings (change: add-ai-access-and-voice)
   getAiSettings: "get_ai_settings",
+  getAiAvailability: "get_ai_availability",
   saveProvider: "save_provider",
   deleteProvider: "delete_provider",
   setActiveProvider: "set_active_provider",
@@ -114,14 +120,30 @@ export const commands = {
   startAgentConversation: "start_agent_conversation",
   sendAgentMessage: "send_agent_message",
   getAgentConversation: "get_agent_conversation",
-  getPreviousAgentConversation: "get_previous_agent_conversation",
   startPlanning: "start_planning",
+  analyzePlanningPeriod: "analyze_planning_period",
   startGoalSetting: "start_goal_setting",
   startPrioritization: "start_prioritization",
   getPlanningIssueReport: "get_planning_issue_report",
   dismissPlanningIssue: "dismiss_planning_issue",
   getPlanningIssueDismissals: "get_planning_issue_dismissals",
 } as const;
+
+export type DesktopShellState = {
+  mode: "pending" | "custom" | "native";
+  revision: number;
+  maximized: boolean;
+  focused: boolean;
+};
+export type DesktopRegions = {
+  revision: number;
+  viewport: { width: number; height: number };
+  maximize: { x: number; y: number; width: number; height: number };
+  drag: { x: number; y: number; width: number; height: number };
+};
+export const getDesktopShellState = () => invoke<DesktopShellState>(commands.desktopShellState);
+export const readyDesktopShell = (regions: DesktopRegions) => invoke<DesktopShellState>(commands.desktopShellReady, { regions });
+export const updateDesktopRegions = (regions: DesktopRegions) => invoke<DesktopShellState>(commands.desktopShellRegions, { regions });
 
 // --- cycles -----------------------------------------------------------------
 
@@ -131,7 +153,7 @@ export function getPlannerState(): Promise<PlannerState> {
 
 /** Focus blocks of one day cycle, in column order; empty for non-days. */
 export function listSessions(day_cycle_id: string): Promise<Cycle[]> {
-  return invoke<Cycle[]>(commands.listSessions, { day_cycle_id });
+  return invoke<Cycle[]>(commands.listSessions, { dayCycleId: day_cycle_id });
 }
 
 export function createPlanningCycle(args: CreateCycleArgs): Promise<Cycle> {
@@ -144,23 +166,23 @@ export function updateCycle(
   title: string,
   duration_ms: number | null,
 ): Promise<Cycle> {
-  return invoke<Cycle>(commands.updateCycle, { cycle_id, title, duration_ms });
+  return invoke<Cycle>(commands.updateCycle, { cycleId: cycle_id, title, durationMs: duration_ms });
 }
 
 export function getCycleDeletionPreview(cycle_id: string): Promise<CycleDeletionPreview> {
-  return invoke<CycleDeletionPreview>(commands.getCycleDeletionPreview, { cycle_id });
+  return invoke<CycleDeletionPreview>(commands.getCycleDeletionPreview, { cycleId: cycle_id });
 }
 
-export function deletePlanningCycle(cycle_id: string): Promise<void> {
-  return invoke<void>(commands.deletePlanningCycle, { cycle_id });
+export function deletePlanningCycle(cycle_id: string, confirmationToken?: string): Promise<void> {
+  return invoke<void>(commands.deletePlanningCycle, { cycleId: cycle_id, confirmationToken: confirmationToken ?? null });
 }
 
 export function startCycle(cycle_id: string): Promise<Cycle> {
-  return invoke<Cycle>(commands.startCycle, { cycle_id });
+  return invoke<Cycle>(commands.startCycle, { cycleId: cycle_id });
 }
 
 export function finishCycle(cycle_id: string): Promise<Cycle> {
-  return invoke<Cycle>(commands.finishCycle, { cycle_id });
+  return invoke<Cycle>(commands.finishCycle, { cycleId: cycle_id });
 }
 
 export function addSession(args: AddSessionArgs): Promise<Cycle> {
@@ -171,11 +193,11 @@ export function reorderSessions(
   day_cycle_id: string,
   session_ids: string[],
 ): Promise<void> {
-  return invoke<void>(commands.reorderSessions, { day_cycle_id, session_ids });
+  return invoke<void>(commands.reorderSessions, { dayCycleId: day_cycle_id, sessionIds: session_ids });
 }
 
 export function copyUncompletedFromPrevious(cycle_id: string): Promise<Task[]> {
-  return invoke<Task[]>(commands.copyUncompletedFromPrevious, { cycle_id });
+  return invoke<Task[]>(commands.copyUncompletedFromPrevious, { cycleId: cycle_id });
 }
 
 /** Find-or-create today's (or `date`'s) day column, materializing repeats. */
@@ -195,16 +217,20 @@ export function updateTask(
   title: string,
   patch: TaskPatch,
 ): Promise<Task> {
-  return invoke<Task>(commands.updateTask, { task_id, title, patch });
+  return invoke<Task>(commands.updateTask, { taskId: task_id, title, patch });
 }
 
 /** Partial editor save: every field optional. */
 export function patchTask(task_id: string, patch: TaskPatch): Promise<Task> {
-  return invoke<Task>(commands.patchTask, { task_id, patch });
+  return invoke<Task>(commands.patchTask, { taskId: task_id, patch });
 }
 
-export function deleteTask(task_id: string): Promise<void> {
-  return invoke<void>(commands.deleteTask, { task_id });
+export function getTaskDeletionPreview(task_id: string): Promise<TaskDeletionPreview> {
+  return invoke<TaskDeletionPreview>(commands.getTaskDeletionPreview, { taskId: task_id });
+}
+
+export function deleteTask(task_id: string, confirmationToken?: string): Promise<void> {
+  return invoke<void>(commands.deleteTask, { taskId: task_id, confirmationToken: confirmationToken ?? null });
 }
 
 /** `position` omitted/null = append at the end of the target sibling group. */
@@ -213,7 +239,7 @@ export function moveTask(
   target_cycle_id: string,
   position?: number | null,
 ): Promise<Task> {
-  return invoke<Task>(commands.moveTask, { task_id, target_cycle_id, position });
+  return invoke<Task>(commands.moveTask, { taskId: task_id, targetCycleId: target_cycle_id, position });
 }
 
 /** `parent_id` scopes the reorder to one sibling group (null = top level). */
@@ -222,7 +248,7 @@ export function reorderTasks(
   parent_id: string | null,
   ordered_ids: string[],
 ): Promise<void> {
-  return invoke<void>(commands.reorderTasks, { cycle_id, parent_id, ordered_ids });
+  return invoke<void>(commands.reorderTasks, { cycleId: cycle_id, parentId: parent_id, orderedIds: ordered_ids });
 }
 
 /** Cross-level link (weekly -> long-term, daily -> weekly); null unlinks. */
@@ -230,7 +256,7 @@ export function setTaskParentLink(
   task_id: string,
   parent_id: string | null,
 ): Promise<Task> {
-  return invoke<Task>(commands.setTaskParentLink, { task_id, parent_id });
+  return invoke<Task>(commands.setTaskParentLink, { taskId: task_id, parentId: parent_id });
 }
 
 /** Long-term goal coloring; null clears. */
@@ -238,13 +264,13 @@ export function setTaskRootColor(
   task_id: string,
   color_key: string | null,
 ): Promise<Task> {
-  return invoke<Task>(commands.setTaskRootColor, { task_id, color_key });
+  return invoke<Task>(commands.setTaskRootColor, { taskId: task_id, colorKey: color_key });
 }
 
 // --- editor workspaces ------------------------------------------------------
 
 export function getEditorWorkspace(cycle_id: string): Promise<EditorWorkspace> {
-  return invoke<EditorWorkspace>(commands.getEditorWorkspace, { cycle_id });
+  return invoke<EditorWorkspace>(commands.getEditorWorkspace, { cycleId: cycle_id });
 }
 
 /** Batch form: results keyed by cycle id; unknown cycles map to empty. */
@@ -252,7 +278,7 @@ export function getEditorWorkspacesByCycleIds(
   cycle_ids: string[],
 ): Promise<Record<string, EditorWorkspace>> {
   return invoke<Record<string, EditorWorkspace>>(commands.getEditorWorkspacesByCycleIds, {
-    cycle_ids,
+    cycleIds: cycle_ids,
   });
 }
 
@@ -262,42 +288,42 @@ export function addLaterGoal(title: string): Promise<Task> {
   return invoke<Task>(commands.addLaterGoal, { title });
 }
 
-/** Pull a parked idea into a planning cycle (typically the long-term one). */
+/** Pull a parked idea into a planning cycle; null lets the backend resolve the current week/day. */
 export function promoteLaterGoal(
   task_id: string,
-  target_cycle_id: string,
+  target_cycle_id?: string | null,
 ): Promise<Task> {
-  return invoke<Task>(commands.promoteLaterGoal, { task_id, target_cycle_id });
+  return invoke<Task>(commands.promoteLaterGoal, { taskId: task_id, targetCycleId: target_cycle_id ?? null });
 }
 
 // --- agent proposals --------------------------------------------------------
 
 export function getPreviewSummary(cycle_id: string): Promise<PreviewSummary> {
-  return invoke<PreviewSummary>(commands.getPreviewSummary, { cycle_id });
+  return invoke<PreviewSummary>(commands.getPreviewSummary, { cycleId: cycle_id });
 }
 
 export function keepTaskPreview(task_id: string): Promise<Task> {
-  return invoke<Task>(commands.keepTaskPreview, { task_id });
+  return invoke<Task>(commands.keepTaskPreview, { taskId: task_id });
 }
 
 export function undoTaskPreview(task_id: string): Promise<void> {
-  return invoke<void>(commands.undoTaskPreview, { task_id });
+  return invoke<void>(commands.undoTaskPreview, { taskId: task_id });
 }
 
 /** Number of previews kept. */
 export function keepAllPreviews(cycle_id: string): Promise<number> {
-  return invoke<number>(commands.keepAllPreviews, { cycle_id });
+  return invoke<number>(commands.keepAllPreviews, { cycleId: cycle_id });
 }
 
 /** Number of previews reverted. */
 export function undoAllPreviews(cycle_id: string): Promise<number> {
-  return invoke<number>(commands.undoAllPreviews, { cycle_id });
+  return invoke<number>(commands.undoAllPreviews, { cycleId: cycle_id });
 }
 
 // --- repeats ----------------------------------------------------------------
 
 export function addRepeat(session_id: string): Promise<Repeat> {
-  return invoke<Repeat>(commands.addRepeat, { session_id });
+  return invoke<Repeat>(commands.addRepeat, { sessionId: session_id });
 }
 
 /** Edits the template only — future instances pick the change up. */
@@ -305,11 +331,11 @@ export function updateRepeat(
   repeat_id: string,
   patch: RepeatPatch,
 ): Promise<Repeat> {
-  return invoke<Repeat>(commands.updateRepeat, { repeat_id, patch });
+  return invoke<Repeat>(commands.updateRepeat, { repeatId: repeat_id, patch });
 }
 
 export function stopRepeat(repeat_id: string): Promise<Repeat> {
-  return invoke<Repeat>(commands.stopRepeat, { repeat_id });
+  return invoke<Repeat>(commands.stopRepeat, { repeatId: repeat_id });
 }
 
 // --- settings ---------------------------------------------------------------
@@ -325,6 +351,10 @@ export function setWeekStartDay(day: number): Promise<void> {
 
 export function setTheme(theme: Theme): Promise<void> {
   return invoke<void>(commands.setTheme, { theme });
+}
+
+export function setLocale(locale: import("./i18n").Locale): Promise<void> {
+  return invoke<void>(commands.setLocale, { locale });
 }
 
 /** Applies immediately to the running logger and persists for next launch. */
@@ -348,7 +378,7 @@ export function getSchemaVersion(): Promise<number> {
 }
 
 export function exportBackup(target_path: string): Promise<void> {
-  return invoke<void>(commands.exportBackup, { target_path });
+  return invoke<void>(commands.exportBackup, { targetPath: target_path });
 }
 
 /** Absolute path of the debug log directory, for the settings entry point. */
@@ -360,9 +390,9 @@ export function getDebugLogDir(): Promise<string> {
 //
 // Shapes mirror src-tauri/src/commands/ai_settings.rs 1:1 (snake_case keys).
 // `provider` is a whole-struct parameter, so it travels nested under its own
-// name like `args`/`patch`. Summaries never contain key material; the key
-// crosses IPC only as the input of saveProviderApiKey. No AI settings event
-// exists, so every mutator's caller invalidates the settings page query
+// name like `args`/`patch`. Summaries never contain key material; API keys and
+// one-shot header replacements cross IPC only as save inputs. No AI settings
+// event exists, so every mutator's caller invalidates the settings page query
 // itself (features/ai-settings/AiSettingsPage.tsx).
 
 /** Snapshot for the AI settings page; never contains key material. */
@@ -370,78 +400,92 @@ export function getAiSettings(): Promise<AiSettingsSummary> {
   return invoke<AiSettingsSummary>(commands.getAiSettings);
 }
 
+/** Persisted verification state only; this read never accesses credentials. */
+export function getAiAvailability(): Promise<boolean> {
+  return invoke<boolean>(commands.getAiAvailability);
+}
+
 /** Empty id adds (the store assigns id/created_at); non-empty id updates. */
-export function saveProvider(provider: ProviderConfig): Promise<ProviderConfig> {
-  return invoke<ProviderConfig>(commands.saveProvider, { provider });
+export function saveProvider(
+  provider: ProviderConfig,
+  apiKey?: string | null,
+  headerValues: Record<string, string> = {},
+): Promise<ProviderConfig> {
+  return invoke<ProviderConfig>(commands.saveProvider, {
+    provider,
+    apiKey: apiKey ?? null,
+    headerValues,
+  });
 }
 
 /** Also cascades the keychain entry away; deleting the active provider clears activation. */
 export function deleteProvider(provider_id: string): Promise<void> {
-  return invoke<void>(commands.deleteProvider, { provider_id });
+  return invoke<void>(commands.deleteProvider, { providerId: provider_id });
 }
 
-export function setActiveProvider(provider_id: string): Promise<void> {
-  return invoke<void>(commands.setActiveProvider, { provider_id });
+export function setActiveProvider(provider_id: string, model_id: string): Promise<void> {
+  return invoke<void>(commands.setActiveProvider, { providerId: provider_id, modelId: model_id });
 }
 
-/** The only path key material takes into the backend; it is never read back. */
+/** Legacy API-key replacement path; key material is never read back. */
 export function saveProviderApiKey(provider_id: string, api_key: string): Promise<void> {
-  return invoke<void>(commands.saveProviderApiKey, { provider_id, api_key });
+  return invoke<void>(commands.saveProviderApiKey, { providerId: provider_id, apiKey: api_key });
 }
 
 /** Idempotent keychain cleanup for an existing provider. */
 export function removeProviderApiKey(provider_id: string): Promise<void> {
-  return invoke<void>(commands.removeProviderApiKey, { provider_id });
+  return invoke<void>(commands.removeProviderApiKey, { providerId: provider_id });
 }
 
 /** One minimal real request (design D7); classified failures come back as the result. */
 export function testProviderConnection(provider_id: string): Promise<ConnectionTestResult> {
-  return invoke<ConnectionTestResult>(commands.testProviderConnection, { provider_id });
+  return invoke<ConnectionTestResult>(commands.testProviderConnection, { providerId: provider_id });
 }
 
 // --- agent conversations & planning issues ----------------------------------
 
-export function startAgentConversation(cycle_id: string): Promise<ConversationView> {
-  return invoke<ConversationView>(commands.startAgentConversation, { cycle_id });
+export function startAgentConversation(): Promise<ConversationView> {
+  return invoke<ConversationView>(commands.startAgentConversation);
 }
 
 export function sendAgentMessage(
-  cycle_id: string,
+  cycle_id: string | null,
   text: string,
   focused_task_id?: string | null,
+  page_context?: import("./types").AgentPageContext | null,
 ): Promise<TurnResult> {
   return invoke<TurnResult>(commands.sendAgentMessage, {
-    cycle_id,
+    cycleId: cycle_id,
     text,
-    focused_task_id: focused_task_id ?? null,
+    focusedTaskId: focused_task_id ?? null,
+    pageContext: page_context ?? null,
   });
 }
 
-export function getAgentConversation(cycle_id: string): Promise<ConversationView | null> {
-  return invoke<ConversationView | null>(commands.getAgentConversation, { cycle_id });
+export function getAgentConversation(): Promise<ConversationView | null> {
+  return invoke<ConversationView | null>(commands.getAgentConversation);
 }
 
-export function getPreviousAgentConversation(cycle_id: string): Promise<ConversationView | null> {
-  return invoke<ConversationView | null>(commands.getPreviousAgentConversation, { cycle_id });
-}
-
-export function startPlanning(cycle_id: string): Promise<TurnResult> {
-  return invoke<TurnResult>(commands.startPlanning, { cycle_id });
+export function startPlanning(
+  cycle_id: string,
+  page_context?: import("./types").AgentPageContext | null,
+): Promise<TurnResult> {
+  return invoke<TurnResult>(commands.startPlanning, { cycleId: cycle_id, pageContext: page_context ?? null });
 }
 
 export function startGoalSetting(cycle_id: string, task_id: string): Promise<TurnResult> {
-  return invoke<TurnResult>(commands.startGoalSetting, { cycle_id, task_id });
+  return invoke<TurnResult>(commands.startGoalSetting, { cycleId: cycle_id, taskId: task_id });
 }
 
 export function startPrioritization(cycle_id: string): Promise<TurnResult> {
-  return invoke<TurnResult>(commands.startPrioritization, { cycle_id });
+  return invoke<TurnResult>(commands.startPrioritization, { cycleId: cycle_id });
 }
 
 export function getPlanningIssueReport(
   cycle_id: string,
   refresh = false,
-): Promise<PlanningIssue[]> {
-  return invoke<PlanningIssue[]>(commands.getPlanningIssueReport, { cycle_id, refresh });
+): Promise<PlanningIssueReport> {
+  return invoke<PlanningIssueReport>(commands.getPlanningIssueReport, { cycleId: cycle_id, refresh });
 }
 
 export function dismissPlanningIssue(
@@ -451,13 +495,18 @@ export function dismissPlanningIssue(
   reason?: string | null,
 ): Promise<void> {
   return invoke<void>(commands.dismissPlanningIssue, {
-    cycle_id,
-    issue_type,
-    task_id: task_id ?? null,
+    cycleId: cycle_id,
+    issueType: issue_type,
+    taskId: task_id ?? null,
     reason: reason ?? null,
   });
 }
 
 export function getPlanningIssueDismissals(cycle_id: string): Promise<Dismissal[]> {
-  return invoke<Dismissal[]>(commands.getPlanningIssueDismissals, { cycle_id });
+  return invoke<Dismissal[]>(commands.getPlanningIssueDismissals, { cycleId: cycle_id });
+}
+
+/** Read-only analysis over exact inclusive calendar dates. */
+export function analyzePlanningPeriod(request: { start_date: string; end_date: string; question: string }): Promise<{ analysis: string; facts: { start_date: string; end_date: string; snapshot_at: number; basis: string; undated_cycles_excluded: number; cycles: Array<{ cycle: Cycle; tasks: Task[]; work_mix: import("./types").EditorWorkspace["work_mix"] }> } }> {
+  return invoke(commands.analyzePlanningPeriod, { request });
 }

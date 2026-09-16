@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useTranslation } from "../../lib/i18n";
 import type { CycleIdsPayload } from "../../lib/events";
 import {
   getOnboarding,
@@ -21,6 +22,7 @@ import {
 } from "./api";
 
 export function GettingStartedGuide() {
+  const { t } = useTranslation("shell");
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
 
@@ -77,7 +79,7 @@ export function GettingStartedGuide() {
 
   return (
     <section
-      aria-label="Getting started"
+      aria-label={t("onboarding.guide.aria")}
       className="flex flex-col border-b border-light bg-content px-4 py-2"
     >
       <div className="flex items-center gap-3">
@@ -87,9 +89,9 @@ export function GettingStartedGuide() {
           aria-expanded={expanded}
           onClick={() => setExpanded((open) => !open)}
         >
-          <ProgressRing ratio={doneRatio} label={`${current.completed} of ${current.total}`} />
+          <ProgressRing ratio={doneRatio} label={t("onboarding.guide.progress", { completed: current.completed, total: current.total })} />
           <span className="text-body font-medium text-primary">
-            Getting started {current.completed} of {current.total}
+            {t("onboarding.guide.progress", { completed: current.completed, total: current.total })}
           </span>
         </button>
         <button
@@ -97,9 +99,9 @@ export function GettingStartedGuide() {
           className="ml-auto rounded-sm px-2 py-1 text-menu text-secondary hover:bg-hover hover:text-primary"
           onClick={() => skip.mutate()}
           disabled={skip.isPending}
-          aria-label="Skip guide"
+          aria-label={t("onboarding.guide.skip")}
         >
-          Skip guide
+          {t("onboarding.guide.skip")}
         </button>
       </div>
       {expanded && (
@@ -114,15 +116,20 @@ export function GettingStartedGuide() {
 }
 
 function GuideRow({ step }: { step: GuideStep }) {
+  const { t } = useTranslation("shell");
+  const copy = GUIDE_STEP_COPY[step.id];
+  const title = copy ? t(copy.title) : step.title;
+  const detail = copy ? t(copy.detail) : step.detail;
+  const statusLabel = step.status === "done"
+    ? t("onboarding.guide.status.done")
+    : step.status === "skipped"
+      ? t("onboarding.guide.status.skipped")
+      : t("onboarding.guide.status.notDone");
   return (
     <li className="flex items-start gap-2" data-step-id={step.id}>
       <span
         aria-label={
-          step.status === "done"
-            ? "Done"
-            : step.status === "skipped"
-              ? "Skipped"
-              : "Not done"
+          statusLabel
         }
         className={
           step.status === "done"
@@ -140,19 +147,43 @@ function GuideRow({ step }: { step: GuideStep }) {
               : "text-body text-primary"
           }
         >
-          {step.title}
+          {title}
         </span>
-        <span className="text-menu text-hint">{step.detail}</span>
+        <span className="text-menu text-hint">{detail}</span>
       </span>
     </li>
   );
 }
+
+const GUIDE_STEP_COPY: Record<string, { title: string; detail: string }> = {
+  set_long_term_goal: {
+    title: "onboarding.guide.step.setLongTermGoal.title",
+    detail: "onboarding.guide.step.setLongTermGoal.detail",
+  },
+  add_later_item: {
+    title: "onboarding.guide.step.addLaterItem.title",
+    detail: "onboarding.guide.step.addLaterItem.detail",
+  },
+  link_week_to_long_term: {
+    title: "onboarding.guide.step.linkWeekToLongTerm.title",
+    detail: "onboarding.guide.step.linkWeekToLongTerm.detail",
+  },
+  link_day_to_week: {
+    title: "onboarding.guide.step.linkDayToWeek.title",
+    detail: "onboarding.guide.step.linkDayToWeek.detail",
+  },
+  complete_focus_block: {
+    title: "onboarding.guide.step.completeFocusBlock.title",
+    detail: "onboarding.guide.step.completeFocusBlock.detail",
+  },
+};
 
 /**
  * 进度环用真实进度语义：周长按 completed/total 的实数比例上色，四舍五入
  * 永远不会把 0 画成有进度、也不会把满进度画成缺口。
  */
 export function ProgressRing({ ratio, label }: { ratio: number; label: string }) {
+  const { t } = useTranslation("shell");
   const clamped = Math.min(1, Math.max(0, ratio));
   const radius = 7;
   const circumference = 2 * Math.PI * radius;
@@ -162,7 +193,7 @@ export function ProgressRing({ ratio, label }: { ratio: number; label: string })
       viewBox="0 0 20 20"
       className="h-5 w-5"
       role="img"
-      aria-label={`Progress: ${label}`}
+      aria-label={t("onboarding.guide.progressAria", { label })}
     >
       <circle
         cx="10"

@@ -12,7 +12,10 @@ pub mod db;
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod i18n;
 pub mod logging;
+pub mod network;
+mod platform;
 pub mod providers;
 pub mod repository;
 pub mod sampling;
@@ -24,7 +27,6 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -43,15 +45,30 @@ pub fn run() {
             // half-initialized store.
             let ai_settings = providers::service::AiSettingsState::load(&data_dir)?;
             app.manage(ai_settings);
+            // A broken personal skill must not stop the planner from opening.
+            if let Err(error) = ai::skills::directory().and_then(|root| {
+                ai::persona::install_missing(root.parent().expect("skills directory has parent"))?;
+                ai::skills::install_missing(&root)
+            }) {
+                eprintln!("AI skills could not be initialized: {error}");
+            }
             // Planning-issue review cache: keyed by (cycle, content hash), so
             // repeated editor-triggered reviews stay cheap (design D5).
             app.manage(ai::review::IssueCache::default());
 
             logging::init(data_dir.join("logs"), initial_level);
             logging::info("app", "app started");
+            #[cfg(target_os = "windows")]
+            platform::windows::setup(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(target_os = "windows")]
+            commands::desktop::desktop_shell_state,
+            #[cfg(target_os = "windows")]
+            commands::desktop::desktop_shell_ready,
+            #[cfg(target_os = "windows")]
+            commands::desktop::desktop_shell_regions,
             // cycles
             commands::cycles::get_planner_state,
             commands::cycles::list_sessions,
@@ -69,6 +86,7 @@ pub fn run() {
             commands::tasks::add_task,
             commands::tasks::update_task,
             commands::tasks::patch_task,
+            commands::tasks::get_task_deletion_preview,
             commands::tasks::delete_task,
             commands::tasks::move_task,
             commands::tasks::reorder_tasks,
@@ -94,11 +112,13 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_week_start_day,
             commands::settings::set_theme,
+            commands::settings::set_locale,
             commands::settings::set_log_level,
             commands::settings::get_app_flag,
             commands::settings::set_app_flag,
             // ai settings
             commands::ai_settings::get_ai_settings,
+            commands::ai_settings::get_ai_availability,
             commands::ai_settings::save_provider,
             commands::ai_settings::delete_provider,
             commands::ai_settings::set_active_provider,
@@ -109,13 +129,17 @@ pub fn run() {
             commands::agent::start_agent_conversation,
             commands::agent::send_agent_message,
             commands::agent::get_agent_conversation,
-            commands::agent::get_previous_agent_conversation,
             commands::agent::start_planning,
+            commands::agent::analyze_planning_period,
             commands::agent::start_goal_setting,
             commands::agent::start_prioritization,
             commands::agent::get_planning_issue_report,
             commands::agent::dismiss_planning_issue,
             commands::agent::get_planning_issue_dismissals,
+            commands::agent::get_agent_actions,
+            commands::proposals::get_pending_task_cycles,
+            commands::proposals::resolve_coach_task_preview,
+            commands::agent::resolve_agent_action,
             // reviews (add-review-retrospective)
             commands::reviews::get_cycle_facts,
             commands::reviews::get_cycle_review,

@@ -1,6 +1,6 @@
 ## Purpose
 
-定义应用的骨架对象：时间容器（planning cycle）。所有目标、任务、专注块都必须挂在某个周期下，周期之间通过 `parent_id` 构成 月 → 周 → 日 → 专注块 的四级层级，并各自带生命周期、日历身份与删除守卫。
+定义应用的骨架对象：时间容器（planning cycle）。所有目标、任务、专注块都必须挂在某个周期下，周与日周期允许独立存在；可选的 `parent_id` 表达时间收纳，专注块必须属于某一天，并各自带生命周期、日历身份与删除守卫。
 
 ## Requirements
 
@@ -111,11 +111,19 @@ Long-term cycle 的时长 SHALL 只从三档中选取，且各档 MUST 按 **28 
 
 ### Requirement: 子周期创建的层级要求
 
-周周期 SHALL 必须有父周期；系统 MUST NOT 允许在已结束的长周期下创建周周期。
+周、日周期 SHALL 允许没有父周期。若调用方显式指定父周期，系统 MUST 校验相邻层级及父周期未结束。创建日历日期 MUST NOT 依赖长期目标存在；每周、每日可包含多条独立或已关联的事务。
 
 #### Scenario: 周周期缺少父周期
-- **WHEN** 尝试创建一个没有父周期的周周期
-- **THEN** 系统拒绝并返回明确错误
+- **WHEN** 用户尚无长期目标并创建本周事务
+- **THEN** 创建独立的自然周容器，允许添加多条周事务
+
+#### Scenario: 独立日周期
+- **WHEN** 用户创建没有父周期的日计划
+- **THEN** 按日期保存，重复打开复用该日，不强制补父周期
+
+#### Scenario: 打开或移动到无长期周期覆盖的日期
+- **WHEN** 日历需要该日期的日容器
+- **THEN** 复用既有日期身份，必要时建立独立周与日，不因缺少长期周期而拒绝
 
 #### Scenario: 父周期已结束
 - **WHEN** 尝试在一个已结束的长周期下创建周周期
@@ -127,15 +135,46 @@ Long-term cycle 的时长 SHALL 只从三档中选取，且各档 MUST 按 **28 
 
 ### Requirement: Do Later 收纳容器
 
-系统 SHALL 提供一个无起止日期的 Long-term 容器（标题 "Later"），用于暂存尚未承诺的目标。该容器 MUST NOT 参与常规周期删除。
+系统 SHALL 提供一个无起止日期的 Long-term 容器（标题 "Later"），用于暂存尚未承诺的目标。该容器 MUST NOT 参与常规周期删除。Later 中的任务 SHALL 通过 `later_plan_type` 记录用户准备安排的周期类型，取值为 `month`、`week`、`day`；直接新增的想法和缺少该字段的旧数据按 `month` 解释，不得猜测旧来源。
 
 #### Scenario: 暂存一个想法
 - **WHEN** 用户在 Do Later 侧栏输入一条目标
 - **THEN** 该目标以 `type='month'` 的 Later 周期为 `cycle_id` 创建，且不出现在任何带日期的周期列中
+- **AND** 目标的 `later_plan_type` 为 `month`
 
-#### Scenario: 把想法拉进当前计划
-- **WHEN** 用户把 Later 中的目标移动到当前 Long-term 周期
-- **THEN** 目标 `cycle_id` 更新为目标周期，原 Later 中不再显示
+#### Scenario: 保留来源计划类型
+- **WHEN** 用户把长期、周或日计划中的任务移入 Later
+- **THEN** 任务进入 Later 容器并分别记录 `month`、`week` 或 `day` 的 `later_plan_type`
+- **AND** 同一来源周期内随根任务移动的子步骤保留同一类型
+
+#### Scenario: 把长期想法拉进目标周期
+- **WHEN** 用户对 `later_plan_type='month'` 的 Later 目标选择提升并选定一个长期周期
+- **THEN** 目标 `cycle_id` 更新为目标周期，`later_plan_type` 清空，原 Later 中不再显示
+
+#### Scenario: 周想法默认安排到本周
+- **WHEN** 用户对 `later_plan_type='week'` 的 Later 目标选择安排到本周
+- **THEN** 系统按用户的 `week_start_day` 和当前本地日期确定本周，并将目标移入该周
+- **AND** 已存在该周周期时复用它，不要求用户再次选择长期周期
+
+#### Scenario: 日想法默认安排到今天
+- **WHEN** 用户对 `later_plan_type='day'` 的 Later 目标选择安排到今天
+- **THEN** 系统按当前本地日期确定今天的日周期，并将目标移入该日
+- **AND** 已存在该日周期时复用它
+
+#### Scenario: 默认目标周期不存在
+- **WHEN** 本周或今天尚无对应周期，用户确认把周或日 Later 目标安排到默认周期
+- **THEN** 系统在同一操作中创建所需周期并移动目标
+- **AND** 周期创建或移动任一步骤失败时整体回滚，不留下没有任务的孤立周期
+
+#### Scenario: 重复提交提升操作
+- **WHEN** 用户在一次安排操作尚未完成时重复点击按钮，或重试同一请求
+- **THEN** 系统最多完成一次有效移动，返回当前结果或明确的可见错误
+- **AND** 不产生重复周期、重复任务或空周期
+
+#### Scenario: 提升失败
+- **WHEN** 目标周期已结束、目标类型不匹配或数据库操作失败
+- **THEN** Later 项保留在原容器及原 `later_plan_type`，界面显示可理解的错误
+- **AND** 不显示成功状态，不留下部分移动结果
 
 ### Requirement: 从上一周期复制未完成项
 
@@ -181,16 +220,27 @@ Long-term cycle 的时长 SHALL 只从三档中选取，且各档 MUST 按 **28 
 - **WHEN** 周期已结束
 - **THEN** 不再显示剩余时间读数
 
-### Requirement: 周期删除守卫
+### Requirement: 规划周期删除守卫
 
-系统 SHALL 在删除周期前评估其可否删除，并 MUST 拒绝会导致数据丢失或语义破坏的删除。
+系统 SHALL 在删除规划容器前评估其可否删除，并 MUST 拒绝会导致数据丢失或语义破坏的删除。单个 Focus block 是可删除的专注记录，即使它已经开始或完成。
 
-#### Scenario: 删除过去周期
-- **WHEN** 用户尝试删除一个已结束的周期
+#### Scenario: 删除过去规划周期
+- **WHEN** 用户尝试删除一个已结束的月、周或日规划周期
 - **THEN** 系统拒绝并提示 "Past cycles can't be deleted."
 
+#### Scenario: 删除历史专注块
+- **WHEN** 用户删除一个已经完成的单个 Focus block
+- **THEN** 系统允许删除该 Focus block
+- **AND** 从其父级日、周、月的 focused_time 聚合中扣除该记录的已计时间，并将聚合值限制为不小于 0
+- **AND** 删除该 Focus block 的排期提醒
+
+#### Scenario: 删除运行中的专注块
+- **WHEN** 用户删除一个已经开始但尚未完成的单个 Focus block
+- **THEN** 系统允许删除该 Focus block 及其排期提醒
+- **AND** 不向任何父级 focused_time 聚合追加时间
+
 #### Scenario: 删除包含已启动专注块的周期
-- **WHEN** 目标周期下存在已经启动的 session
+- **WHEN** 目标月、周或日规划周期下存在已经启动的 session
 - **THEN** 系统拒绝并说明该周期包含已开始的专注块
 
 #### Scenario: 超出可删范围

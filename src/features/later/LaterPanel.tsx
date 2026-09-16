@@ -1,3 +1,4 @@
+import { RemovalList } from "../../ui/RemovalList";
 /**
  * Do Later 侧栏（rebuild-baseline 7.6）：先记录、后安排的暂存区。
  *
@@ -22,11 +23,13 @@ import {
 import { qk } from "../../lib/events";
 import { Button, Input } from "../../ui";
 import { LaterTaskRow } from "./LaterTaskRow";
+import { useTranslation } from "../../lib/i18n";
 
 /** app_settings 里的 flag key；值为 "dismissed" 后解释卡不再出现。 */
 export const LATER_HINT_KEY = "hint.later-explainer";
 
 export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const { t } = useTranslation("planning");
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
   const [hintHidden, setHintHidden] = useState(false);
@@ -36,7 +39,7 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
     queryKey: qk.editorWorkspace(LATER_CYCLE_ID),
     queryFn: () => getEditorWorkspace(LATER_CYCLE_ID),
   });
-  // 规划状态只为 Promote 提供长期（month）周期候选。
+  // 规划状态只为长期（month）类型提供目标周期候选。
   const planner = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
   // 自定 key：qk 工厂没有 app-flag 形状，这个 key 只有本面板消费。
   const hintFlag = useQuery({
@@ -45,8 +48,13 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
   });
 
   // Later 容器自身在 Rust 侧以 month 类型播种，这里要从候选里排除。
+  // 已归档或已结束的周期不能再接收 Later 项。
   const monthCycles = (planner.data?.cycles ?? []).filter(
-    (cycle) => cycle.type === "month" && cycle.id !== LATER_CYCLE_ID,
+    (cycle) =>
+      cycle.type === "month" &&
+      cycle.id !== LATER_CYCLE_ID &&
+      !cycle.archived &&
+      !cycle.finished,
   );
 
   const addGoal = useMutation({
@@ -82,7 +90,9 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
   // 面板内 Escape 关面板；行内 Popover 在捕获阶段先消费自己的 Escape
   // （design.md 6.2 的退出顺序）。输入法组合中的 Escape 不当作退出。
   const onPanelKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if (e.key !== "Escape" || e.nativeEvent.isComposing) return;
+    if (e.key !== "Escape" || e.nativeEvent.isComposing || e.defaultPrevented) return;
+    e.preventDefault();
+    e.stopPropagation();
     onClose();
   };
 
@@ -91,21 +101,20 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
 
   return (
     <aside
-      aria-label="Do Later"
+      aria-label={t("later.panel")}
       onKeyDown={onPanelKeyDown}
       className="flex h-full w-panel shrink-0 flex-col border-r border-light bg-content"
     >
       <header className="flex items-center justify-between px-4 pb-3 pt-4">
         <h2 className="text-caption font-semibold uppercase tracking-[0.08em] text-secondary">
-          Later
+          {t("later.title")}
         </h2>
         <Button
           variant="ghost"
-          size="compact"
-          className="h-7 w-7 justify-center px-0"
+          size="icon"
           onClick={onClose}
-          aria-label="Close Later panel"
-          title="Close (Esc)"
+          aria-label={t("later.close")}
+          title={t("later.closeEsc")}
         >
           <CloseIcon />
         </Button>
@@ -116,43 +125,39 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onQuickAddKeyDown}
-          placeholder="Note it down, schedule later"
-          aria-label="New parked goal"
+          placeholder={t("later.placeholder")}
+          aria-label={t("later.newGoal")}
         />
       </div>
       {showHint && (
         <section className="mx-4 mb-3 rounded-sm border border-light bg-subtle p-3">
           <header className="flex items-start justify-between gap-2">
             <h3 className="text-caption font-semibold uppercase tracking-[0.08em] text-secondary">
-              Park now, plan later
+              {t("later.hintTitle")}
             </h3>
             <Button
               variant="ghost"
-              size="compact"
-              className="h-7 w-7 justify-center px-0"
+              size="icon"
               onClick={() => dismissHint.mutate()}
-              aria-label="Dismiss hint"
-              title="Won't show again"
+              aria-label={t("later.dismissHint")}
+              title={t("later.wontShow")}
             >
               <CloseIcon />
             </Button>
           </header>
           <p className="mt-1 text-menu text-secondary">
-            Capture a goal the moment it shows up — nothing here needs a date or
-            a plan. Promote parked items into a long-term cycle when you are
-            ready.
+            {t("later.hint")}
           </p>
         </section>
       )}
       {/* 列表区在面板内纵向滚动（design.md 3.3 适配规则）。 */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {rows.length === 0 ? (
-          // 空状态只留一行轻提示：Later 面板窄，不用大 EmptyState（9.1）。
+        <RemovalList empty={
           <p className="pt-2 text-body text-hint">
-            Nothing parked yet — note it down above. No date or plan needed.
+            {t("later.empty")}
           </p>
-        ) : (
-          rows.map(({ task, depth }) => (
+        }>
+          {rows.map(({ task, depth }) => (
             <LaterTaskRow
               key={task.id}
               task={task}
@@ -161,8 +166,8 @@ export function LaterPanel({ onClose }: { onClose: () => void }): React.JSX.Elem
               autoFocusTitle={task.id === focusTaskId}
               onRowCreated={setFocusTaskId}
             />
-          ))
-        )}
+          ))}
+        </RemovalList>
       </div>
     </aside>
   );
@@ -184,7 +189,7 @@ function CloseIcon() {
   return (
     <svg
       viewBox="0 0 16 16"
-      className="h-4 w-4"
+      className="h-4 w-4 shrink-0"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.5"

@@ -25,6 +25,57 @@ const MS_PER_DAY = 86_400_000;
 /** 允许的时长（Rust LONG_TERM_DURATIONS_MONTHS）；运行时仍做防御检查。 */
 export type TimelineMonths = 1 | 3 | 6;
 
+export type CustomTimelineError = "invalid_cycle_range" | "invalid_progress_check";
+
+export type CustomTimeline = {
+  days: number | null;
+  checkDates: string[];
+  totalChecks: number;
+  error: CustomTimelineError | null;
+};
+
+/**
+ * Derives a custom cycle's review checkpoints using date-only arithmetic.
+ * The end date is the review boundary and is therefore excluded from checks.
+ * Only a small preview is materialized; totalChecks stays arithmetic so a
+ * long interval cannot make the dialog render an unbounded list.
+ */
+export function deriveCustomTimeline(
+  startISO: string,
+  endISO: string,
+  check: import("../../lib/types").ProgressCheck | null,
+  previewLimit = 4,
+): CustomTimeline {
+  const start = toEpochDay(startISO);
+  const end = toEpochDay(endISO);
+  if (start === null || end === null || end <= start) {
+    return { days: null, checkDates: [], totalChecks: 0, error: "invalid_cycle_range" };
+  }
+  if (!check) {
+    return { days: end - start, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
+  }
+
+  if (check.kind === "once") {
+    const date = toEpochDay(check.date);
+    if (date === null || date < start || date >= end) {
+      return { days: end - start, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
+    }
+    return { days: end - start, checkDates: [check.date], totalChecks: 1, error: null };
+  }
+
+  if (!Number.isSafeInteger(check.every_days) || check.every_days <= 0) {
+    return { days: end - start, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
+  }
+  const interval = check.every_days;
+  const days = end - start;
+  const totalChecks = Math.max(0, Math.floor((days - 1) / interval));
+  const count = Math.min(totalChecks, Math.max(0, previewLimit));
+  const checkDates = Array.from({ length: count }, (_, index) =>
+    fromEpochDay(start + (index + 1) * interval),
+  );
+  return { days, checkDates, totalChecks, error: null };
+}
+
 /** 严格解析 `YYYY-MM-DD` 为 UTC 午夜 epoch 天数；格式或日历不合法返回 null。 */
 function toEpochDay(iso: string): number | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);

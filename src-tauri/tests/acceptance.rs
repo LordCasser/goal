@@ -25,6 +25,7 @@ fn full_chain_walkthrough_accrues_focus_time() {
     let session = cycles::add_session(
         &test.db,
         &cycles::AddSessionArgs {
+            task_id: None,
             day_cycle_id: day.id.clone(),
             title: "deep work".into(),
             duration_ms: Some(50 * 60 * 1000),

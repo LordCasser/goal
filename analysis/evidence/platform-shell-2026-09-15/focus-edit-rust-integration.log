@@ -1,0 +1,125 @@
+warning: unused import: `NotificationExt`
+   --> src/commands/onboarding.rs:209:51
+    |
+209 |     use tauri_plugin_notification::{Notification, NotificationExt};
+    |                                                   ^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `reply` is never read
+   --> src/ai/agent/turn.rs:373:21
+    |
+373 |     let mut reply = String::new();
+    |                     ^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+393 |             reply = response.text.clone();
+    |             ----- `reply` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:33:23
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<Result<AgentResponse, AgentError>>;
+   |                       ^^^^^                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                       |
+   |                       the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+   = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+   |
+33 |     fn generate_agent(&self, req: AgentRequest) -> BoxFuture<'_, Result<AgentResponse, AgentError>>;
+   |                                                              +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> src/ai/llm/mod.rs:35:22
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<Result<serde_json::Value, AgentError>>;
+   |                      ^^^^^                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                      |
+   |                      the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+35 |     fn generate_json(&self, req: LlmRequest) -> BoxFuture<'_, Result<serde_json::Value, AgentError>>;
+   |                                                           +++
+
+warning: `planner` (lib) generated 4 warnings (run `cargo fix --lib -p planner` to apply 3 suggestions)
+   Compiling planner v0.1.0 (/Users/lordcasser/workspace/projects/goal/src-tauri)
+    Finished `test` profile [unoptimized] target(s) in 0.74s
+     Running tests/invariants.rs (target/debug/deps/invariants-69523c0e46a9058f)
+
+running 14 tests
+test skill_migration_preserves_messages_with_foreign_keys_enabled ... ok
+test lifecycle_check_rejects_finished_without_started ... ok
+test repeats_table_and_cycles_link_exist_after_migrations ... ok
+test trigger_rejects_root_color_outside_long_term_on_insert ... ok
+test empty_database_reaches_latest_version_in_order ... ok
+test later_container_is_seeded_with_zero_duration_and_no_dates ... ok
+test calendar_key_is_globally_unique_but_nulls_repeat ... ok
+test trigger_rejects_retyping_cycle_with_root_colors ... ok
+test checksum_drift_fails_loudly ... ok
+test trigger_rejects_moving_colored_task_into_week_cycle ... ok
+test deleting_cycle_cascades_to_tasks_and_snapshots ... ok
+test migrations_apply_idempotently_and_version_is_stable ... ok
+test backup_export_contains_all_committed_data ... ok
+test unknown_cycle_type_is_rejected_by_check ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/services.rs (target/debug/deps/services-5d45ac8f992ef46a)
+
+running 39 tests
+test agent_upsert_lands_in_preview_and_is_hidden_from_visible_queries ... ok
+test copy_from_completed_week_returns_empty ... ok
+test deletion_guard_blocks_cycles_with_started_sessions ... ok
+test delete_preview_keeps_row_revertible_then_keep_removes_it ... ok
+test deletion_guard_blocks_past_cycles ... ok
+test creating_a_goal_reuses_trailing_empty_row ... ok
+test copy_uncompleted_records_lineage_and_skips_completed ... ok
+test deletion_guard_allows_only_latest_n ... ok
+test deleting_one_days_instance_leaves_the_template_alone ... ok
+test batch_keep_and_undo_cover_whole_cycle ... ok
+test coach_preview_locks_only_affected_tasks_and_rejection_restores_the_exact_tree ... ok
+test cross_level_links_allow_only_adjacent_levels ... ok
+test editor_workspace_renders_subtasks_markdown ... ok
+test keep_clears_snapshot_and_commits_the_row ... ok
+test finishing_a_session_accrues_focused_time_up_the_chain ... ok
+test long_term_rejects_durations_outside_allowed_set ... ok
+test later_container_is_protected_from_deletion ... ok
+test duplicate_calendar_key_maps_to_taken ... ok
+test editing_template_with_undated_instance_fails_explicitly ... ok
+test editor_workspace_matches_batch_entry_and_handles_missing_cycles ... ok
+test long_term_durations_use_28_day_months ... ok
+test manual_goals_default_to_needing_clarity ... ok
+test editing_template_never_touches_existing_instances ... ok
+test next_day_generates_instances_in_template_order ... ok
+test moving_into_ended_cycle_is_rejected ... ok
+test repeat_instances_obey_the_same_deletion_guards ... ok
+test planning_cycles_cannot_be_renamed_or_resized ... ok
+test undo_removes_rows_that_never_existed_and_restores_rows_that_did ... ok
+test start_requires_duration ... ok
+test root_color_on_week_task_is_rejected ... ok
+test save_as_repeat_links_first_instance ... ok
+test stop_repeat_archives_unlinks_and_preserves_history ... ok
+test week_under_ended_long_term_is_rejected ... ok
+test weekly_items_can_link_goals_outside_the_container_parent ... ok
+test work_mix_counts_real_commitments_and_follows_optional_goal_links ... ok
+test independent_weeks_copy_unfinished_tasks_from_the_previous_date ... ok
+test opening_an_independent_day_does_not_force_a_parent_or_duplicate_it ... ok
+test removing_template_unlinks_but_never_deletes_instances ... ok
+test week_can_be_created_without_long_term_goals ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+
+     Running tests/session_deletion.rs (target/debug/deps/session_deletion-43761c982a2d967c)
+
+running 3 tests
+test running_focus_block_can_be_deleted_without_accruing_time ... ok
+test proposal_lock_rejects_container_delete_without_partial_session_changes ... ok
+test finished_focus_block_can_be_deleted_and_reverses_its_aggregate ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+

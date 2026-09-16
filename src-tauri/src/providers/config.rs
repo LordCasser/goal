@@ -54,14 +54,6 @@ pub enum OutputType {
     Text,
 }
 
-/// A non-sensitive custom header sent with every request to this provider
-/// (e.g. gateway routing hints). Never used for credentials.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtraHeader {
-    pub name: String,
-    pub value: String,
-}
-
 /// One model of one provider, with user-declared capability metadata
 /// (design D1). Sampling needs `model_id` only; the rest informs compaction
 /// decisions and explicit capability downgrades in the agent layer.
@@ -99,7 +91,10 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub api_format: ApiFormat,
     #[serde(default)]
-    pub extra_headers: Vec<ExtraHeader>,
+    pub connection: crate::network::ConnectionSettings,
+    #[serde(default)]
+    /// Names only. Values live in the provider header credential.
+    pub extra_headers: Vec<String>,
     pub models: Vec<ModelConfig>,
     /// Unix epoch milliseconds.
     pub created_at: i64,
@@ -107,6 +102,10 @@ pub struct ProviderConfig {
     /// outright, so this flag carries no behavior today.
     #[serde(default)]
     pub archived: bool,
+    /// Last successful real probe of this saved configuration and credential.
+    /// Only backend connection commands may establish this marker.
+    #[serde(default)]
+    pub connection_verified_at: Option<i64>,
 }
 
 /// On-disk shape of `providers.json`, also kept as the in-memory state: the
@@ -115,6 +114,8 @@ pub struct ProviderConfig {
 struct ProviderState {
     #[serde(default)]
     active_provider_id: Option<String>,
+    #[serde(default)]
+    active_model_id: Option<String>,
     #[serde(default)]
     providers: Vec<ProviderConfig>,
 }
@@ -184,6 +185,15 @@ impl ProviderStore {
             .find(|p| p.id == stored.id)
             .expect("existence checked above");
         *slot = stored.clone();
+        if next.active_provider_id.as_deref() == Some(&stored.id)
+            && !stored
+                .models
+                .iter()
+                .any(|m| Some(&m.model_id) == next.active_model_id.as_ref())
+        {
+            next.active_provider_id = None;
+            next.active_model_id = None;
+        }
         self.commit(&mut state, next)?;
         crate::logging::debug(
             LOG_MODULE,
@@ -204,6 +214,7 @@ impl ProviderStore {
         next.providers.retain(|p| p.id != id);
         if next.active_provider_id.as_deref() == Some(id) {
             next.active_provider_id = None;
+            next.active_model_id = None;
         }
         self.commit(&mut state, next)?;
         crate::logging::debug(LOG_MODULE, &format!("deleted provider {id}"));
@@ -225,13 +236,37 @@ impl ProviderStore {
         self.lock().active_provider_id.clone()
     }
 
-    /// Marks an existing provider as active.
+    pub fn active_model_id(&self) -> Option<String> {
+        self.lock().active_model_id.clone()
+    }
+
+    #[cfg(test)]
     pub fn set_active(&self, id: &str) -> AppResult<()> {
+        let provider = self
+            .get(id)
+            .ok_or_else(|| AppError::not_found("provider", id))?;
+        self.set_active_model(id, &provider.models[0].model_id)
+    }
+
+    /// Persist the exact pair atomically. Browsing/editing never changes it.
+    pub fn set_active_model(&self, id: &str, model_id: &str) -> AppResult<()> {
         let mut state = self.lock();
         if !state.providers.iter().any(|p| p.id == id) {
             return Err(AppError::not_found("provider", id));
         }
+        if !state
+            .providers
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .models
+            .iter()
+            .any(|m| m.model_id == model_id)
+        {
+            return Err(AppError::not_found("model", model_id));
+        }
         let mut next = state.clone();
+        next.active_model_id = Some(model_id.to_string());
         next.active_provider_id = Some(id.to_string());
         self.commit(&mut state, next)?;
         crate::logging::debug(LOG_MODULE, &format!("active provider set to {id}"));
@@ -246,6 +281,7 @@ impl ProviderStore {
         }
         let mut next = state.clone();
         next.active_provider_id = None;
+        next.active_model_id = None;
         self.commit(&mut state, next)?;
         crate::logging::debug(LOG_MODULE, "active provider cleared");
         Ok(())
@@ -258,6 +294,19 @@ impl ProviderStore {
         let state = self.lock();
         let id = state.active_provider_id.as_deref()?;
         state.providers.iter().find(|p| p.id == id).cloned()
+    }
+
+    pub fn resolve_active_model(&self) -> Option<(ProviderConfig, ModelConfig)> {
+        let state = self.lock();
+        let provider = state
+            .providers
+            .iter()
+            .find(|p| Some(&p.id) == state.active_provider_id.as_ref())?;
+        let model = provider
+            .models
+            .iter()
+            .find(|m| Some(&m.model_id) == state.active_model_id.as_ref())?;
+        Some((provider.clone(), model.clone()))
     }
 
     fn lock(&self) -> MutexGuard<'_, ProviderState> {
@@ -327,7 +376,7 @@ fn read_state(path: &Path) -> AppResult<ProviderState> {
 
 /// Checks every invariant a provider must hold before it can be stored
 /// (task 1.3/1.4). Each rule maps to one stable validation code.
-fn validate(provider: &ProviderConfig) -> AppResult<()> {
+pub(crate) fn validate(provider: &ProviderConfig) -> AppResult<()> {
     if provider.name.trim().is_empty() {
         return Err(AppError::validation(
             "invalid_provider_name",
@@ -346,7 +395,14 @@ fn validate(provider: &ProviderConfig) -> AppResult<()> {
             "a provider needs at least one model",
         ));
     }
+    let mut model_ids = std::collections::HashSet::new();
     for model in &provider.models {
+        if !model_ids.insert(model.model_id.as_str()) {
+            return Err(AppError::validation(
+                "duplicate_model_id",
+                "Model IDs must be unique within a provider.",
+            ));
+        }
         if model.model_id.trim().is_empty() {
             return Err(AppError::validation(
                 "invalid_model_id",
@@ -374,14 +430,8 @@ fn validate(provider: &ProviderConfig) -> AppResult<()> {
             ));
         }
     }
-    for header in &provider.extra_headers {
-        if !is_valid_header_name(&header.name) {
-            return Err(AppError::validation(
-                "invalid_header_name",
-                "extra header names must be valid HTTP header names",
-            ));
-        }
-    }
+    provider.connection.validate()?;
+    super::headers::normalize_names(&provider.extra_headers)?;
     Ok(())
 }
 
@@ -401,32 +451,6 @@ fn is_http_base_url(url: &str) -> bool {
     }
 }
 
-/// RFC 7230 `token` (a non-empty `tchar` run) — enough to reject header
-/// injection through names containing spaces, colons or non-ASCII bytes.
-fn is_valid_header_name(name: &str) -> bool {
-    let is_tchar = |b: u8| {
-        b.is_ascii_alphanumeric()
-            || matches!(
-                b,
-                b'!' | b'#'
-                    | b'$'
-                    | b'%'
-                    | b'&'
-                    | b'\''
-                    | b'*'
-                    | b'+'
-                    | b'-'
-                    | b'.'
-                    | b'^'
-                    | b'_'
-                    | b'`'
-                    | b'|'
-                    | b'~'
-            )
-    };
-    !name.is_empty() && name.bytes().all(is_tchar)
-}
-
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -434,6 +458,31 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_model_survives_reload_and_removal_clears_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProviderStore::load(dir.path()).unwrap();
+        let mut config = sample_provider();
+        let mut second = sample_model();
+        second.model_id = "second".into();
+        config.models.push(second);
+        let saved = store.add(config).unwrap();
+        store.set_active_model(&saved.id, "second").unwrap();
+        assert!(store.set_active_model(&saved.id, "missing").is_err());
+        assert_eq!(store.resolve_active_model().unwrap().1.model_id, "second");
+        let reopened = ProviderStore::load(dir.path()).unwrap();
+        assert_eq!(
+            reopened.resolve_active_model().unwrap().1.model_id,
+            "second"
+        );
+        let mut changed = saved;
+        changed.models.pop();
+        store.update(changed).unwrap();
+        assert!(store.resolve_active_model().is_none());
+        assert_eq!(store.active_provider_id(), None);
+        assert_eq!(store.active_model_id(), None);
+    }
 
     fn sample_model() -> ModelConfig {
         ModelConfig {
@@ -448,6 +497,7 @@ mod tests {
 
     fn sample_provider() -> ProviderConfig {
         ProviderConfig {
+            connection: Default::default(),
             id: String::new(),
             name: "Local runtime".into(),
             base_url: "http://localhost:11434/v1".into(),
@@ -456,6 +506,7 @@ mod tests {
             models: vec![sample_model()],
             created_at: 0,
             archived: false,
+            connection_verified_at: None,
         }
     }
 
@@ -469,7 +520,9 @@ mod tests {
     #[test]
     fn crud_roundtrip_survives_reload() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = ProviderStore::load(dir.path()).expect("load empty");
+        let config_dir = dir.path().join("用户 providers with spaces");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        let store = ProviderStore::load(&config_dir).expect("load empty");
 
         assert!(store.list().is_empty());
         let added = store.add(sample_provider()).expect("add");
@@ -477,7 +530,7 @@ mod tests {
         assert_ne!(added.created_at, 0, "store assigns created_at");
 
         // A fresh store over the same directory sees the write.
-        let reopened = ProviderStore::load(dir.path()).expect("reload");
+        let reopened = ProviderStore::load(&config_dir).expect("reload");
         assert_eq!(reopened.list(), vec![added.clone()]);
         assert_eq!(reopened.get(&added.id), Some(added.clone()));
         assert_eq!(reopened.get("missing"), None);
@@ -488,12 +541,12 @@ mod tests {
         let updated = reopened.update(edited).expect("update");
         assert_eq!(updated.name, "Renamed");
 
-        let after_update = ProviderStore::load(dir.path()).expect("reload");
+        let after_update = ProviderStore::load(&config_dir).expect("reload");
         assert_eq!(after_update.list().len(), 1);
         assert_eq!(after_update.list()[0].name, "Renamed");
 
         after_update.delete(&updated.id).expect("delete");
-        assert!(ProviderStore::load(dir.path())
+        assert!(ProviderStore::load(&config_dir)
             .expect("reload")
             .list()
             .is_empty());
@@ -619,18 +672,12 @@ mod tests {
         let store = ProviderStore::load(dir.path()).expect("load");
         for name in ["", "Bad Header", "X-Header:", "høsted"] {
             let mut provider = sample_provider();
-            provider.extra_headers = vec![ExtraHeader {
-                name: name.into(),
-                value: "1".into(),
-            }];
+            provider.extra_headers = vec![name.into()];
             assert_rejected(store.add(provider), "invalid_header_name");
         }
         // A legal token name still passes.
         let mut provider = sample_provider();
-        provider.extra_headers = vec![ExtraHeader {
-            name: "X-Request-Source".into(),
-            value: "planner".into(),
-        }];
+        provider.extra_headers = vec!["x-request-source".into()];
         store.add(provider).expect("valid header name");
     }
 
@@ -827,4 +874,26 @@ mod tests {
         .expect("deserialize");
         assert!(model.supports_tools);
     }
+    #[test]
+    fn connection_settings_default_and_persist_per_provider() {
+        use crate::network::ConnectionSettings;
+        let mut json = serde_json::to_value(sample_provider()).unwrap();
+        json.as_object_mut().unwrap().remove("connection");
+        let parsed: ProviderConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.connection, ConnectionSettings::Auto);
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProviderStore::load(dir.path()).unwrap();
+        for connection in [ConnectionSettings::Auto, ConnectionSettings::Direct,
+            ConnectionSettings::Proxy { url: "socks5h://localhost:1080".into() }] {
+            let mut provider = sample_provider();
+            provider.connection = connection.clone();
+            let saved = store.add(provider).unwrap();
+            assert_eq!(ProviderStore::load(dir.path()).unwrap().get(&saved.id).unwrap().connection, connection);
+        }
+        let mut invalid = sample_provider();
+        invalid.connection = ConnectionSettings::Proxy { url: "http://user:secret@localhost:7890".into() };
+        assert!(store.add(invalid).is_err());
+        assert!(!std::fs::read_to_string(dir.path().join("providers.json")).unwrap().contains("secret"));
+    }
+
 }

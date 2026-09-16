@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { applyLocale } from "../../lib/i18n";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
@@ -39,6 +40,7 @@ function renderTrend(): void {
 }
 
 beforeEach(() => {
+  applyLocale("en");
   invokeMock.mockReset();
   invokeMock.mockReturnValue(Promise.resolve([]));
 });
@@ -55,7 +57,7 @@ describe("ReviewTrend", () => {
 
     expect(await screen.findByText("September cycle")).toBeTruthy();
     expect(screen.getByText("75%")).toBeTruthy();
-    expect(screen.getByText("2h")).toBeTruthy();
+    expect(screen.getByText("2 h")).toBeTruthy();
     expect(
       screen.getByText("Only one review so far — trends need more than one review to show."),
     ).toBeTruthy();
@@ -83,8 +85,8 @@ describe("ReviewTrend", () => {
     expect(await screen.findByText("September cycle")).toBeTruthy();
     expect(screen.getByText("December cycle")).toBeTruthy();
     // 比例与专注时长合并在同一个读数里。
-    expect(screen.getByText("75% · 2h")).toBeTruthy();
-    expect(screen.getByText("25% · 30m")).toBeTruthy();
+    expect(screen.getByText("75% · 2 h")).toBeTruthy();
+    expect(screen.getByText("25% · 30 min")).toBeTruthy();
     expect(
       screen.queryByText(/trends need more than one review/),
     ).toBeNull();

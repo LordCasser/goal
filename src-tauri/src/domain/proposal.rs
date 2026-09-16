@@ -128,6 +128,7 @@ mod tests {
             needs_breakdown: Some(true),
             root_color_key: Some("teal".into()),
             copied_from_task_id: None,
+            later_plan_type: None,
             proposal: None,
             created_at: 1234,
         }

@@ -3,8 +3,7 @@
  *
  * 本模块直连 @tauri-apps/api/core——src/lib 由协调者持有，本 feature 自带
  * 一份命令名清单与查询键工厂。命令名与 src-tauri/src/commands/reminders.rs
- * 一一对应；invoke 参数键保持 Rust 参数名的 snake_case（Tauri 2 无大小写
- * 转换），整结构参数（args）按参数名整体嵌套。
+ * 一一对应；invoke 顶层参数键使用 Tauri 默认的 camelCase，嵌套 serde 数据保留 snake_case，整结构参数（args）按参数名整体嵌套。
  *
  * 错误形状是 `{ code, message }`（见 src/lib/ipc.ts 的 isAppError）；本
  * feature 的错误码：invalid_target_kind / not_found / reminder_already_fired /
@@ -14,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
+import { formatDate } from "../../lib/i18n";
 
 export type TargetKind = "task" | "session" | "day" | "cycle";
 
@@ -64,7 +64,7 @@ export interface MissedSummary {
 
 /** Mirrors `service::reminders::DeliveryStatus`. */
 export interface DeliveryStatus {
-  permission: "granted" | "denied" | "prompt" | null;
+  permission: "granted" | "denied" | "prompt" | "system_managed" | null;
   last_error: string | null;
   last_delivery_at: number | null;
 }
@@ -175,18 +175,18 @@ export function listReminders(
   cycle_id: string | null,
   status: ReminderStatusFilter = "pending",
 ): Promise<Reminder[]> {
-  return invoke<Reminder[]>(commands.listReminders, { cycle_id, status });
+  return invoke<Reminder[]>(commands.listReminders, { cycleId: cycle_id, status });
 }
 
 export function updateReminder(
   reminder_id: string,
   args: UpdateReminderArgs,
 ): Promise<Reminder> {
-  return invoke<Reminder>(commands.updateReminder, { reminder_id, args });
+  return invoke<Reminder>(commands.updateReminder, { reminderId: reminder_id, args });
 }
 
 export function deleteReminder(reminder_id: string): Promise<void> {
-  return invoke<void>(commands.deleteReminder, { reminder_id });
+  return invoke<void>(commands.deleteReminder, { reminderId: reminder_id });
 }
 
 export function reconcileReminders(): Promise<void> {
@@ -240,13 +240,11 @@ export function fromLocalInputValue(value: string): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-const FIRE_AT_FORMAT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 export function formatFireAt(fireAt: number): string {
-  return FIRE_AT_FORMAT.format(new Date(fireAt));
+  return formatDate(fireAt, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

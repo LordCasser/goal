@@ -1,25 +1,28 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Planner",
-  "version": "0.1.0",
+  "productName": "Goal",
+  "version": "0.1.5",
   "identifier": "dev.lordcasser.planner",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run desktop:before-dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run desktop:before-build",
+    "beforeBundleCommand": "npm run desktop:before-bundle",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "Planner",
+        "title": "Goal",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
         "minHeight": 600,
-        "titleBarStyle": "Transparent",
-        "hiddenTitle": true
+        "decorations": true,
+        "theme": "Light",
+        "dragDropEnabled": false,
+        "visible": true
       }
     ],
     "security": {
@@ -28,16 +31,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns"
+      "icons/128x128@2x.png"
     ],
-    "category": "Productivity",
-    "macOS": {
-      "minimumSystemVersion": "11.0"
-    }
+    "category": "Productivity"
   }
 }

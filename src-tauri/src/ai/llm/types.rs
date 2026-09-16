@@ -7,13 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The skill driving an agent conversation (spec: agent-conversation,
-/// 技能激活). Five skills are persisted on the conversation row plus the
-/// `none` fallback that guides the model to pick a `start_*` tool first.
-///
-/// Persistence note: the `agent_conversations.active_skill` CHECK allows the
-/// five skill values plus NULL — `None` is expressed as NULL and never stored
-/// as the string `"none"`.
+/// Workflow selected by the model or an explicit plan-area entry.
+/// Names are persisted on the existing conversation; None is stored as NULL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentSkill {
@@ -21,6 +16,10 @@ pub enum AgentSkill {
     GoalSetting,
     LongTermPlanning,
     ShortTermPlanning,
+    WeeklyPlanning,
+    DailyPlanning,
+    PeriodAnalysis,
+    PlanningIssues,
     Prioritization,
     Review,
 }
@@ -33,6 +32,10 @@ impl AgentSkill {
             Self::GoalSetting => "goal_setting",
             Self::LongTermPlanning => "long_term_planning",
             Self::ShortTermPlanning => "short_term_planning",
+            Self::WeeklyPlanning => "weekly_planning",
+            Self::DailyPlanning => "daily_planning",
+            Self::PeriodAnalysis => "period_analysis",
+            Self::PlanningIssues => "planning_issues",
             Self::Prioritization => "prioritization",
             Self::Review => "review",
         }
@@ -45,6 +48,10 @@ impl AgentSkill {
             "goal_setting" => Some(Self::GoalSetting),
             "long_term_planning" => Some(Self::LongTermPlanning),
             "short_term_planning" => Some(Self::ShortTermPlanning),
+            "weekly_planning" => Some(Self::WeeklyPlanning),
+            "daily_planning" => Some(Self::DailyPlanning),
+            "period_analysis" => Some(Self::PeriodAnalysis),
+            "planning_issues" => Some(Self::PlanningIssues),
             "prioritization" => Some(Self::Prioritization),
             "review" => Some(Self::Review),
             _ => None,

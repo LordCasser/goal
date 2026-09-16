@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes } from "react";
 import { cn } from "./cn";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost";
-export type ButtonSize = "md" | "compact";
+export type ButtonSize = "md" | "compact" | "icon";
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
@@ -14,7 +14,7 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 /* 主按钮用主文字色反转成深底白字（4.1）；暖色留给运行状态，不用于按钮。 */
 const VARIANT: Record<ButtonVariant, string> = {
   primary: "bg-primary text-white hover:brightness-90",
-  secondary: "border border-control bg-transparent text-primary hover:bg-hover",
+  secondary: "border border-light bg-content text-primary hover:bg-hover hover:border-control",
   ghost: "bg-transparent text-primary hover:bg-hover",
 };
 
@@ -22,6 +22,7 @@ const VARIANT: Record<ButtonVariant, string> = {
 const SIZE: Record<ButtonSize, string> = {
   md: "h-9 px-4 text-[14px]",
   compact: "h-8 px-3 text-[13px]",
+  icon: "h-7 w-7 shrink-0 p-0",
 };
 
 export function Button({
@@ -40,7 +41,7 @@ export function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-sm font-medium",
+        "inline-flex items-center justify-center gap-2 rounded-md font-medium",
         "transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45",
         VARIANT[variant],
         SIZE[size],

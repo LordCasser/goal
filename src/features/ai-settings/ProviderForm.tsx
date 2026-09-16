@@ -6,30 +6,29 @@
  * - API Key 只进不出：输入框永不回显（服务端也从不返回 Key），已有 Key
  *   仅以「已配置」徽标 + 移除入口表达（design.md §9.3：密钥不出现在普通
  *   状态）。本地端点留空 Key 是正常状态，不显示警告（design D4）。
- * - 保存 = saveProvider（配置文件）+ 可选 saveProviderApiKey（钥匙串）；
+ * - 保存 = saveProvider（配置文件 + API Key/Header 凭据输入）；
  *   后端校验错误（AppError code）行内显示（task 5.3）。
  * - 操作（设为激活 / 删除 / 连接测试）只对已保存供应商开放；连接测试
  *   结果按 design D3 的 error_code 映射文案，行内反馈（task 5.4）。
  * - 所有写操作成功后经 onChanged 请求页面失效 ai-settings 查询；查询
  *   key 由页面持有（见 AiSettingsPage.tsx 文件头注释）。
  */
-import { useId, useState, type JSX } from "react";
+import { useId, useRef, useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import { Button, Dialog, Input, ProgressDot, cn } from "../../ui";
+import { Button, Dialog, Input, ProgressDot, Select, SelectItem, cn } from "../../ui";
+import { errorMessage, formatNumber, t, useTranslation } from "../../lib/i18n";
 import {
   deleteProvider,
-  isAppError,
   removeProviderApiKey,
   saveProvider,
-  saveProviderApiKey,
-  setActiveProvider,
   testProviderConnection,
 } from "../../lib/ipc";
 import type {
   ApiFormat,
   ConnectionTestResult,
   ModelConfig,
+  ProviderConnection,
   ProviderConfig,
   ProviderSummary,
 } from "../../lib/ipc";
@@ -44,19 +43,64 @@ export type ProviderFormProps = {
   onChanged: () => Promise<void> | void;
 };
 
-/* 原生 select 复用 Input 的表面样式（design.md 4.1/4.3）；箭头留给平台。 */
-const SELECT_CLASS =
-  "h-8 rounded-sm border border-control bg-content px-2 text-[14px] text-primary transition-colors duration-100";
-
 /** 三种 API 格式 + 各自的请求端点（design D2），下拉项直接显示端点路径。 */
 const API_FORMATS: ReadonlyArray<{ value: ApiFormat; label: string }> = [
-  { value: "anthropic_messages", label: "Anthropic Messages · POST {base}/messages" },
+  { value: "anthropic_messages", label: "Anthropic Messages" },
   {
     value: "openai_chat_completions",
-    label: "OpenAI Chat Completions · POST {base}/chat/completions",
+    label: "OpenAI Chat Completions",
   },
-  { value: "openai_responses", label: "OpenAI Responses · POST {base}/responses" },
+  { value: "openai_responses", label: "OpenAI Responses" },
 ];
+
+type HeaderDraft = {
+  id: string;
+  name: string;
+  value: string;
+  /** Name returned by the backend when this row was loaded. */
+  savedName: string | null;
+};
+
+type HeaderIssue =
+  | "invalid_header_name"
+  | "duplicate_header_name"
+  | "reserved_header_name"
+  | "invalid_header_value"
+  | "missing_header_value"
+  | "unknown_header_value";
+
+const RESERVED_HEADER_NAMES = new Set([
+  "host",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "content-type",
+  "accept",
+]);
+
+// RFC 9110 §5.6.2 token. Header values may contain horizontal tabs and
+// printable ASCII only; this also rejects newlines before they reach IPC.
+const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const HEADER_VALUE_RE = /^[\x09\x20-\x7e]*$/;
+
+function headerName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function initialHeaders(provider: ProviderSummary | null): HeaderDraft[] {
+  return (provider?.extra_headers ?? []).map((name, index) => ({
+    id: `saved-header-${index}`,
+    name,
+    value: "",
+    savedName: headerName(name),
+  }));
+}
 
 /** 镜像 providers::config::is_http_base_url：http(s) scheme + 非空主机，本地 http 合法。 */
 function isHttpBaseUrl(url: string): boolean {
@@ -68,27 +112,66 @@ function isHttpBaseUrl(url: string): boolean {
   return (scheme === "http" || scheme === "https") && rest !== "";
 }
 
+const PROXY_SCHEMES = new Set(["http", "https", "socks5", "socks5h"]);
+const PROXY_CONTROL_OR_SPACE_RE = /[\s\\\u0000-\u001f\u007f]/;
+
+/**
+ * Mirrors the backend proxy URL boundary.  In particular, the authority is
+ * inspected directly so URL.port does not hide an explicitly written 80/443.
+ */
+function isProxyUrl(value: string): boolean {
+  if (value === "" || PROXY_CONTROL_OR_SPACE_RE.test(value)) return false;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+
+  const scheme = parsed.protocol.slice(0, -1).toLowerCase();
+  if (!PROXY_SCHEMES.has(scheme) || !parsed.hostname) return false;
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) return false;
+  if (parsed.pathname !== "" && parsed.pathname !== "/") return false;
+
+  const schemeSeparator = value.indexOf("://");
+  if (schemeSeparator < 0) return false;
+  const authorityAndPath = value.slice(schemeSeparator + 3);
+  if (authorityAndPath.includes("?") || authorityAndPath.includes("#")) return false;
+  const authority = authorityAndPath.split("/", 1)[0] ?? "";
+  if (authority.includes("@")) return false;
+  const explicitPort = authority.match(/^(?:\[[^\]]+\]|[^:]+):(\d+)$/)?.[1];
+  if (!explicitPort) return false;
+  const port = Number(explicitPort);
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
+function normalizeConnection(connection: ProviderConnection | undefined): ProviderConnection {
+  if (!connection || connection.mode === "auto") return { mode: "auto" };
+  if (connection.mode === "direct") return { mode: "direct" };
+  return connection;
+}
+
 /** 连接测试失败文案：按 design D3 的 error_code 映射（task 5.4）。 */
 function connectionFailureText(result: ConnectionTestResult): string {
   switch (result.error_code) {
     case "auth_failed":
-      return "认证失败：请检查 API Key。";
+      return t("ai:settings.authFailed");
     case "provider_unreachable":
     case "timeout":
-      return "无法连接到端点：请检查 Base URL 与网络连接。";
+      return t("ai:settings.unreachable");
     case "invalid_request":
-      return `请求被拒绝：${result.error_message ?? ""}`;
+      return t("ai:settings.invalidRequest", { message: result.error_message ?? "" });
     case "rate_limited":
-      return "请求被限流：请稍后重试。";
+      return t("ai:settings.rateLimited");
     default:
-      return result.error_message ?? result.error_code ?? "连接失败。";
+      return result.error_message ?? result.error_code ?? t("ai:settings.connectionFailed");
   }
 }
 
 /** AppError 保留稳定 code（如 invalid_base_url），与 message 一起行内展示。 */
 function errorText(error: unknown): string {
-  if (isAppError(error)) return `${error.code}：${error.message}`;
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }
 
 export function ProviderForm({
@@ -96,12 +179,19 @@ export function ProviderForm({
   onSaved,
   onChanged,
 }: ProviderFormProps): JSX.Element {
+  const { t: translate } = useTranslation("ai");
   const nameInputId = useId();
   const urlInputId = useId();
   const keyInputId = useId();
   const formatInputId = useId();
+  const connectionSectionId = useId();
+  const connectionInputId = useId();
+  const proxyUrlInputId = useId();
+  const headerSectionId = useId();
+  const headerId = useRef(0);
 
   const providerId = provider?.id ?? null;
+  const initialConnection = normalizeConnection(provider?.connection);
 
   const [name, setName] = useState(provider?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(provider?.base_url ?? "");
@@ -110,20 +200,89 @@ export function ProviderForm({
   );
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<ModelConfig[]>(provider?.models ?? []);
+  const [connectionMode, setConnectionMode] = useState<ProviderConnection["mode"]>(initialConnection.mode);
+  const [proxyUrl, setProxyUrl] = useState(initialConnection.mode === "proxy" ? initialConnection.url : "");
+  const [proxyTouched, setProxyTouched] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(provider !== null && initialConnection.mode !== "auto");
+  const [headers, setHeaders] = useState<HeaderDraft[]>(() => initialHeaders(provider));
+  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(() => new Set());
+  const [touchedHeaders, setTouchedHeaders] = useState<Set<string>>(() => new Set());
+  const [headerSubmitError, setHeaderSubmitError] = useState<HeaderIssue | null>(null);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
-  // 前端预校验（task 5.3）：名称非空、http(s) URL、至少一个模型。
+  const proxyUrlValid = connectionMode !== "proxy" || isProxyUrl(proxyUrl);
+
+  // 前端预校验（task 5.3）：名称非空、http(s) URL、连接设置、至少一个模型。
   const missing: string[] = [];
-  if (name.trim() === "") missing.push("名称");
-  if (!isHttpBaseUrl(baseUrl.trim())) missing.push("Base URL（http/https 地址）");
-  if (models.length === 0) missing.push("至少一个模型");
+  if (name.trim() === "") missing.push(translate("settings.name"));
+  if (!isHttpBaseUrl(baseUrl.trim())) missing.push(translate("settings.baseUrl"));
+  if (!proxyUrlValid) missing.push(translate("settings.proxyUrl"));
+  if (models.length === 0) missing.push(translate("settings.models"));
   const canSave = missing.length === 0;
+
+  const connection: ProviderConnection = connectionMode === "proxy"
+    ? { mode: "proxy", url: proxyUrl }
+    : { mode: connectionMode };
 
   const requireProviderId = (): string => {
     if (!providerId) throw new Error("provider is not saved yet");
     return providerId;
+  };
+
+  const headerIssues = new Map<string, HeaderIssue>();
+  const normalizedHeaderNames = headers.map((header) => headerName(header.name));
+  normalizedHeaderNames.forEach((name, index) => {
+    const header = headers[index]!;
+    if (!name || !HEADER_NAME_RE.test(name)) {
+      headerIssues.set(header.id, "invalid_header_name");
+      return;
+    }
+    if (RESERVED_HEADER_NAMES.has(name)) {
+      headerIssues.set(header.id, "reserved_header_name");
+      return;
+    }
+    if (normalizedHeaderNames.indexOf(name) !== index) {
+      headerIssues.set(header.id, "duplicate_header_name");
+      return;
+    }
+    const savedName = header.savedName;
+    const needsValue = savedName === null || savedName !== name;
+    if (!header.value && needsValue) {
+      headerIssues.set(header.id, "missing_header_value");
+      return;
+    }
+    if (header.value && !HEADER_VALUE_RE.test(header.value)) {
+      headerIssues.set(header.id, "invalid_header_value");
+    }
+  });
+
+  const headerValues = Object.fromEntries(
+    headers.flatMap((header) => {
+      const name = headerName(header.name);
+      return !headerIssues.has(header.id) && name && header.value
+        ? [[name, header.value] as const]
+        : [];
+    }),
+  );
+
+  const headerErrorText = (issue: HeaderIssue): string =>
+    translate(`settings.${issue}`);
+
+  const addHeader = () => {
+    headerId.current += 1;
+    const id = `new-header-${headerId.current}`;
+    setHeaders((previous) => [...previous, { id, name: "", value: "", savedName: null }]);
+  };
+
+  const touchHeader = (id: string) => {
+    setTouchedHeaders((previous) => {
+      if (previous.has(id)) return previous;
+      const next = new Set(previous);
+      next.add(id);
+      return next;
+    });
   };
 
   const saveMutation = useMutation({
@@ -133,28 +292,44 @@ export function ProviderForm({
         name: name.trim(),
         base_url: baseUrl.trim(),
         api_format: apiFormat,
-        // 表单不编辑 extra_headers/created_at/archived；编辑时原样保留。
-        extra_headers: provider?.extra_headers ?? [],
+        connection,
+        extra_headers: normalizedHeaderNames,
         models,
         created_at: provider?.created_at ?? 0,
         archived: provider?.archived ?? false,
+        connection_verified_at: null,
       };
-      const saved = await saveProvider(config);
-      const nextKey = apiKey.trim();
-      if (nextKey) await saveProviderApiKey(saved.id, nextKey);
-      return saved;
+      return saveProvider(config, apiKey.trim() || null, headerValues);
     },
     onSuccess: async (saved) => {
+      setName(saved.name);
+      setBaseUrl(saved.base_url);
       setApiKey(""); // 保存成功即清空 Key 草稿：不回显（design §9.3）
+      setHeaders(initialHeaders({ ...saved, has_api_key: provider?.has_api_key ?? false, is_active: provider?.is_active ?? false }));
+      setVisibleHeaders(new Set());
+      setTouchedHeaders(new Set());
+      setHeaderSubmitError(null);
       setTestResult(null);
       await onChanged(); // 等失效重取完成后再切换选中，避免右栏闪空态
       onSaved(saved.id);
     },
-  });
-
-  const activateMutation = useMutation({
-    mutationFn: () => setActiveProvider(requireProviderId()),
-    onSuccess: () => void onChanged(),
+    onError: (error) => {
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? (error as { code?: unknown }).code
+        : null;
+      setHeaderSubmitError(
+        typeof code === "string" && [
+          "invalid_header_name",
+          "duplicate_header_name",
+          "reserved_header_name",
+          "invalid_header_value",
+          "missing_header_value",
+          "unknown_header_value",
+        ].includes(code)
+          ? code as HeaderIssue
+          : null,
+      );
+    },
   });
 
   const removeKeyMutation = useMutation({
@@ -173,8 +348,19 @@ export function ProviderForm({
   const testMutation = useMutation({
     mutationFn: () => testProviderConnection(requireProviderId()),
     onMutate: () => setTestResult(null),
-    onSuccess: (result) => setTestResult(result),
+    onSuccess: async (result) => { setTestResult(result); await onChanged(); },
+    onError: () => void onChanged(),
   });
+
+  const busy = saveMutation.isPending || testMutation.isPending || removeKeyMutation.isPending;
+  const dirty = name !== (provider?.name ?? "") || baseUrl !== (provider?.base_url ?? "") || apiFormat !== provider?.api_format
+    || apiKey !== "" || JSON.stringify(models) !== JSON.stringify(provider?.models ?? [])
+    || JSON.stringify(normalizedHeaderNames) !== JSON.stringify((provider?.extra_headers ?? []).map(headerName))
+    || headers.some((header) => header.value !== "")
+    || connectionMode !== initialConnection.mode
+    || (connectionMode === "proxy" && proxyUrl !== (initialConnection.mode === "proxy" ? initialConnection.url : ""));
+  const hasHeaderIssues = headerIssues.size > 0;
+  const canSaveWithHeaders = canSave && !hasHeaderIssues;
 
   return (
     <div className="flex min-h-0 flex-col">
@@ -188,34 +374,30 @@ export function ProviderForm({
                 {provider.name}
               </h4>
               <span className="shrink-0 text-caption text-secondary">
-                {provider.is_active ? "激活" : "未激活"}
+                {provider.is_active ? translate("settings.active") : translate("settings.inactive")}
               </span>
+              <span className="text-caption text-hint">{provider.connection_verified_at ? translate("settings.verified") : translate("settings.unverified")}</span>
             </div>
             <div className="flex items-center gap-2">
-              {!provider.is_active && (
-                <Button
-                  size="compact"
-                  onClick={() => activateMutation.mutate()}
-                  loading={activateMutation.isPending}
-                >
-                  设为激活
-                </Button>
-              )}
+
               <Button
                 variant="secondary"
                 size="compact"
                 onClick={() => testMutation.mutate()}
                 loading={testMutation.isPending}
+                disabled={busy || dirty}
+                title={dirty ? translate("settings.unsavedTitle") : translate("settings.testSavedTitle")}
               >
-                Test connection
+                {translate("settings.testConnection")}
               </Button>
               <Button
                 variant="ghost"
                 size="compact"
                 className="text-danger"
                 onClick={() => setDeleteOpen(true)}
+                disabled={busy}
               >
-                删除
+                {translate("settings.deleteProvider")}
               </Button>
             </div>
           </div>
@@ -228,7 +410,7 @@ export function ProviderForm({
             >
               <ProgressDot tone={testResult.ok ? "done" : "alert"} />
               {testResult.ok
-                ? `Connected in ${testResult.latency_ms ?? 0}ms`
+                ? translate("settings.connectionSuccess", { latency: formatNumber(testResult.latency_ms ?? 0) })
                 : connectionFailureText(testResult)}
             </p>
           )}
@@ -240,42 +422,42 @@ export function ProviderForm({
         </>
       ) : (
         <div className="border-b border-light px-4 py-2.5">
-          <h4 className="text-block-title font-semibold text-primary">添加供应商</h4>
+          <h4 className="text-block-title font-semibold text-primary">{translate("settings.addProviderTitle")}</h4>
         </div>
       )}
 
-      <div className="flex flex-col gap-4 px-4 py-4">
+      <fieldset disabled={busy} className="flex min-w-0 flex-col gap-4 px-4 py-4">
         <div className="flex flex-col gap-1">
           <label htmlFor={nameInputId} className="text-caption text-secondary">
-            名称
+            {translate("settings.name")}
           </label>
           <Input
             id={nameInputId}
             value={name}
             onChange={(e) => setName(e.currentTarget.value)}
-            placeholder="如 Ollama 本地、OpenRouter"
+            placeholder={translate("settings.namePlaceholder")}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={urlInputId} className="text-caption text-secondary">
-            Base URL
+            {translate("settings.baseUrl")}
           </label>
           <Input
             id={urlInputId}
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.currentTarget.value)}
-            placeholder="https://api.example.com/v1 或 http://127.0.0.1:11434/v1"
+            placeholder={translate("settings.baseUrlPlaceholder")}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={keyInputId} className="text-caption text-secondary">
-            API Key
+            {translate("settings.apiKey")}
           </label>
           {/* 已有 Key：只显示「已配置」徽标 + 移除入口；明文既不回显也不截尾。 */}
           {provider?.has_api_key && (
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center rounded-[2px] border border-light bg-subtle px-1.5 py-0.5 text-caption text-secondary">
-                已配置
+                {translate("settings.configured")}
               </span>
               <Button
                 variant="ghost"
@@ -284,7 +466,7 @@ export function ProviderForm({
                 onClick={() => removeKeyMutation.mutate()}
                 loading={removeKeyMutation.isPending}
               >
-                移除
+                {translate("settings.remove")}
               </Button>
               {removeKeyMutation.isError && (
                 <span className="text-caption text-danger">
@@ -301,41 +483,251 @@ export function ProviderForm({
             onChange={(e) => setApiKey(e.currentTarget.value)}
             placeholder={
               provider?.has_api_key
-                ? "输入新 Key 以替换；留空保持不变"
-                : "sk-…（本地端点可留空）"
+                ? translate("settings.replaceKeyPlaceholder")
+                : translate("settings.localKeyPlaceholder")
             }
           />
-          <p className="text-caption text-hint">密钥保存在系统钥匙串，不写入配置文件。</p>
+          <p className="text-caption text-hint">{translate("settings.keychainHelp")}</p>
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={formatInputId} className="text-caption text-secondary">
-            API 格式
+            {translate("settings.apiFormat")}
           </label>
-          <select
+          <Select
             id={formatInputId}
             value={apiFormat}
-            onChange={(e) => setApiFormat(e.currentTarget.value as ApiFormat)}
-            className={SELECT_CLASS}
+            onValueChange={(value) => setApiFormat(value as ApiFormat)}
+            triggerClassName="w-full"
           >
             {API_FORMATS.map((format) => (
-              <option key={format.value} value={format.value}>
+              <SelectItem key={format.value} value={format.value}>
                 {format.label}
-              </option>
+              </SelectItem>
             ))}
-          </select>
+          </Select>
         </div>
+
+        <section className="flex min-w-0 flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              className="inline-flex min-w-0 items-center gap-1 text-left text-caption font-medium text-secondary transition-colors duration-150 hover:text-primary"
+              aria-expanded={advancedOpen}
+              aria-controls={connectionSectionId}
+              onClick={() => setAdvancedOpen((open) => !open)}
+            >
+              <span>{translate("settings.connectionAdvanced")}</span>
+              <svg
+                viewBox="0 0 16 16"
+                className={cn("h-3.5 w-3.5 transition-transform duration-150", advancedOpen && "rotate-180")}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m4 6 4 4 4-4" />
+              </svg>
+            </button>
+            <span className="shrink-0 text-caption text-secondary">
+              {translate(`settings.connectionMode.${connectionMode}`)}
+            </span>
+          </div>
+          {advancedOpen && (
+            <div id={connectionSectionId} className="flex min-w-0 flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label htmlFor={connectionInputId} className="text-caption text-secondary">
+                  {translate("settings.connectionMode")}
+                </label>
+                <Select
+                  id={connectionInputId}
+                  aria-label={translate("settings.connectionMode")}
+                  value={connectionMode}
+                  onValueChange={(value) => setConnectionMode(value as ProviderConnection["mode"])}
+                  triggerClassName="w-full"
+                >
+                  <SelectItem value="auto">{translate("settings.connectionMode.auto")}</SelectItem>
+                  <SelectItem value="direct">{translate("settings.connectionMode.direct")}</SelectItem>
+                  <SelectItem value="proxy">{translate("settings.connectionMode.proxy")}</SelectItem>
+                </Select>
+                <p className="text-caption text-hint">
+                  {translate(`settings.connectionModeHelp.${connectionMode}`)}
+                </p>
+              </div>
+              {connectionMode === "proxy" && (
+                <div className="flex flex-col gap-1">
+                  <label htmlFor={proxyUrlInputId} className="text-caption text-secondary">
+                    {translate("settings.proxyUrl")}
+                  </label>
+                  <Input
+                    id={proxyUrlInputId}
+                    value={proxyUrl}
+                    onChange={(event) => {
+                      setProxyTouched(true);
+                      setProxyUrl(event.currentTarget.value);
+                    }}
+                    onBlur={() => setProxyTouched(true)}
+                    placeholder={translate("settings.proxyUrlPlaceholder")}
+                    aria-invalid={proxyTouched && !proxyUrlValid}
+                    aria-describedby={`${proxyUrlInputId}-help${proxyTouched && !proxyUrlValid ? ` ${proxyUrlInputId}-error` : ""}`}
+                  />
+                  <p id={`${proxyUrlInputId}-help`} className="text-caption text-hint">
+                    {translate("settings.proxyUrlHelp")}
+                  </p>
+                  {proxyTouched && !proxyUrlValid && (
+                    <p id={`${proxyUrlInputId}-error`} role="alert" className="text-caption text-danger">
+                      {translate("settings.invalidProxyUrl")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section id={headerSectionId} className="flex min-w-0 flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h4 className="text-block-title font-semibold text-primary">{translate("settings.requestHeaders")}</h4>
+              <p className="text-caption text-hint">{translate("settings.requestHeadersHelp")}</p>
+            </div>
+            <Button size="compact" className="cursor-pointer duration-150" onClick={addHeader}>
+              {translate("settings.addHeader")}
+            </Button>
+          </div>
+          {headers.length > 0 && (
+            <ul className="flex min-w-0 flex-col gap-2" aria-label={translate("settings.requestHeaders")}>
+              {headers.map((header, index) => {
+                const issue = headerIssues.get(header.id);
+                const displayedIssue = touchedHeaders.has(header.id) ? issue : undefined;
+                const nameInputIdForRow = `${header.id}-name`;
+                const valueInputIdForRow = `${header.id}-value`;
+                const errorIdForRow = `${header.id}-error`;
+                const labelSuffix = `${index + 1}`;
+                const valueVisible = visibleHeaders.has(header.id);
+                const savedNameUnchanged = header.savedName !== null && header.savedName === headerName(header.name);
+                return (
+                  <li key={header.id} className="flex min-w-0 flex-wrap items-end gap-2 rounded-md border border-light bg-subtle p-2">
+                    <div className="min-w-[9rem] flex-1">
+                      <label htmlFor={nameInputIdForRow} className="mb-1 block text-caption text-secondary">
+                        {translate("settings.headerName")}
+                      </label>
+                      <Input
+                        id={nameInputIdForRow}
+                        aria-label={`${translate("settings.headerName")} ${labelSuffix}`}
+                        aria-invalid={displayedIssue === "invalid_header_name" || displayedIssue === "duplicate_header_name" || displayedIssue === "reserved_header_name" || undefined}
+                        aria-describedby={displayedIssue === "invalid_header_name" || displayedIssue === "duplicate_header_name" || displayedIssue === "reserved_header_name" ? errorIdForRow : undefined}
+                        autoFocus={header.savedName === null && index === headers.length - 1}
+                        value={header.name}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          touchHeader(header.id);
+                          setHeaderSubmitError(null);
+                          setHeaders((previous) => previous.map((item) => item.id === header.id ? { ...item, name: value } : item));
+                        }}
+                        onBlur={() => touchHeader(header.id)}
+                        placeholder={translate("settings.headerNamePlaceholder")}
+                      />
+                    </div>
+                    <div className="min-w-[11rem] flex-[1.4]">
+                      <label htmlFor={valueInputIdForRow} className="mb-1 block text-caption text-secondary">
+                        {translate("settings.headerValue")}
+                      </label>
+                      <div className="flex min-w-0 gap-1">
+                        <Input
+                          id={valueInputIdForRow}
+                          aria-label={`${translate("settings.headerValue")} ${labelSuffix}`}
+                          aria-invalid={displayedIssue === "invalid_header_value" || displayedIssue === "missing_header_value" || undefined}
+                          aria-describedby={displayedIssue === "invalid_header_value" || displayedIssue === "missing_header_value" ? errorIdForRow : undefined}
+                          type={valueVisible ? "text" : "password"}
+                          autoComplete="off"
+                          value={header.value}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            touchHeader(header.id);
+                            setHeaderSubmitError(null);
+                            setHeaders((previous) => previous.map((item) => item.id === header.id ? { ...item, value } : item));
+                          }}
+                          onBlur={() => touchHeader(header.id)}
+                          placeholder={translate(savedNameUnchanged ? "settings.savedHeaderValuePlaceholder" : "settings.headerValuePlaceholder")}
+                        />
+                        <button
+                          type="button"
+                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-secondary transition-colors duration-150 hover:bg-hover hover:text-primary disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
+                          disabled={header.value.length === 0}
+                          aria-label={translate(valueVisible ? "settings.hideHeaderValue" : "settings.showHeaderValue", { name: header.name || labelSuffix })}
+                          title={translate(valueVisible ? "settings.hideHeaderValue" : "settings.showHeaderValue", { name: header.name || labelSuffix })}
+                          aria-pressed={valueVisible}
+                          onClick={() => setVisibleHeaders((previous) => {
+                            const next = new Set(previous);
+                            if (next.has(header.id)) next.delete(header.id); else next.add(header.id);
+                            return next;
+                          })}
+                        >
+                          <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M2.25 8s2.05-3.25 5.75-3.25S13.75 8 13.75 8 11.7 11.25 8 11.25 2.25 8 2.25 8Z" />
+                            <circle cx="8" cy="8" r="1.5" />
+                            {valueVisible && <path d="m2.5 2.5 11 11" />}
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="flex h-9 shrink-0 cursor-pointer items-center justify-center rounded-md px-2 text-caption text-danger transition-colors duration-150 hover:bg-hover"
+                      aria-label={translate("settings.removeHeader", { name: header.name || labelSuffix })}
+                      onClick={(event) => {
+                        // Move focus before removing its row so keyboard editing
+                        // continues at the next row, previous row, or Add control.
+                        const row = event.currentTarget.closest("li");
+                        const nextInput = row?.nextElementSibling?.querySelector("input")
+                          ?? row?.previousElementSibling?.querySelector("input");
+                        const focusTarget = nextInput
+                          ?? document.getElementById(headerSectionId)?.querySelector("button");
+                        focusTarget?.focus({ preventScroll: true });
+                        setHeaders((previous) => previous.filter((item) => item.id !== header.id));
+                        setTouchedHeaders((previous) => {
+                          const next = new Set(previous);
+                          next.delete(header.id);
+                          return next;
+                        });
+                        setVisibleHeaders((previous) => {
+                          const next = new Set(previous);
+                          next.delete(header.id);
+                          return next;
+                        });
+                        setHeaderSubmitError(null);
+                      }}
+                    >
+                      {translate("settings.remove")}
+                    </button>
+                    {displayedIssue && (
+                      <p id={errorIdForRow} role="alert" className="basis-full text-caption text-danger">
+                        {headerErrorText(displayedIssue)}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {headerSubmitError && (
+            <p role="alert" className="text-caption text-danger">{headerErrorText(headerSubmitError)}</p>
+          )}
+        </section>
 
         {/* 模型列表（task 5.2）：model_id + 窗口 + 最大输出 + 工具调用标记。 */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-block-title font-semibold text-primary">模型</span>
+            <span className="text-block-title font-semibold text-primary">{translate("settings.models")}</span>
             <Button size="compact" onClick={() => setModelDialogOpen(true)}>
-              添加模型
+              {translate("settings.addModel")}
             </Button>
           </div>
           {models.length === 0 ? (
             <p className="text-caption text-hint">
-              尚未添加模型；每个供应商至少需要一个模型。
+              {translate("settings.noModels")}
             </p>
           ) : (
             <ul className="border border-light">
@@ -350,13 +742,13 @@ export function ProviderForm({
                   <div className="flex min-w-0 flex-col">
                     <span className="truncate text-body text-primary">{model.model_id}</span>
                     <span className="text-caption text-secondary">
-                      上下文 {model.context_window} · 最大输出 {model.max_output_tokens}
-                      {model.supports_tools ? " · 支持工具调用" : " · 不支持工具调用"}
+                      {translate("settings.modelDetails", { context: formatNumber(model.context_window), output: formatNumber(model.max_output_tokens) })}
+                      {model.supports_tools ? ` · ${translate("settings.toolsSupported")}` : ` · ${translate("settings.toolsUnsupported")}`}
                     </span>
                   </div>
                   <button
                     type="button"
-                    aria-label={`移除模型 ${model.model_id}`}
+                    aria-label={translate("settings.removeModel", { model: model.model_id })}
                     onClick={() =>
                       setModels((previous) => previous.filter((_, i) => i !== index))
                     }
@@ -382,23 +774,24 @@ export function ProviderForm({
             </ul>
           )}
         </div>
-      </div>
+      </fieldset>
 
       {/* 底部：行内校验提示（列出缺什么）+ 主按钮（task 5.3）。 */}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-light px-4 py-3">
         <div className="flex min-w-0 flex-col">
-          {!canSave && <p className="text-caption text-hint">还需完善：{missing.join("、")}</p>}
+          {!canSaveWithHeaders && <p className="text-caption text-hint">{translate("settings.needComplete", { items: missing.concat(hasHeaderIssues ? [translate("settings.requestHeaders")] : []).join(translate("common.listSeparator")) })}</p>}
+          {canSaveWithHeaders && <p className="text-caption text-hint">{saveMutation.isPending ? translate("settings.testingSave") : translate("settings.saveHelp")}</p>}
           {saveMutation.isError && (
             <p className="text-caption text-danger">{errorText(saveMutation.error)}</p>
           )}
         </div>
         <Button
           variant="primary"
-          disabled={!canSave}
+          disabled={!canSaveWithHeaders || busy}
           loading={saveMutation.isPending}
           onClick={() => saveMutation.mutate()}
         >
-          保存供应商
+          {translate("settings.testSave")}
         </Button>
       </div>
 
@@ -415,11 +808,11 @@ export function ProviderForm({
         <Dialog
           open={deleteOpen}
           onClose={() => setDeleteOpen(false)}
-          title="删除供应商"
+          title={translate("settings.deleteProvider")}
           footer={
             <>
               <Button variant="secondary" size="compact" onClick={() => setDeleteOpen(false)}>
-                取消
+                {translate("settings.cancel")}
               </Button>
               <Button
                 variant="primary"
@@ -428,14 +821,14 @@ export function ProviderForm({
                 loading={deleteMutation.isPending}
                 onClick={() => deleteMutation.mutate()}
               >
-                删除
+                {translate("settings.deleteProvider")}
               </Button>
             </>
           }
         >
-          <p className="text-body text-primary">确定删除供应商「{provider.name}」？</p>
+          <p className="text-body text-primary">{translate("settings.deleteConfirm", { provider: provider.name })}</p>
           <p className="mt-1 text-caption text-secondary">
-            钥匙串中的 API Key 将一并清除。
+            {translate("settings.deleteHelp")}
           </p>
         </Dialog>
       )}

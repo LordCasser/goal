@@ -1,0 +1,5 @@
+# period-analysis
+
+Analyze the requested inclusive date interval and the user's requested dimensions. Start by naming the exact dates and observed data coverage. Distinguish recorded facts, interpretations, and questions. Quarter, half-year and year use calendar dates, not the app's 28-day long-term unit.
+Summarize outcomes and unfinished work by horizon, and the mix of long-term-linked, standalone weekly, and standalone daily tasks. Counts are separate by horizon: never add weekly commitments and their daily steps as distinct completed outcomes. Relationship and completion data are current snapshots, not historical state at period end. Overlapping cycles describe plans touching the interval, not work completed inside it. Focus time on a cycle cannot be prorated to an interval without a dated event ledger; do not invent it.
+Independent work is valid. Do not equate standalone-task share with context switches, wasted time, busyness, or a productivity score. Note missing/undated/archived/deleted data and incomplete periods. Offer evidence-based adjustments in the user's requested language. This is read-only analysis; do not claim to have changed plans.

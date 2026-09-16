@@ -52,10 +52,19 @@ pub fn delete_task(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,
     task_id: String,
+    confirmation_token: Option<String>,
 ) -> AppResult<()> {
-    let mutation = tasks::delete_task(&db, &task_id)?;
+    let mutation = tasks::delete_task_confirmed(&db, &task_id, confirmation_token.as_deref())?;
     emit_mutation(&app, &mutation);
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_task_deletion_preview(
+    db: State<'_, Db>,
+    task_id: String,
+) -> AppResult<tasks::TaskDeletionPreview> {
+    tasks::get_task_deletion_preview(&db, &task_id)
 }
 
 #[tauri::command]

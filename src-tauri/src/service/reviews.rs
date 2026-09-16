@@ -463,17 +463,17 @@ fn parse_disposition(value: &str) -> AppResult<&'static str> {
     }
 }
 
-/// The closest later dated sibling (same type, same parent) —「下一周期」,
+/// The closest later date of the same type — independent weeks/days need no parent.
 /// the mirror of `repository::cycles::previous_dated_sibling`.
 fn next_dated_sibling(conn: &Connection, cycle: &Cycle) -> AppResult<Option<Cycle>> {
-    let parent = cycle.parent_id.as_deref().unwrap_or("");
+    let parent = cycle.parent_id.as_deref();
     let starts_on = cycle.starts_on.as_deref().unwrap_or("");
     conn.query_row(
         "SELECT id, title, type, parent_id, position, archived, started, finished, \
          started_at, finished_at, duration, focused_time, starts_on, ends_on, calendar_key, \
-         repeat_id, created_at \
+         repeat_id, task_id, progress_check, created_at \
          FROM cycles \
-         WHERE type = ?1 AND parent_id = ?2 AND starts_on IS NOT NULL AND starts_on > ?3 \
+         WHERE type = ?1 AND (type IN ('week', 'day') OR parent_id IS ?2) AND starts_on IS NOT NULL AND starts_on > ?3 \
          ORDER BY starts_on ASC LIMIT 1",
         rusqlite::params![cycle.cycle_type.as_str(), parent, starts_on],
         cycles_repo::row_to_cycle,

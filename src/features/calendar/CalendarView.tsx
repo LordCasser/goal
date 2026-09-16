@@ -9,18 +9,19 @@
  * 弹窗（merge / swap），由用户显式选择，绝不静默覆盖。
  *
  * 顶栏视图切换由协调者接线（App 窗口栏）；本组件内部提供密度切换并把
- * 偏好写入 localStorage（key：planner.preferred-view，spec：记住偏好），
+ * 密度偏好写入 localStorage（key：planner.calendar-density，spec：记住偏好），
  * 并在提供 onClose 时渲染关闭按钮。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { Button, cn } from "../../ui";
-import { ensureDay } from "../../lib/ipc";
+import { ensureDay, getPlannerState, getEditorWorkspacesByCycleIds, getSettings, LATER_CYCLE_ID, type AgentPageContext } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import { addDaysISO, todayISO } from "../planner/dates";
+import { weekStartForDate } from "../planner/WeekNavigation";
 import { errorMessage, useActionError } from "../planner/actions";
 import {
   addMonthsISO,
@@ -30,11 +31,17 @@ import {
   savePreferredView,
   weekBounds,
   applyMoveToRange,
+  calendarPlanCycleIds,
+  calendarTasks,
   type CalendarViewMode,
 } from "./calendar-model";
 import { DayCell } from "./DayCell";
 import { DayTimeline } from "./DayTimeline";
+import { DAY_DRAG_TYPE, readDragToken } from "./calendar-dnd";
+import { CalendarPlan } from "./CalendarPlan";
+import { highlightedTasks, indexTasks, type RelationView } from "../planner/relations";
 import { StrategyDialog, type StrategyChoice } from "./StrategyDialog";
+import { useTranslation, formatDate } from "../../lib/i18n";
 import {
   getCalendarRange,
   getScheduleOverlaps,
@@ -58,21 +65,47 @@ function invalidateCalendar(qc: ReturnType<typeof useQueryClient>): void {
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export function CalendarView({ onClose }: { onClose?: () => void }) {
+export function CalendarView({ active = true, onClose, onActiveCycleChange, onPageContextChange, onReviewIssues, onPlanWithAI }: { active?: boolean; onClose?: () => void; onActiveCycleChange?: (id: string | null) => void; onPageContextChange?: (context: AgentPageContext) => void; onReviewIssues?: (id: string) => void; onPlanWithAI?: (id: string) => void }) {
+  const { t } = useTranslation("planning");
   const qc = useQueryClient();
   const [view, setView] = useState<CalendarViewMode>(() => loadPreferredView());
   const [anchor, setAnchor] = useState<string>(() => todayISO());
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<{ dayId: string; date: string } | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayISO());
+  const [detail, setDetail] = useState<"plan" | "schedule">("plan");
+  const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const [hoveredTask, setHoveredTask] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<{ dayId: string; date: string; token: string } | null>(null);
   const [strategyChoice, setStrategyChoice] = useState<StrategyChoice | null>(null);
+  const datesViewport = useRef<HTMLDivElement>(null);
+  const detailsRef = useRef<HTMLElement>(null);
+  const [detailTarget, setDetailTarget] = useState<{ kind: "task" | "session"; id: string } | null>(null);
+  const [weekScrollTarget, setWeekScrollTarget] = useState<{ date: string; animate: boolean } | null>(() => ({ date: todayISO(), animate: false }));
   const { error, run, fail, dismiss } = useActionError();
 
   const bounds = view === "month" ? monthBounds(anchor) : weekBounds(anchor);
+  const visibleStart = formatDate(bounds.start, { year: "numeric", month: "short", day: "numeric" });
+  const visibleEnd = formatDate(bounds.end, { year: "numeric", month: "short", day: "numeric" });
   const rangeKey = useMemo(() => [RANGE_KEY, bounds.start, bounds.end] as const, [bounds.start, bounds.end]);
   const { data: range, isLoading } = useQuery({
     queryKey: rangeKey,
     queryFn: () => getCalendarRange(bounds.start, bounds.end),
   });
+  const { data: planner } = useQuery({ queryKey: qk.plannerState(), queryFn: getPlannerState });
+  const { data: settings } = useQuery({ queryKey: qk.settings(), queryFn: getSettings });
+  const weekStartDay = settings?.week_start_day ?? 1;
+  const cycles = planner?.cycles ?? [];
+  const planCycleIds = calendarPlanCycleIds(cycles, range?.grid_start ?? bounds.start, range?.grid_end ?? bounds.end);
+  const plans = useQuery({
+    queryKey: qk.editorWorkspaces(planCycleIds),
+    queryFn: () => getEditorWorkspacesByCycleIds(planCycleIds),
+    enabled: planCycleIds.length > 0,
+  });
+  const workspaces = plans.data ?? {};
+  const graph = useMemo(() => indexTasks(Object.values(plans.data ?? {}).map((workspace) => workspace.tasks)), [plans.data]);
+  const cycleMap = new Map(cycles.map((cycle) => [cycle.id, cycle]));
+  const relations: RelationView = { tasks: graph, cycles: cycleMap, selectedId: selectedTask,
+    highlighted: highlightedTasks(selectedTask ?? hoveredTask, graph, cycleMap), select: setSelectedTask,
+    preview: setHoveredTask, setDragging: () => {} };
 
   // 后端事件 → 失效本视图查询（工作台由 lib/events 负责，两边共享数据库）。
   useEffect(() => {
@@ -95,19 +128,47 @@ export function CalendarView({ onClose }: { onClose?: () => void }) {
     };
   }, [qc]);
 
+  useEffect(() => {
+    const cancelDrag = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDragging(null);
+    };
+    window.addEventListener("keydown", cancelDrag);
+    return () => window.removeEventListener("keydown", cancelDrag);
+  }, []);
+
   const days = range?.days ?? [];
   const today = todayISO();
 
+  // Center only on entry or explicit date navigation. Edits, query refreshes and
+  // returning from Workspace must not pull the user away from a manual scroll.
+  useLayoutEffect(() => {
+    if (!active || view !== "week" || isLoading || !weekScrollTarget) return;
+    const viewport = datesViewport.current;
+    const cell = viewport?.querySelector<HTMLElement>(`[data-day-cell="${weekScrollTarget.date}"]`);
+    if (!viewport?.clientWidth || !cell) return;
+    const cellRect = cell.getBoundingClientRect();
+    const left = viewport.scrollLeft + cellRect.left - viewport.getBoundingClientRect().left
+      + cellRect.width / 2 - viewport.clientWidth / 2;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    // The browser clamps to the real content edges: no empty space just to
+    // center Monday or Sunday, and neighboring dates stay visible.
+    viewport.scrollTo({ left, behavior: weekScrollTarget.animate && !reducedMotion ? "smooth" : "instant" });
+    setWeekScrollTarget(null);
+  }, [active, view, isLoading, weekScrollTarget]);
+
   const switchView = (next: CalendarViewMode) => {
+    if (next === "week" && view !== "week") setWeekScrollTarget({ date: anchor, animate: false });
     setView(next);
     savePreferredView(next); // spec：preferred_view 记忆
     // 周/月切换共享 anchor：聚焦的日期不动，只有网格密度变化。
   };
 
   const navigate = (delta: number) => {
-    setAnchor((current) =>
-      view === "month" ? addMonthsISO(current, delta) : addDaysISO(current, delta * 7),
-    );
+    const next = view === "month" ? addMonthsISO(anchor, delta) : addDaysISO(anchor, delta * 7);
+    setAnchor(next);
+    setSelectedDate(next);
+    setSelectedTask(null);
+    setWeekScrollTarget({ date: next, animate: false });
   };
 
   const selectDay = (date: string) => {
@@ -115,25 +176,53 @@ export function CalendarView({ onClose }: { onClose?: () => void }) {
     if (cell && !cell.in_range) {
       // 弱化格（非当前月）可点击跳转，而不是选中。
       setAnchor(date);
-      return;
     }
     setSelectedDate(date);
+    setAnchor(date);
+    setDetail("plan");
+    setSelectedTask(null);
+    onActiveCycleChange?.(cell?.day_cycle?.id ?? null);
     dismiss();
   };
 
   const createDay = (date: string) => {
     void run(async () => {
-      await ensureDay(date); // 空格子一键创建当日计划（带日期）
+      const created = await ensureDay(date); // 空格子一键创建当日计划（带日期）
+      setSelectedDate(date);
+      setDetail("plan");
+      onActiveCycleChange?.(created.id);
+      void qc.invalidateQueries({ queryKey: qk.plannerState() });
       invalidateCalendar(qc);
     });
   };
+
+  const openTask = (date: string, id: string) => {
+    selectDay(date);
+    setSelectedTask(id);
+    setDetailTarget({ kind: "task", id });
+  };
+  const openSession = (date: string, id: string) => {
+    selectDay(date);
+    setDetail("schedule");
+    setDetailTarget({ kind: "session", id });
+  };
+  useEffect(() => {
+    if (!active || !detailTarget) return;
+    const attr = detailTarget.kind === "task" ? "data-task-id" : "data-focus-block";
+    const row = detailsRef.current?.querySelector<HTMLElement>(`[${attr}="${detailTarget.id}"]`);
+    if (!row) return;
+    row.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    (row.querySelector<HTMLElement>("textarea") ?? row).focus({ preventScroll: true });
+    setDetailTarget(null);
+  }, [active, detailTarget, plans.data, range]);
 
   // 拖到空日期：乐观更新（快照 → 改缓存 → 失败回滚），沿用工作台策略。
   const onDropOnCell = (targetDate: string, event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const source = dragging;
+    const token = readDragToken(event.dataTransfer, DAY_DRAG_TYPE);
     setDragging(null);
-    if (!source || source.date === targetDate) return;
+    if (!source || token !== source.token || source.date === targetDate) return;
     const targetCell = days.find((d) => d.date === targetDate);
     if (!targetCell?.in_range) return; // 弱化格不可作为落点
     const sourceCell = days.find((d) => d.day_cycle?.id === source.dayId);
@@ -175,6 +264,29 @@ export function CalendarView({ onClose }: { onClose?: () => void }) {
 
   const selectedDay = selectedDate === null ? undefined : days.find((d) => d.date === selectedDate);
   const selectedDayCycleId = selectedDay?.day_cycle?.id ?? null;
+  useEffect(() => {
+    if (active) onActiveCycleChange?.(selectedDayCycleId);
+  }, [active, selectedDayCycleId, onActiveCycleChange]);
+  const selectedDayParentWeek = selectedDay?.day_cycle?.parent_id
+    ? cycles.find((cycle) => cycle.id === selectedDay.day_cycle?.parent_id && cycle.type === "week") ?? null
+    : null;
+  const selectedWeekCycle = selectedDayParentWeek ?? cycles.find((cycle) => cycle.type === "week"
+    && cycle.starts_on !== null && cycle.ends_on !== null
+    && cycle.starts_on <= selectedDate && selectedDate < cycle.ends_on) ?? null;
+  const selectedLongTermCycle = selectedDayParentWeek?.parent_id
+    ? cycles.find((cycle) => cycle.id === selectedDayParentWeek.parent_id && cycle.type === "month" && cycle.id !== LATER_CYCLE_ID) ?? null
+    : null;
+  useEffect(() => {
+    if (!active) return;
+    onPageContextChange?.({
+      view: "calendar",
+      long_term_cycle_id: selectedLongTermCycle?.id ?? null,
+      week_cycle_id: selectedWeekCycle?.id ?? null,
+      day_cycle_id: selectedDayCycleId,
+      week_starts_on: selectedWeekCycle?.starts_on ?? weekStartForDate(selectedDate, weekStartDay),
+      selected_date: selectedDate,
+    });
+  }, [active, onPageContextChange, selectedDate, selectedDayCycleId, selectedLongTermCycle?.id, selectedWeekCycle?.id, selectedWeekCycle?.starts_on, weekStartDay]);
 
   const { data: budget } = useQuery({
     queryKey: [BUDGET_KEY, selectedDate],
@@ -187,18 +299,26 @@ export function CalendarView({ onClose }: { onClose?: () => void }) {
     enabled: selectedDayCycleId !== null,
   });
 
-  const scheduleSession = (sessionId: string, startsAt: number, durationMs: number | null) => {
-    void run(async () => {
+  const scheduleSession = async (sessionId: string, startsAt: number | null, durationMs: number | null) => {
+    return (await run(async () => {
       await setSessionSchedule(sessionId, startsAt, durationMs);
       invalidateCalendar(qc);
-    });
+    })) !== null;
+  };
+
+  const onDragOverCell = (event: DragEvent<HTMLDivElement>) => {
+    // The browser can hide custom payload values during dragover; validation
+    // happens on drop, while the live source state controls acceptance here.
+    if (dragging) event.preventDefault();
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-calendar-view={view}>
+    <div className="flex h-full min-h-0 flex-col" data-calendar-view={view}
+      onDragEnd={() => setDragging(null)}
+      onKeyDown={(event) => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) { setDragging(null); setSelectedTask(null); setHoveredTask(null); } }}>
       {/* 视图工具条：密度切换 + 期间导航 + 偏好记忆；顶栏入口由 App 接线。 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-light bg-canvas px-4 py-2">
-        <div role="tablist" aria-label="Calendar density">
+        <div role="tablist" aria-label={t("workspace.calendarDensity")}>
           {(["month", "week"] as const).map((mode) => (
             <button
               key={mode}
@@ -211,101 +331,100 @@ export function CalendarView({ onClose }: { onClose?: () => void }) {
                 view === mode ? "bg-focus-surface text-focus" : "text-primary hover:bg-hover",
               )}
             >
-              {mode}
+              {t(`workspace.${mode}`)}
             </button>
           ))}
         </div>
-        <Button size="compact" variant="ghost" onClick={() => navigate(-1)} aria-label="Previous">
+        <Button size="compact" variant="ghost" onClick={() => navigate(-1)} aria-label={t("workspace.previous")}>
           ‹
         </Button>
-        <Button size="compact" variant="ghost" onClick={() => setAnchor(today)} aria-label="Jump to today">
-          Today
+        <Button size="compact" variant="ghost" onClick={() => { selectDay(today); setWeekScrollTarget({ date: today, animate: true }); }} aria-label={t("workspace.todayButton")}>
+          {t("workspace.today")}
         </Button>
-        <Button size="compact" variant="ghost" onClick={() => navigate(1)} aria-label="Next">
+        <Button size="compact" variant="ghost" onClick={() => navigate(1)} aria-label={t("workspace.next")}>
           ›
         </Button>
         <span className="text-menu text-secondary" data-testid="visible-range">
-          {bounds.start === bounds.end ? bounds.start : `${bounds.start} – ${bounds.end}`}
+          {bounds.start === bounds.end ? visibleStart : `${visibleStart} – ${visibleEnd}`}
         </span>
         <div className="min-w-4 flex-1" />
         {onClose && (
-          <Button size="compact" variant="ghost" onClick={onClose} aria-label="Close calendar view">
-            Close
+          <Button size="compact" variant="ghost" onClick={onClose} aria-label={t("workspace.closeCalendar")}>
+            {t("workspace.closeCalendar")}
           </Button>
         )}
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {/* 网格：月/周共用 DayCell；左列是工作日表头。 */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {/* Week keeps readable day widths; Month retains its compact seven-column grid. */}
+        <div ref={datesViewport} role="region" aria-label={t("workspace.calendarDates")} tabIndex={0}
+          className={cn("min-h-0 min-w-0 flex-1 overflow-auto", view === "week" ? "py-4" : "p-4")}>
+          {plans.isError && <p role="alert" className="mb-3 text-caption text-danger">{t("workspace.calendarError")} <button className="underline" onClick={() => void plans.refetch()}>{t("workspace.retry")}</button></p>}
           {isLoading ? (
-            <p className="p-4 text-body text-hint">Loading calendar…</p>
+            <p className="p-4 text-body text-hint">{t("workspace.loadingCalendar")}</p>
           ) : (
             <div
               role="grid"
-              aria-label={`Calendar ${view} view`}
+              aria-label={t("workspace.calendarView", { view: t(`workspace.${view}`) })}
               className={cn(
-                "grid gap-1",
-                view === "month" ? "grid-cols-7" : "grid-cols-1",
+                "grid",
+                view === "week" ? "calendar-week-grid" : "min-w-[720px] grid-cols-7 gap-1",
               )}
             >
-              {view === "month" &&
-                WEEKDAY_LABELS.map((label) => (
+              {WEEKDAY_LABELS.map((label, index) => (
                   <div key={label} role="columnheader" className="text-caption font-medium text-hint">
-                    {label}
+                    {t(`calendar.weekday.${index}`)}
                   </div>
                 ))}
-              {view === "week" ? (
-                <div role="row" className="col-span-1 grid grid-cols-7 gap-1">
-                  {WEEKDAY_LABELS.map((label) => (
-                    <div key={label} className="text-caption font-medium text-hint">
-                      {label}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {view === "month"
-                ? days.map((day) => (
+              {days.map((day) => (
                     <DayCell
                       key={day.date}
                       day={day}
                       today={today}
                       selected={day.date === selectedDate}
-                      density="month"
+                      density={view}
+                      tasks={calendarTasks(day.day_cycle ? workspaces[day.day_cycle.id]?.tasks ?? [] : [])}
+                      tasksLoading={!!day.day_cycle && !workspaces[day.day_cycle.id] && !plans.isError}
+                      tasksUnavailable={plans.isError}
+                      relations={relations}
                       onSelect={selectDay}
                       onCreate={createDay}
-                      onDayDragStart={(dayId, date) => setDragging({ dayId, date })}
-                      onDragOverCell={(event) => event.preventDefault()}
+                      onOpenTask={openTask}
+                      onOpenSession={openSession}
+                      onDayDragStart={(dayId, date, token) => setDragging({ dayId, date, token })}
+                      onDayDragEnd={() => setDragging(null)}
+                      onDragOverCell={onDragOverCell}
                       onDropOnCell={onDropOnCell}
                     />
-                  ))
-                : // 周密度：7 行大格（同一 DayCell 组件，仅排版不同）。
-                  days.map((day) => (
-                    <div key={day.date} role="row" className="grid grid-cols-1">
-                      <DayCell
-                        day={day}
-                        today={today}
-                        selected={day.date === selectedDate}
-                        density="week"
-                        onSelect={selectDay}
-                        onCreate={createDay}
-                        onDayDragStart={(dayId, date) => setDragging({ dayId, date })}
-                        onDragOverCell={(event) => event.preventDefault()}
-                        onDropOnCell={onDropOnCell}
-                      />
-                    </div>
                   ))}
             </div>
           )}
         </div>
 
-        {/* 单日面板：时间轴 + 待排区 + 预算条。 */}
-        <aside className="flex w-[360px] shrink-0 flex-col gap-3 border-l border-light bg-content p-4">
-          {selectedDate === null ? (
-            <p className="text-caption text-hint">
-              Pick a day to see its timeline, unscheduled blocks and time budget.
-            </p>
-          ) : (
+        {/* Plan content and timed execution are two sections of the same day. */}
+        <aside ref={detailsRef} className="flex w-panel shrink-0 flex-col gap-3 border-l border-light bg-content p-4">
+          <header className="flex items-center justify-between gap-2">
+            <h2 className="text-block-title font-semibold">{formatDate(selectedDate, { year: "numeric", month: "short", day: "numeric" })}</h2>
+            <div className="flex rounded-md bg-subtle p-0.5" role="tablist" aria-label={t("workspace.dayDetails")}>
+              {(["plan", "schedule"] as const).map((tab) => <button key={tab} id={`day-detail-${tab}`} aria-controls={`day-panel-${tab}`} type="button" role="tab" aria-selected={detail === tab} tabIndex={detail === tab ? 0 : -1}
+                className={cn("rounded-sm px-2 py-1 text-caption capitalize transition-colors", detail === tab ? "bg-content text-primary shadow-sm" : "text-secondary hover:text-primary")}
+                onClick={() => setDetail(tab)} onKeyDown={(event) => {
+                  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                  event.preventDefault();
+                  const next = event.key === "Home" ? "plan" : event.key === "End" ? "schedule" : detail === "plan" ? "schedule" : "plan";
+                  setDetail(next);
+                  event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#day-detail-${next}`)?.focus();
+                }}>{t(`workspace.${tab}`)}</button>)}
+            </div>
+          </header>
+          <div id="day-panel-plan" role="tabpanel" aria-labelledby="day-detail-plan" className="min-h-0 flex-1 flex-col" style={{ display: detail === "plan" ? "flex" : "none" }}>
+          {isLoading || (planCycleIds.length > 0 && plans.isPending)
+            ? <p className="text-caption text-hint">{t("workspace.loadingPlan")}</p>
+            : plans.isError ? <p className="text-caption text-danger">{t("workspace.planUnavailable")}</p>
+            : <CalendarPlan active={active && detail === "plan"} date={selectedDate} day={selectedDay?.day_cycle ?? null} cycles={cycles} workspaces={workspaces}
+              relations={relations} onCreateDay={createDay} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} />}
+          </div>
+          <div id="day-panel-schedule" role="tabpanel" aria-labelledby="day-detail-schedule" className="min-h-0 flex-1 flex-col" style={{ display: detail === "schedule" ? "flex" : "none" }}>
             <DayTimeline
               date={selectedDate}
               day={selectedDay}
@@ -314,7 +433,7 @@ export function CalendarView({ onClose }: { onClose?: () => void }) {
               onCreateDay={createDay}
               onSchedule={scheduleSession}
             />
-          )}
+          </div>
         </aside>
       </div>
 
@@ -330,7 +449,7 @@ export function CalendarView({ onClose }: { onClose?: () => void }) {
         >
           {error}
           <button type="button" className="ml-2 underline" onClick={dismiss}>
-            Dismiss
+            {t("workspace.dismiss")}
           </button>
         </div>
       )}
