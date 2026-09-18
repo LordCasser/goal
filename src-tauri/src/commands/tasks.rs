@@ -93,7 +93,7 @@ pub fn reorder_tasks(
     Ok(())
 }
 
-/// Cross-level link (weekly -> long-term, daily -> weekly); `None` unlinks.
+/// Cross-level link (weekly -> long-term, daily -> weekly or long-term); `None` unlinks.
 #[tauri::command]
 pub fn set_task_parent_link(
     app: tauri::AppHandle<tauri::Wry>,

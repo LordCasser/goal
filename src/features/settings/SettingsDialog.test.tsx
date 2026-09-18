@@ -14,6 +14,7 @@ import { qk } from "../../lib/events";
 const mocks = vi.hoisted(() => ({
   getSettings: vi.fn(),
   setLocale: vi.fn(),
+  setShowRelationLines: vi.fn(),
   setTheme: vi.fn(),
   setWeekStartDay: vi.fn(),
   setLogLevel: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("../../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/ipc")>()),
   getSettings: mocks.getSettings,
   setLocale: mocks.setLocale,
+  setShowRelationLines: mocks.setShowRelationLines,
   setTheme: mocks.setTheme,
   setWeekStartDay: mocks.setWeekStartDay,
   setLogLevel: mocks.setLogLevel,
@@ -55,8 +57,9 @@ function renderDialog(open: boolean) {
 beforeEach(() => {
   applyLocale("zh-CN");
   vi.clearAllMocks();
-  mocks.getSettings.mockResolvedValue({ locale: "zh-CN", week_start_day: 1, theme: "white" });
+  mocks.getSettings.mockResolvedValue({ locale: "zh-CN", week_start_day: 1, theme: "white", show_relation_lines: false });
   mocks.setLocale.mockResolvedValue(undefined);
+  mocks.setShowRelationLines.mockResolvedValue(undefined);
   mocks.setTheme.mockResolvedValue(undefined);
   mocks.setWeekStartDay.mockResolvedValue(undefined);
   mocks.setLogLevel.mockResolvedValue(undefined);
@@ -104,6 +107,23 @@ describe("SettingsDialog", () => {
     );
   });
 
+  it("optimistically toggles relation lines and rolls back when saving fails", async () => {
+    let rejectSave!: (reason: unknown) => void;
+    mocks.setShowRelationLines.mockReturnValueOnce(new Promise<void>((_resolve, reject) => {
+      rejectSave = reject;
+    }));
+    const { client } = renderDialog(true);
+    const toggle = await screen.findByRole("checkbox", { name: "显示关联连线" });
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+    expect(client.getQueryData<{ show_relation_lines: boolean }>(qk.settings())?.show_relation_lines).toBe(true);
+    rejectSave({ code: "db_error", message: "failed" });
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    expect(client.getQueryData<{ show_relation_lines: boolean }>(qk.settings())?.show_relation_lines).toBe(false);
+    expect(mocks.setShowRelationLines).toHaveBeenCalledWith(true, expect.anything());
+  });
+
   it("applies the selected language only after the setting is saved", async () => {
     let resolveSave!: () => void;
     mocks.setLocale.mockReturnValue(new Promise<void>((resolve) => { resolveSave = resolve; }));
@@ -117,7 +137,7 @@ describe("SettingsDialog", () => {
     // App subscribes to this cache too; publishing an optimistic language
     // would change the mounted application even while the save is pending.
     expect(client.getQueryData<{ locale: string }>(qk.settings())?.locale).toBe("zh-CN");
-    mocks.getSettings.mockResolvedValue({ locale: "en", week_start_day: 1, theme: "white" });
+    mocks.getSettings.mockResolvedValue({ locale: "en", week_start_day: 1, theme: "white", show_relation_lines: false });
     resolveSave();
     await waitFor(() => expect(document.documentElement.lang).toBe("en"));
     expect(mocks.setLocale).toHaveBeenCalledWith("en");

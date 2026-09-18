@@ -158,6 +158,8 @@ fn day_promotion_without_target_uses_today() {
     let old_week = create_week(&db.db, &month.id, "2026-09-06");
     let old_day = create_day(&db.db, &old_week.id, "2026-09-10", NOW);
     let parked = add_task(&db.db, &old_day.id, "today's action", NOW);
+    let goal = add_task(&db.db, &month.id, "long-term goal", NOW);
+    tasks::set_task_parent_link(&db.db, &parked.id, Some(&goal.id)).unwrap();
     tasks::move_task(&db.db, &parked.id, LATER_CYCLE_ID, None).unwrap();
 
     let restored = tasks::promote_later_task(&db.db, &parked.id, None, common::today(), NOW + 1)
@@ -171,6 +173,7 @@ fn day_promotion_without_target_uses_today() {
         "promotion follows today, not the old source day"
     );
     assert_eq!(restored.later_plan_type, None);
+    assert_eq!(restored.parent_id.as_deref(), Some(goal.id.as_str()), "promotion preserves direct long-term ownership");
 }
 
 #[test]

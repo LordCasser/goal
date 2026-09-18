@@ -11,6 +11,7 @@ use crate::repository::settings as repo;
 /// Monday; the first UI that needs the value persists it once
 /// (spec: 首次确定周起始日 — 之后不再变更).
 pub const DEFAULT_WEEK_START_DAY: i64 = 1;
+pub const DEFAULT_SHOW_RELATION_LINES: bool = false;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Settings {
@@ -20,6 +21,8 @@ pub struct Settings {
     /// Preferred surface theme: `"white"` or `"gray"`; `None` until first
     /// chosen (design.md §4.4 — the default white is a client-side fallback).
     pub theme: Option<String>,
+    /// Whether relationship lines are shown in the planner; disabled by default.
+    pub show_relation_lines: bool,
 }
 
 pub fn get(db: &Db) -> AppResult<Settings> {
@@ -28,10 +31,14 @@ pub fn get(db: &Db) -> AppResult<Settings> {
         .and_then(|v| v.parse::<i64>().ok())
         .filter(|v| is_valid_week_start_day(*v));
     let theme = repo::get(&conn, repo::KEY_THEME)?.filter(|v| is_valid_theme(v));
+    let show_relation_lines = repo::get(&conn, repo::KEY_SHOW_RELATION_LINES)?
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(DEFAULT_SHOW_RELATION_LINES);
     Ok(Settings {
         locale: crate::i18n::current(&conn)?,
         week_start_day,
         theme,
+        show_relation_lines,
     })
 }
 
@@ -56,6 +63,15 @@ pub fn set_theme(db: &Db, theme: String) -> AppResult<()> {
     }
     let conn = db.pool().get()?;
     repo::set(&conn, repo::KEY_THEME, &theme)
+}
+
+pub fn set_show_relation_lines(db: &Db, show: bool) -> AppResult<()> {
+    let conn = db.pool().get()?;
+    repo::set(
+        &conn,
+        repo::KEY_SHOW_RELATION_LINES,
+        if show { "true" } else { "false" },
+    )
 }
 
 /// Persists the log level and applies it to the running logger so the change

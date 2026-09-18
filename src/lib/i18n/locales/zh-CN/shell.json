@@ -22,6 +22,8 @@
   "settings.theme.grayDescription": "柔和灰底，衬托白色计划面",
   "settings.weekStart.label": "周起始日",
   "settings.weekStart.description": "用于日历与新建周计划。",
+  "settings.relationLines.label": "显示关联连线",
+  "settings.relationLines.description": "选中事项时显示跨计划连线，默认关闭。",
   "settings.language.label": "语言",
   "settings.language.description": "选择 Goal 全局使用的语言。",
   "settings.language.zhCN": "简体中文",

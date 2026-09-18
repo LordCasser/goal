@@ -463,6 +463,160 @@ fn copy_uncompleted_records_lineage_and_skips_completed() {
 }
 
 #[test]
+fn copy_uncompleted_keeps_the_persistent_empty_row_at_the_end() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let week = create_week(&db.db, &month.id, TODAY);
+    let previous_day = create_day(&db.db, &week.id, "2026-09-15", NOW);
+    let current_day = create_day(&db.db, &week.id, TODAY, NOW + 1);
+    add_task(&db.db, &current_day.id, "already here", NOW + 2);
+    let carried = add_task(&db.db, &previous_day.id, "carry me", NOW + 2);
+    let carried_child = add_task(&db.db, &previous_day.id, "carry me's child", NOW + 3);
+    tasks::set_task_parent_link(&db.db, &carried_child.id, Some(&carried.id)).unwrap();
+    let second_carried = add_task(&db.db, &previous_day.id, "another carry", NOW + 4);
+
+    // The frontend creates this real row as soon as the empty day opens.
+    add_task(&db.db, &current_day.id, "", NOW + 5);
+    let copied = cycles::copy_uncompleted_from_previous(&db.db, &current_day.id, NOW + 4)
+        .unwrap()
+        .value;
+
+    assert_eq!(copied.len(), 3);
+    let copied_carried = copied.iter().find(|task| task.title == carried.title).unwrap();
+    assert_eq!(
+        copied_carried.copied_from_task_id.as_deref(),
+        Some(carried.id.as_str())
+    );
+    let copied_child = copied
+        .iter()
+        .find(|task| task.title == carried_child.title)
+        .unwrap();
+    assert_eq!(copied_child.parent_id.as_deref(), Some(copied_carried.id.as_str()));
+    assert!(copied.iter().any(|task| {
+        task.title == second_carried.title
+            && task.copied_from_task_id.as_deref() == Some(second_carried.id.as_str())
+    }));
+    let workspace = planner_lib::service::editor::get_editor_workspace(&db.db, &current_day.id)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .tasks
+            .iter()
+            .map(|task| task.task.title.as_str())
+            .collect::<Vec<_>>(),
+        vec!["already here", "carry me", "another carry", ""],
+        "the persistent typing row must remain after copied work"
+    );
+    assert_eq!(
+        workspace.tasks[1].children[0].task.title,
+        "carry me's child"
+    );
+    assert!(workspace.tasks[2].task.position < workspace.tasks[3].task.position);
+}
+
+#[test]
+fn adding_empty_row_after_copy_appends_after_cross_cycle_roots() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let goal = add_task(&db.db, &month.id, "long-term goal", NOW);
+    let week = create_week(&db.db, &month.id, TODAY);
+    let previous_day = create_day(&db.db, &week.id, "2026-09-15", NOW);
+    let current_day = create_day(&db.db, &week.id, TODAY, NOW + 1);
+    let carried = tasks::add_task(
+        &db.db,
+        &tasks::AddTaskArgs {
+            cycle_id: previous_day.id.clone(),
+            title: "linked carry".into(),
+            position: Some(10),
+            ..Default::default()
+        },
+        NOW + 2,
+    )
+    .unwrap()
+    .value;
+    tasks::set_task_parent_link(&db.db, &carried.id, Some(&goal.id)).unwrap();
+    let carried_child = tasks::add_task(
+        &db.db,
+        &tasks::AddTaskArgs {
+            cycle_id: previous_day.id.clone(),
+            title: "carry step".into(),
+            position: Some(100),
+            ..Default::default()
+        },
+        NOW + 3,
+    )
+    .unwrap()
+    .value;
+    tasks::set_task_parent_link(&db.db, &carried_child.id, Some(&carried.id)).unwrap();
+
+    cycles::copy_uncompleted_from_previous(&db.db, &current_day.id, NOW + 4).unwrap();
+    let empty = add_task(&db.db, &current_day.id, "", NOW + 5);
+
+    assert_eq!(empty.position, 11);
+    let workspace = planner_lib::service::editor::get_editor_workspace(&db.db, &current_day.id)
+        .unwrap();
+    assert_eq!(workspace.tasks.len(), 2);
+    assert_eq!(workspace.tasks[0].task.title, "linked carry");
+    assert_eq!(workspace.tasks[0].task.position, 10);
+    assert_eq!(workspace.tasks[0].children[0].task.title, "carry step");
+    assert_eq!(workspace.tasks[0].children[0].task.position, 100);
+    assert_eq!(workspace.tasks[1].task.id, empty.id);
+}
+
+#[test]
+fn copy_uncompleted_preserves_cross_cycle_links_and_does_not_move_proposed_children() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let goal = add_task(&db.db, &month.id, "long-term goal", NOW);
+    let week = create_week(&db.db, &month.id, TODAY);
+    let previous_day = create_day(&db.db, &week.id, "2026-09-15", NOW + 1);
+    let current_day = create_day(&db.db, &week.id, TODAY, NOW + 2);
+    let linked = tasks::add_task(
+        &db.db,
+        &tasks::AddTaskArgs {
+            cycle_id: previous_day.id.clone(),
+            title: "linked carry".into(),
+            position: Some(100),
+            ..Default::default()
+        },
+        NOW + 3,
+    )
+    .unwrap()
+    .value;
+    tasks::set_task_parent_link(&db.db, &linked.id, Some(&goal.id)).unwrap();
+
+    let structured_blank = add_task(&db.db, &current_day.id, "", NOW + 4);
+    let proposed_child = add_task(&db.db, &current_day.id, "child", NOW + 5);
+    tasks::set_task_parent_link(&db.db, &proposed_child.id, Some(&structured_blank.id)).unwrap();
+    proposals::apply_update_preview(
+        &db.db,
+        &proposed_child.id,
+        &TaskInput {
+            title: "preview child".into(),
+            parent_id: Some(structured_blank.id.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let input_row = add_task(&db.db, &current_day.id, "", NOW + 6);
+
+    let copied = cycles::copy_uncompleted_from_previous(&db.db, &current_day.id, NOW + 7)
+        .unwrap()
+        .value;
+    assert_eq!(copied.len(), 1);
+    assert_eq!(copied[0].parent_id.as_deref(), Some(goal.id.as_str()));
+
+    let workspace = planner_lib::service::editor::get_editor_workspace(&db.db, &current_day.id)
+        .unwrap();
+    assert_eq!(workspace.tasks.len(), 3);
+    assert_eq!(workspace.tasks[0].task.id, structured_blank.id);
+    assert_eq!(workspace.tasks[0].children[0].task.id, proposed_child.id);
+    assert!(workspace.tasks[0].children[0].task.proposal.is_some());
+    assert_eq!(workspace.tasks[2].task.id, input_row.id);
+    assert!(workspace.tasks[1].task.position < workspace.tasks[2].task.position);
+}
+
+#[test]
 fn copy_from_completed_week_returns_empty() {
     let db = TestDb::open();
     let month = create_long_term(&db.db, TODAY, 6);
@@ -503,7 +657,7 @@ fn manual_goals_default_to_needing_clarity() {
 }
 
 #[test]
-fn cross_level_links_allow_only_adjacent_levels() {
+fn cross_level_links_allow_daily_tasks_to_choose_weekly_or_long_term_goals() {
     let db = TestDb::open();
     let month = create_long_term(&db.db, TODAY, 1);
     let week = create_week(&db.db, &month.id, TODAY);
@@ -521,9 +675,13 @@ fn cross_level_links_allow_only_adjacent_levels() {
     // daily -> weekly item.
     tasks::set_task_parent_link(&db.db, &daily.id, Some(&weekly.id)).unwrap();
 
-    // daily -> long-term goal: skipped level, rejected.
-    let err = tasks::set_task_parent_link(&db.db, &daily.id, Some(&goal.id)).unwrap_err();
-    assert_eq!(err_code(&err), "link_level_not_adjacent");
+    // daily -> long-term goal: direct ownership replaces the weekly link.
+    let linked = tasks::set_task_parent_link(&db.db, &daily.id, Some(&goal.id)).unwrap().value;
+    assert_eq!(linked.parent_id.as_deref(), Some(goal.id.as_str()));
+    assert_eq!(linked.cycle_id, day.id);
+    // Reverse ownership still cannot create a cycle in the task graph.
+    let err = tasks::set_task_parent_link(&db.db, &goal.id, Some(&daily.id)).unwrap_err();
+    assert_eq!(err_code(&err), "invalid_link_level");
 
     // self link rejected
     let err = tasks::set_task_parent_link(&db.db, &daily.id, Some(&daily.id)).unwrap_err();
@@ -548,6 +706,40 @@ fn weekly_items_can_link_goals_outside_the_container_parent() {
         .unwrap()
         .value;
     assert_eq!(linked.parent_id.as_deref(), Some(goal_a.id.as_str()));
+}
+
+#[test]
+fn direct_daily_goal_link_persists_without_creating_a_weekly_task() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, "2026-12-09", 1);
+    let day = cycles::create_planning_cycle(
+        &db.db,
+        &CreateCycleArgs { cycle_type: "day".into(), date: Some(TODAY.into()), ..Default::default() },
+        common::today(), NOW,
+    ).unwrap().value;
+    let goal = add_task(&db.db, &month.id, "long-term goal", NOW);
+    let daily = add_task(&db.db, &day.id, "daily task", NOW);
+    let step = add_task(&db.db, &day.id, "daily step", NOW + 1);
+    tasks::set_task_parent_link(&db.db, &step.id, Some(&daily.id)).unwrap();
+    tasks::set_task_parent_link(&db.db, &daily.id, Some(&goal.id)).unwrap();
+
+    let workspace = planner_lib::service::editor::get_editor_workspace(&db.db, &day.id).unwrap();
+    assert_eq!(workspace.tasks.len(), 1, "cross-cycle ownership keeps the daily task at the visual root");
+    assert_eq!(workspace.tasks[0].task.parent_id.as_deref(), Some(goal.id.as_str()));
+    assert_eq!(workspace.tasks[0].children[0].task.id, step.id);
+    let mix = workspace.work_mix.unwrap();
+    assert_eq!(mix.total, 1);
+    assert_eq!(mix.long_term, 1);
+    let weekly_tasks: i64 = db.conn().query_row(
+        "SELECT COUNT(*) FROM tasks JOIN cycles ON tasks.cycle_id = cycles.id WHERE cycles.type = 'week'",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(weekly_tasks, 0);
+
+    tasks::set_task_parent_link(&db.db, &daily.id, None).unwrap();
+    let unlinked = planner_lib::service::editor::get_editor_workspace(&db.db, &day.id).unwrap();
+    assert_eq!(unlinked.tasks[0].task.parent_id, None);
+    assert_eq!(unlinked.work_mix.unwrap().daily_standalone, 1);
 }
 
 #[test]

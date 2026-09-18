@@ -22,16 +22,23 @@ export function CalendarPlan({ active = true, date, day, cycles, workspaces, rel
   const displayDate = formatDate(date, { year: "numeric", month: "short", day: "numeric" });
   const week = cycles.find((cycle) => cycle.type === "week" && cycle.starts_on && cycle.ends_on && cycle.starts_on <= date && date < cycle.ends_on);
   const weeklyTasks = calendarTasks(week ? workspaces[week.id]?.tasks ?? [] : []);
+  const dailyTasks = calendarTasks(day ? workspaces[day.id]?.tasks ?? [] : []);
   const longTermGoals = new Map<string, TaskNode>();
-  for (const task of weeklyTasks) {
-    const seen = new Set<string>();
-    let parent = task.parent_id ? relations.tasks.get(task.parent_id) : undefined;
-    while (parent && !seen.has(parent.id)) {
-      seen.add(parent.id);
-      if (relations.cycles.get(parent.cycle_id)?.type === "month") longTermGoals.set(parent.id, parent);
-      parent = parent.parent_id ? relations.tasks.get(parent.parent_id) : undefined;
+  const collectGoals = (tasks: TaskNode[]) => {
+    for (const task of tasks) {
+      if (task.title.trim()) {
+        const seen = new Set<string>();
+        let parent = task.parent_id ? relations.tasks.get(task.parent_id) : undefined;
+        while (parent && !seen.has(parent.id)) {
+          seen.add(parent.id);
+          if (relations.cycles.get(parent.cycle_id)?.type === "month") longTermGoals.set(parent.id, parent);
+          parent = parent.parent_id ? relations.tasks.get(parent.parent_id) : undefined;
+        }
+      }
+      collectGoals(task.children);
     }
-  }
+  };
+  collectGoals([...weeklyTasks, ...dailyTasks]);
   const goalRow = (task: TaskNode) => <button key={task.id} type="button" title={task.title}
     aria-label={t("calendar.showConnections", { title: task.title })} onClick={() => relations.select(task.id)}
     className={cn("flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-menu hover:bg-hover",

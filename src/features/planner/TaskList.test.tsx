@@ -29,6 +29,33 @@ describe("task drag interactions", () => {
       getData(type: string) { return data.get(type) ?? ""; } };
   }
   const row = (title: string) => screen.getByDisplayValue(title).closest("[data-task-id]")!;
+  it("describes the inherited long-term goal from the focused daily row control", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    try {
+      const goal = task("Ship the product", "m");
+      const week = task("Prepare release", "w", goal.id);
+      const day = task("Verify onboarding", "c1", week.id);
+      const relations: RelationView = {
+        tasks: indexTasks([[goal], [week], [day]]),
+        cycles: new Map([...["m", "w", "c1"].map((id, index) => [id, { id, type: ["month", "week", "day"][index] } as Cycle] as const)]),
+        selectedId: null, highlighted: new Set(), select: vi.fn(), preview: vi.fn(), setDragging: vi.fn(),
+      };
+      mocks.getEditorWorkspace.mockResolvedValue({ tasks: [day, empty] });
+      render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <TaskList cycleId="c1" cycleType="day" locked={false} relations={relations} />
+      </QueryClientProvider>);
+      const handle = await screen.findByRole("button", { name: "Reorder Verify onboarding" });
+      act(() => handle.focus());
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toContain(goal.title);
+      expect(tooltip.textContent).toContain(week.title);
+      expect(document.activeElement).toBe(handle);
+      expect(handle.getAttribute("aria-describedby")).toBe(tooltip.id);
+      const checkbox = screen.getByRole("checkbox", { name: 'Mark “Verify onboarding” complete' });
+      act(() => checkbox.focus());
+      expect(checkbox.getAttribute("aria-describedby")).toBe(tooltip.id);
+    } finally { vi.unstubAllGlobals(); }
+  });
   function start(title: string) {
     const dataTransfer = transfer();
     fireEvent.dragStart(screen.getByRole("button", { name: `Reorder ${title}` }), { dataTransfer });
@@ -121,10 +148,10 @@ describe("task drag interactions", () => {
     expect(mocks.reorderTasks).not.toHaveBeenCalled();
     expect(screen.queryByRole("status")).toBeNull();
   });
-  it("links a daily task to this week's task but refuses skipping a horizon", async () => {
+  it("links a daily task directly to a long-term goal or this week's task", async () => {
     await mountHorizons();
     fireEvent.drop(row("Goal"), { dataTransfer: start("Daily") });
-    expect(mocks.setTaskParentLink).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.setTaskParentLink).toHaveBeenCalledWith("Daily", "Goal"));
     fireEvent.drop(row("Weekly"), { dataTransfer: start("Daily") });
     await waitFor(() => expect(mocks.setTaskParentLink).toHaveBeenCalledWith("Daily", "Weekly"));
   });
@@ -248,4 +275,30 @@ it("reveals a diagnostic task after its editor query resolves, without changing 
   expect(scroll).toHaveBeenCalledWith({block:"nearest",inline:"center",behavior:"instant"});
   expect(mocks.patchTask).not.toHaveBeenCalled(); expect(mocks.addTask).not.toHaveBeenCalled();
   vi.unstubAllGlobals();
+});
+
+it("does not replay a completed external reveal after a local reveal", async () => {
+  let deliver!: (value: unknown) => void;
+  mocks.getEditorWorkspace.mockImplementation(() => new Promise(resolve => { deliver = resolve; }));
+  const originalScroll = Element.prototype.scrollIntoView;
+  const scroll = vi.fn();
+  Element.prototype.scrollIntoView = scroll;
+  const select = vi.fn();
+  const relations = { tasks: new Map(), cycles: new Map(), selectedId: null, highlighted: new Set(), select, preview: vi.fn(), setDragging: vi.fn() } as unknown as RelationView;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = (revealTask: { taskId: string; requestId: number }) => <QueryClientProvider client={client}><TaskList cycleId="c1" cycleType="day" locked={false} revealTask={revealTask} relations={relations} /></QueryClientProvider>;
+  const mounted = render(view({ taskId: "first", requestId: 1 }));
+  deliver({ tasks: [{ ...empty, id: "first", title: "First" }, { ...empty, id: "second", title: "Second" }, empty] });
+  await screen.findByDisplayValue("First");
+  await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+
+  mounted.rerender(view({ taskId: "second", requestId: -1 }));
+  await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
+  mounted.rerender(view({ taskId: "first", requestId: 1 }));
+  await act(async () => { await Promise.resolve(); });
+
+  expect(scroll).toHaveBeenCalledTimes(2);
+  expect(select).toHaveBeenNthCalledWith(1, "first");
+  expect(select).toHaveBeenNthCalledWith(2, "second");
+  Element.prototype.scrollIntoView = originalScroll;
 });

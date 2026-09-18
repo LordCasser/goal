@@ -173,6 +173,24 @@ pub fn max_position(conn: &Connection, cycle_id: &str, parent_id: Option<&str>) 
     .map_err(from_rusqlite)
 }
 
+/// Highest position among the roots visible in a cycle's editor tree.
+/// Cross-cycle links are visual roots; same-cycle children remain in their
+/// parent's sibling group and do not affect top-level insertion.
+pub fn max_visible_root_position(conn: &Connection, cycle_id: &str) -> AppResult<i64> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(task.position), -1) FROM tasks task \
+         WHERE task.cycle_id = ?1 \
+           AND (task.parent_id IS NULL OR NOT EXISTS ( \
+               SELECT 1 FROM tasks parent \
+               WHERE parent.id = task.parent_id \
+                 AND parent.cycle_id = task.cycle_id \
+           ))",
+        params![cycle_id],
+        |r| r.get(0),
+    )
+    .map_err(from_rusqlite)
+}
+
 /// Pick the least-used palette key in a cycle. Ties follow the stable palette
 /// order so successive roots spread across colors deterministically.
 pub fn least_used_root_color(conn: &Connection, cycle_id: &str) -> AppResult<String> {

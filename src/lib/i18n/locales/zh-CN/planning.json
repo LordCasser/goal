@@ -114,6 +114,7 @@
   "parent.linkA": "关联到{{parent}}",
   "parent.labelLongTerm": "长期目标",
   "parent.labelWeekly": "周目标",
+  "parent.labelWeeklyOrLongTerm": "周目标或长期目标",
   "parent.menu": "关联{{parent}}",
   "parent.partOfTask": "属于任务",
   "parent.belongs": "此步骤属于{{parent}}。请在父任务上更改归属。",
@@ -339,5 +340,7 @@
   "cycle.nestedPlans_other": "{{count}} 个下级计划",
   "cycle.deletedFocus_one": "{{count}} 个专注块",
   "cycle.deletedFocus_other": "{{count}} 个专注块",
-  "cycle.deleteRecursiveNote": "包含其他计划中的关联子目标、子任务及其提醒。逐级删除后无法撤销。"
+  "cycle.deleteRecursiveNote": "包含其他计划中的关联子目标、子任务及其提醒。逐级删除后无法撤销。",
+  "goalHint.label": "关联的长期目标",
+  "goalHint.via": "经由周事项"
 }

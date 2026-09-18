@@ -39,6 +39,7 @@ import { errorMessage, invalidateTasks, useActionError } from "./actions";
 
 import { canAssignParent, ROOT_PALETTE, taskColor, type RelationView } from "./relations";
 import { ParentGoalPicker } from "./ParentGoalPicker";
+import { useDailyGoalTooltip } from "./useDailyGoalTooltip";
 import { TASK_DRAG_TYPE, useTaskDrag } from "./TaskDragContext";
 import { useTranslation } from "../../lib/i18n";
 import { useTaskDeletion } from "./TaskDeletion";
@@ -148,12 +149,17 @@ export function TaskList({
   }, [active, workspace.data, cycleId, locked, qc, fail]);
 
   // Wait for this editor's own query and DOM, not the workspace's parallel query.
-  const revealed = useRef<number | null>(null);
+  // Keep the latest handled request in each namespace. PlannerWorkspace may
+  // hand a completed external request back after a local relation reveal;
+  // one shared slot would replay that stale request.
+  const revealed = useRef<{ local: number | null; external: number | null }>({ local: null, external: null });
   useEffect(() => {
-    if (!active || !revealTask || revealed.current === revealTask.requestId) return;
+    if (!active || !revealTask) return;
+    const namespace = revealTask.requestId < 0 ? "local" : "external";
+    if (revealed.current[namespace] === revealTask.requestId) return;
     const input = inputRefs.current.get(revealTask.taskId);
     if (!input) return;
-    revealed.current = revealTask.requestId;
+    revealed.current[namespace] = revealTask.requestId;
     relations?.select(revealTask.taskId);
     input.closest("[data-task-id]")?.scrollIntoView({block:"nearest",inline:"center",behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"instant":"smooth"});
     input.focus({preventScroll:true});
@@ -367,6 +373,7 @@ export function TaskList({
             onReviewIssues={onReviewIssues}
             draft={row.node.proposal ? row.node.title : drafts[row.node.id] ?? row.node.title}
             dragging={drag?.task.id === row.node.id}
+            goalHintEnabled={active && !drag}
             dropBefore={drag && dropHint?.id === row.node.id && dropHint.kind === "reorder" ? dropHint.before : null}
             linkHint={!!drag && dropHint?.id === row.node.id && dropHint.kind === "link"}
             placeholder={cycleType === "month" ? t("task.addGoal") : t("task.addTask")}
@@ -490,6 +497,7 @@ function TaskRow({
   onReviewIssues,
   draft,
   dragging,
+  goalHintEnabled,
   dropBefore,
   linkHint,
   placeholder,
@@ -515,6 +523,7 @@ function TaskRow({
   onReviewIssues?: () => void;
   draft: string;
   dragging: boolean;
+  goalHintEnabled: boolean;
   dropBefore: boolean | null;
   linkHint: boolean;
   placeholder: string;
@@ -534,6 +543,8 @@ function TaskRow({
 }) {
   const { t } = useTranslation("planning");
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const goalTooltip = useDailyGoalTooltip(row.node, relations, goalHintEnabled && !linkHint, rowRef);
   useLayoutEffect(() => {
     const field = titleRef.current;
     if (!field) return;
@@ -547,6 +558,8 @@ function TaskRow({
   const hints = [node.needs_refinement === true ? t("task.clarify") : null, node.needs_breakdown === true ? t("task.breakdown") : null].filter(Boolean).join(" · ");
   return (
     <div
+      ref={rowRef}
+      {...goalTooltip.rowProps}
       data-task-id={node.id}
       data-proposal={node.proposal ?? undefined}
       title={node.proposal ? t("task.previewLockedCn") : undefined}
@@ -576,6 +589,7 @@ function TaskRow({
           role="button"
           tabIndex={active ? 0 : -1}
           aria-label={t("task.reorder", { title: node.title || t("task.reorderRow") })}
+          aria-describedby={goalTooltip.descriptionId}
           title={t("task.reorderTitle")}
           draggable={active}
           onDragStart={onDragStart}
@@ -599,10 +613,11 @@ function TaskRow({
         disabled={locked || empty}
         onChange={onToggle}
         aria-label={empty ? undefined : t("task.markComplete", { title: node.title })}
+        aria-describedby={goalTooltip.descriptionId}
         className="task-check shrink-0"
       />
       {!empty && allowColor && row.depth === 0 ? <ColorSlotButton task={node} disabled={locked} onPick={onPickColor} relations={relations} /> :
-        !empty && relations && (!allowColor || row.depth > 0) ? <ParentGoalPicker task={node} relations={relations} locked={locked} nested={row.depth > 0} /> :
+        !empty && relations && (!allowColor || row.depth > 0) ? <ParentGoalPicker task={node} relations={relations} locked={locked} nested={row.depth > 0} descriptionId={goalTooltip.descriptionId} /> :
         <span className="task-color-control" aria-hidden="true" />}
       <textarea
         rows={1}
@@ -611,6 +626,7 @@ function TaskRow({
         readOnly={locked}
         placeholder={placeholder}
         aria-label={empty ? placeholder : undefined}
+        aria-describedby={goalTooltip.descriptionId}
         onChange={(e) => onDraftChange(e.target.value)}
         onKeyDown={onKeyDown}
         onBlur={onBlur}
@@ -625,19 +641,19 @@ function TaskRow({
         {node.proposal === "delete" ? t("task.proposalDelete") : t("task.proposalPreview")}
       </span>}
       {!empty && !node.proposal && hints && <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-hint transition-colors hover:bg-hover hover:text-secondary"
-        aria-label={t("task.reviewHints", { title: node.title })} title={hints} onClick={onReviewIssues}>
+        aria-label={t("task.reviewHints", { title: node.title })} aria-describedby={goalTooltip.descriptionId} title={hints} onClick={onReviewIssues}>
         <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true"><path d="M4 14V2h8l-2 3 2 3H4" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>}
       {!empty && !locked && (
         /* 预览任务沿用相同布局，仅锁定编辑控件。 */
         <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
-          <IconButton label={t("task.moveLater", { title: node.title })} title={t("task.moveLaterTitle")} onClick={onSendToLater}>
+          <IconButton label={t("task.moveLater", { title: node.title })} title={t("task.moveLaterTitle")} descriptionId={goalTooltip.descriptionId} onClick={onSendToLater}>
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
               <circle cx="8" cy="8" r="6.2" />
               <path d="M8 4.8V8l2.2 1.6" />
             </svg>
           </IconButton>
-          <IconButton label={t("task.delete", { title: node.title })} title={t("cycle.delete")} onClick={onDelete}>
+          <IconButton label={t("task.delete", { title: node.title })} title={t("cycle.delete")} descriptionId={goalTooltip.descriptionId} onClick={onDelete}>
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
               <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8h5.8l.6-8M6.8 7v3.5M9.2 7v3.5" />
             </svg>
@@ -645,6 +661,7 @@ function TaskRow({
         </span>
       )}
       {dropBefore === false && <InsertLine position="bottom" />}
+      {goalTooltip.tooltip}
     </div>
   );
 }
@@ -661,11 +678,13 @@ function InsertLine({ position }: { position: "top" | "bottom" }) {
 function IconButton({
   label,
   title,
+  descriptionId,
   onClick,
   children,
 }: {
   label: string;
   title: string;
+  descriptionId?: string;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -673,6 +692,7 @@ function IconButton({
     <button
       type="button"
       aria-label={label}
+      aria-describedby={descriptionId}
       title={title}
       onClick={onClick}
       className="flex h-7 w-7 items-center justify-center rounded-sm text-secondary transition-colors duration-100 hover:bg-hover"

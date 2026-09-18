@@ -126,7 +126,10 @@ pub fn add_task(db: &Db, args: &AddTaskArgs, now: i64) -> AppResult<Mutation<Tas
     let (default_refine, default_breakdown) = clarity_defaults(cycle.cycle_type);
     let position = match args.position {
         Some(p) => p,
-        None => repo::max_position(&tx, &args.cycle_id, args.parent_id.as_deref())? + 1,
+        None => match args.parent_id.as_deref() {
+            Some(parent_id) => repo::max_position(&tx, &args.cycle_id, Some(parent_id))? + 1,
+            None => repo::max_visible_root_position(&tx, &args.cycle_id)? + 1,
+        },
     };
     let root_color_key = match args.root_color_key.as_deref() {
         Some(color) => Some(color.to_string()),
@@ -365,10 +368,8 @@ fn move_task_in_tx(
             let parent = repo::require(conn, parent_id)?;
             let parent_cycle = cycles_repo::require(conn, &parent.cycle_id)?;
             let valid = parent_cycle.id != LATER_CYCLE_ID
-                && (parent_cycle.id == target_cycle_id || matches!(
-                    (target.cycle_type, parent_cycle.cycle_type),
-                    (CycleType::Week, CycleType::Month) | (CycleType::Day, CycleType::Week)
-                ));
+                && (parent_cycle.id == target_cycle_id
+                    || can_link_task_levels(target.cycle_type, parent_cycle.cycle_type));
             if !valid { parent_for_position = None; }
         }
     }
@@ -535,8 +536,16 @@ pub fn reorder_tasks(
     Ok(Mutation::new(()).touching_tasks(cycle_id))
 }
 
-/// Cross-level link (weekly item -> long-term goal, daily task -> weekly item).
-/// Links are optional and connect adjacent task levels, independent of cycle parents
+fn can_link_task_levels(child: CycleType, parent: CycleType) -> bool {
+    matches!(
+        (child, parent),
+        (CycleType::Week, CycleType::Month)
+            | (CycleType::Day, CycleType::Week | CycleType::Month)
+    )
+}
+
+/// Cross-level link (weekly -> long-term; daily -> weekly or long-term).
+/// Links are optional and independent of cycle parents
 /// (spec: 跨层目标链接); `None` unlinks.
 pub fn set_task_parent_link(
     db: &Db,
@@ -566,18 +575,13 @@ pub fn set_task_parent_link(
             update.root_color_key = Some(None);
         }
 
-        // Same-cycle nesting (subtask rows) is free-form; the adjacency rule
-        // only governs cross-level links between cycles.
+        // Same-cycle nesting (subtask rows) is free-form; planning levels
+        // only constrain cross-cycle ownership.
         if parent_cycle.id != cycle.id {
-            let adjacent = match (cycle.cycle_type, parent_cycle.cycle_type) {
-                (CycleType::Week, CycleType::Month) => true,
-                (CycleType::Day, CycleType::Week) => true,
-                _ => false,
-            };
-            if !adjacent {
+            if !can_link_task_levels(cycle.cycle_type, parent_cycle.cycle_type) {
                 return Err(AppError::validation(
-                    "link_level_not_adjacent",
-                    "Links only work between neighbouring levels (weekly -> long-term, daily -> weekly)",
+                    "invalid_link_level",
+                    "Weekly tasks can link to long-term goals; daily tasks can link to weekly or long-term goals.",
                 ));
             }
             if parent_cycle.id == crate::domain::cycle::LATER_CYCLE_ID {

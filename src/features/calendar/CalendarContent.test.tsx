@@ -111,6 +111,22 @@ describe("calendar content uses the workspace tasks", () => {
     expect(backend.addTask).not.toHaveBeenCalled();
   });
 
+  it("shows a directly linked daily long-term goal when the week has no tasks", async () => {
+    content.week!.tasks = [];
+    content.day!.tasks = [task("direct-work", "day", "Direct daily work", "goal"), task("blank", "day", "")];
+    mount();
+    const goals = await screen.findByRole("region", { name: "Long-term goals" });
+    expect(await within(goals).findByRole("button", { name: "Show connections for Launch the product" })).toBeTruthy();
+    expect(within(goals).queryByText("No long-term goals linked. Weekly and daily tasks can stay independent.")).toBeNull();
+  });
+
+  it("deduplicates a long-term goal reached through weekly and daily task chains", async () => {
+    content.day!.tasks = [...content.day!.tasks, task("direct-work", "day", "Direct daily work", "goal")];
+    mount();
+    const goals = await screen.findByRole("region", { name: "Long-term goals" });
+    await waitFor(() => expect(within(goals).getAllByRole("button", { name: "Show connections for Launch the product" })).toHaveLength(1));
+  });
+
   it("completion and renaming in either editor refresh the calendar projection without event delivery", async () => {
     mount();
     const workspace = within(screen.getByRole("region", { name: "Workspace editor" }));

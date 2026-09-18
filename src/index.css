@@ -237,6 +237,18 @@ button.task-color-control:hover { background: var(--surface-hover); }
 .task-row[data-related] { background: color-mix(in srgb, var(--task-color) 7%, var(--surface-content)); }
 .task-row[data-selected] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--task-color) 22%, transparent); }
 .plan-enter, .connection-bar { animation: ui-fade-in 180ms ease-out; }
+.daily-goal-tooltip {
+  --hint-offset: 4px;
+  box-shadow: 0 3px 8px #00000005, 0 12px 32px #00000012;
+  animation: goal-hint-enter 180ms cubic-bezier(.16, 1, .3, 1) both;
+}
+.daily-goal-tooltip[data-above] { --hint-offset: -4px; }
+.daily-goal-tooltip[data-closing] { animation: goal-hint-leave 120ms ease-in both; pointer-events: none; }
+@keyframes goal-hint-enter {
+  from { opacity: 0; transform: translateY(var(--hint-offset)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes goal-hint-leave { to { opacity: 0; transform: translateY(var(--hint-offset)); } }
 .plan-card { min-height: min(360px, 100%); max-height: 100%; }
 [data-workspace-scroll-pane][data-wheel-active="true"] {
   overscroll-behavior-y: contain;

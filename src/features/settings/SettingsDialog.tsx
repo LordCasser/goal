@@ -1,5 +1,5 @@
 /**
- * Settings dialog: theme choice, week start day and diagnostics
+ * Settings dialog: theme choice, relation-line visibility, week start day and diagnostics
  * (design.md §4.4 主题切换、§9.3 AI 设置预留；spec: local-logging).
  *
  * Every write goes through the app_settings-backed commands. No settings
@@ -15,7 +15,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { ReminderSettingsSection } from "../reminders/ReminderSettingsSection";
 import { AiSettingsPage } from "../ai-settings/AiSettingsPage";
-import { Button, Dialog, Select, SelectItem, cn } from "../../ui";
+import { Button, Checkbox, Dialog, Select, SelectItem, cn } from "../../ui";
 import { qk } from "../../lib/events";
 import {
   getDebugLogDir,
@@ -23,6 +23,7 @@ import {
   getSettings,
   setLocale,
   setLogLevel,
+  setShowRelationLines,
   setTheme,
   setWeekStartDay,
 } from "../../lib/ipc";
@@ -138,6 +139,26 @@ export function SettingsDialog({
     },
   });
 
+  const relationLinesMutation = useMutation({
+    mutationFn: setShowRelationLines,
+    onMutate: async (show_relation_lines) => {
+      await queryClient.cancelQueries({ queryKey: qk.settings() });
+      const previous = queryClient.getQueryData<Settings>(qk.settings());
+      queryClient.setQueryData<Settings>(qk.settings(), (current) =>
+        current ? { ...current, show_relation_lines } : current,
+      );
+      return { previous };
+    },
+    onError: (_error, _show_relation_lines, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(qk.settings(), context.previous);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.settings() });
+    },
+  });
+
   const localeMutation = useMutation({
     mutationFn: async (locale: Settings["locale"]) => {
       await setLocale(locale);
@@ -167,6 +188,7 @@ export function SettingsDialog({
 
   const selectedTheme = settingsQuery.data?.theme ?? "white";
   const weekStartDay = settingsQuery.data?.week_start_day ?? 1;
+  const showRelationLines = settingsQuery.data?.show_relation_lines ?? false;
   const selectedLocale = settingsQuery.data?.locale ?? "en";
 
   const chooseTheme = (theme: Theme) => {
@@ -178,6 +200,11 @@ export function SettingsDialog({
   const chooseWeekStart = (day: number) => {
     if (day === weekStartDay) return;
     weekStartMutation.mutate(day);
+  };
+
+  const chooseRelationLines = (show: boolean) => {
+    if (show === showRelationLines) return;
+    relationLinesMutation.mutate(show);
   };
 
   const chooseLogLevel = (level: LogLevel) => {
@@ -273,12 +300,27 @@ export function SettingsDialog({
               </div>
               <InlineError error={weekStartMutation.error} />
             </section>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-body font-medium text-primary">{t("settings.relationLines.label")}</h3>
+                  <p className="mt-1 text-caption text-secondary">{t("settings.relationLines.description")}</p>
+                </div>
+                <Checkbox
+                  aria-label={t("settings.relationLines.label")}
+                  checked={showRelationLines}
+                  disabled={settingsQuery.isPending || relationLinesMutation.isPending}
+                  onChange={chooseRelationLines}
+                />
+              </div>
+              <InlineError error={relationLinesMutation.error} />
+            </section>
             {onPreviewExitPoll && <section className="flex items-center justify-between gap-4 border-t border-light pt-5">
               <div><h3 className="text-body font-medium text-primary">{t("settings.feedback.title")}</h3><p className="mt-1 text-caption text-secondary">{t("settings.feedback.description")}</p></div>
               <Button size="compact" onClick={onPreviewExitPoll}>{t("settings.feedback.action")}</Button>
             </section>}
             <InlineError error={settingsQuery.error} />
-            <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending || localeMutation.isPending ? t("settings.saveStatus.saving") : t("settings.saveStatus.auto")}</p>
+            <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending || relationLinesMutation.isPending || localeMutation.isPending ? t("settings.saveStatus.saving") : t("settings.saveStatus.auto")}</p>
           </div>}
           {section === "ai" && <AiSettingsPage />}
           {section === "reminders" && <div className="flex flex-col gap-6"><div><h3 className="text-section-title font-semibold text-primary">{t("settings.reminders.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.reminders.description")}</p></div><ReminderSettingsSection /></div>}

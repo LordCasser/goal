@@ -25,12 +25,13 @@ export function indexTasks(trees: TaskNode[][]): TaskGraph {
   return tasks;
 }
 
-/** Traversing same-cycle steps is allowed; cross-cycle ownership is adjacent only. */
+/** Daily work can belong to a weekly item or directly to a long-term goal. */
 export function canLink(child: TaskNode, parent: TaskNode, cycles: Map<string, Cycle>): boolean {
   const childCycle = cycles.get(child.cycle_id);
   const parentCycle = cycles.get(parent.cycle_id);
   return !!childCycle && !!parentCycle && parentCycle.id !== "later"
-    && ((childCycle.type === "week" && parentCycle.type === "month") || (childCycle.type === "day" && parentCycle.type === "week"));
+    && ((childCycle.type === "week" && parentCycle.type === "month")
+      || (childCycle.type === "day" && (parentCycle.type === "week" || parentCycle.type === "month")));
 }
 
 /** Menu and drag ownership use the same planning/date constraints. */
@@ -38,7 +39,7 @@ export function canAssignParent(child: TaskNode, parent: TaskNode, cycles: Map<s
   if (child.proposal || parent.proposal || !parent.title.trim() || !canLink(child, parent, cycles)) return false;
   const day = cycles.get(child.cycle_id);
   const week = cycles.get(parent.cycle_id);
-  return day?.type !== "day" || !day.starts_on || !week?.starts_on || !week.ends_on
+  return day?.type !== "day" || week?.type !== "week" || !day.starts_on || !week.starts_on || !week.ends_on
     || (week.starts_on <= day.starts_on && day.starts_on < week.ends_on);
 }
 
@@ -49,6 +50,22 @@ export function taskColor(task: TaskNode, tasks: TaskGraph): string | null {
     seen.add(current.id);
     const color = current.root_color_key as RootColorKey | null;
     if (color && color in ROOT_PALETTE) return ROOT_PALETTE[color];
+    current = current.parent_id ? tasks.get(current.parent_id) : undefined;
+  }
+  return null;
+}
+
+/** Resolve the actual goal item, including daily steps and weekly ownership. */
+export function dailyGoal(task: TaskNode, tasks: TaskGraph, cycles: Map<string, Cycle>): { goal: TaskNode; via: TaskNode | null } | null {
+  if (cycles.get(task.cycle_id)?.type !== "day") return null;
+  const seen = new Set([task.id]);
+  let current = task.parent_id ? tasks.get(task.parent_id) : undefined;
+  let via: TaskNode | null = null;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    const cycle = cycles.get(current.cycle_id);
+    if (cycle?.type === "month" && cycle.id !== "later") return { goal: current, via };
+    if (cycle?.type === "week" && !via) via = current;
     current = current.parent_id ? tasks.get(current.parent_id) : undefined;
   }
   return null;

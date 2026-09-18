@@ -22,6 +22,8 @@
   "settings.theme.grayDescription": "A soft gray surface behind white planning cards",
   "settings.weekStart.label": "First day of the week",
   "settings.weekStart.description": "Used for the calendar and new weekly plans.",
+  "settings.relationLines.label": "Show relation lines",
+  "settings.relationLines.description": "Show lines between plans when viewing task connections. Off by default.",
   "settings.language.label": "Language",
   "settings.language.description": "Choose the language used throughout Goal.",
   "settings.language.zhCN": "简体中文",
