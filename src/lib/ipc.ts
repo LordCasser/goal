@@ -99,6 +99,7 @@ export const commands = {
   getSettings: "get_settings",
   setWeekStartDay: "set_week_start_day",
   setTheme: "set_theme",
+  setShowRelationLines: "set_show_relation_lines",
   setLocale: "set_locale",
   setLogLevel: "set_log_level",
   getAppFlag: "get_app_flag",
@@ -251,7 +252,7 @@ export function reorderTasks(
   return invoke<void>(commands.reorderTasks, { cycleId: cycle_id, parentId: parent_id, orderedIds: ordered_ids });
 }
 
-/** Cross-level link (weekly -> long-term, daily -> weekly); null unlinks. */
+/** Cross-level link (weekly -> long-term, daily -> weekly or long-term); null unlinks. */
 export function setTaskParentLink(
   task_id: string,
   parent_id: string | null,
@@ -351,6 +352,10 @@ export function setWeekStartDay(day: number): Promise<void> {
 
 export function setTheme(theme: Theme): Promise<void> {
   return invoke<void>(commands.setTheme, { theme });
+}
+
+export function setShowRelationLines(show: boolean): Promise<void> {
+  return invoke<void>(commands.setShowRelationLines, { show });
 }
 
 export function setLocale(locale: import("./i18n").Locale): Promise<void> {

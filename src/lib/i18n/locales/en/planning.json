@@ -114,6 +114,7 @@
   "parent.linkA": "Link to a {{parent}}",
   "parent.labelLongTerm": "long-term goal",
   "parent.labelWeekly": "weekly goal",
+  "parent.labelWeeklyOrLongTerm": "weekly or long-term goal",
   "parent.menu": "Link {{parent}}",
   "parent.partOfTask": "Part of a task",
   "parent.belongs": "This step belongs to {{parent}}. Change ownership on the parent task.",
@@ -339,5 +340,7 @@
   "cycle.nestedPlans_other": "{{count}} nested plans",
   "cycle.deletedFocus_one": "{{count}} focus block",
   "cycle.deletedFocus_other": "{{count}} focus blocks",
-  "cycle.deleteRecursiveNote": "Includes linked goals and tasks in other plans, plus their reminders. This cannot be undone."
+  "cycle.deleteRecursiveNote": "Includes linked goals and tasks in other plans, plus their reminders. This cannot be undone.",
+  "goalHint.label": "Linked long-term goal",
+  "goalHint.via": "Via weekly item"
 }

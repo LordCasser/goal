@@ -112,6 +112,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_week_start_day,
             commands::settings::set_theme,
+            commands::settings::set_show_relation_lines,
             commands::settings::set_locale,
             commands::settings::set_log_level,
             commands::settings::get_app_flag,

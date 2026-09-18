@@ -36,7 +36,7 @@
   "task_preview_locked": "Confirm or discard the change in Coach before editing the affected task.",
   "invalid_parent_link": "This parent relationship is not valid. Choose a valid parent task.",
   "link_to_self": "Parent link cannot point to the same task",
-  "link_level_not_adjacent": "Links only work between neighbouring levels (weekly -> long-term, daily -> weekly)",
+  "invalid_link_level": "Weekly tasks can link to long-term goals; daily tasks can link to weekly or long-term goals.",
   "link_cycle_mismatch": "Move a Later idea into a long-term plan before linking it",
   "repeat_duration_required": "A focus block needs a duration before it can repeat",
   "invalid_duration": "Enter a valid duration.",

@@ -17,7 +17,7 @@ use crate::domain::cycle::{
     Cycle, CycleType, LifecycleAction, LifecycleState, LATER_CYCLE_ID, LONG_TERM_DURATIONS_MONTHS,
     WEEK_DURATION_MS,
 };
-use crate::domain::task::Task;
+use crate::domain::task::{is_empty_input_row, Task};
 use crate::error::{AppError, AppResult};
 use crate::repository::{cycles as repo, tasks as tasks_repo};
 use crate::service::{settings as settings_service, Mutation};
@@ -752,6 +752,27 @@ pub fn copy_uncompleted_from_previous(
         return Ok(Mutation::new(Vec::new()).touching_tasks(cycle_id));
     }
 
+    // The editor keeps one real blank row as the typing affordance. It may
+    // already exist when a new cycle is populated (for example, the editor
+    // creates it before the user chooses "copy unfinished"). Since the task
+    // tree is ordered by position, move those rows after the copied roots so
+    // the affordance remains at the bottom of the list.
+    // Include pending proposals while checking descendants: a committed blank
+    // row with a proposed child is content, not a typing affordance.
+    let target_tasks = tasks_repo::list_with_proposals_by_cycle(&tx, cycle_id)?;
+    let target_parent_ids: std::collections::HashSet<String> = target_tasks
+        .iter()
+        .filter_map(|task| task.parent_id.clone())
+        .collect();
+    let target_empty_rows: Vec<Task> = target_tasks
+        .into_iter()
+        .filter(|task| {
+            task.proposal.is_none()
+                && task.parent_id.is_none()
+                && is_empty_input_row(task)
+                && !target_parent_ids.contains(&task.id)
+        })
+        .collect();
     let source_ids: std::collections::HashSet<&str> =
         source.iter().map(|t| t.id.as_str()).collect();
     let mut id_map: HashMap<String, String> = HashMap::new();
@@ -802,6 +823,21 @@ pub fn copy_uncompleted_from_previous(
         let created_task = tasks_repo::require(&tx, &new_id)?;
         id_map.insert(original.id.clone(), new_id);
         created.push(created_task);
+    }
+    // Cross-cycle links have a parent_id outside this cycle and therefore are
+    // visual roots without matching `parent_id IS NULL`. Include every task
+    // position so the input row follows those roots too.
+    let mut next_empty_position = tasks_repo::list_with_proposals_by_cycle(&tx, cycle_id)?
+        .iter()
+        .map(|task| task.position)
+        .max()
+        .unwrap_or(-1)
+        + 1;
+    for empty_row in target_empty_rows {
+        let mut update = tasks_repo::TaskUpdate::empty();
+        update.position = Some(next_empty_position);
+        next_empty_position += 1;
+        tasks_repo::update(&tx, &empty_row.id, &update)?;
     }
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     Ok(Mutation::new(created).touching_tasks(cycle_id))

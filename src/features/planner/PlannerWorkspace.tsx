@@ -25,6 +25,7 @@ function currentCycle(cycles: Cycle[], selected: string | null, today: string): 
 
 const WORKSPACE_PANE_SELECTOR = "[data-workspace-scroll-pane]";
 const NATIVE_WHEEL_TARGET_SELECTOR = "input, textarea, select, [contenteditable=\"true\"], [role=\"menu\"], [role=\"listbox\"], [data-wheel-native]";
+type RevealTaskRequest = { cycleId: string; taskId: string; requestId: number };
 
 function eventTargetElement(target: EventTarget | null): Element | null {
   if (target instanceof Element) return target;
@@ -132,6 +133,8 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
   const navigationIntent = useRef<"week" | "day" | null>(null);
   const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null);
   const handledReveal = useRef<number | undefined>(undefined);
+  const locateRequestId = useRef(0);
+  const [locateRequest, setLocateRequest] = useState<RevealTaskRequest | undefined>(undefined);
   const [creating, setCreating] = useState(false);
   const { error, run, dismiss } = useActionError();
   const today = todayISO();
@@ -201,21 +204,37 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, [active, selectedTask]);
+  const revealForCycle = (cycleId: string) => locateRequest?.cycleId === cycleId ? locateRequest
+    : revealTask?.cycleId === cycleId ? revealTask : undefined;
+  useEffect(() => {
+    if (locateRequest && selectedTask === locateRequest.taskId) setLocateRequest(undefined);
+  }, [locateRequest, selectedTask]);
+  useEffect(() => {
+    if (revealTask && handledReveal.current !== revealTask.requestId) setLocateRequest(undefined);
+  }, [revealTask]);
   const locate = (id: string) => {
     const target = tasks.get(id);
-    if (target && cycleMap.get(target.cycle_id)?.type === "month") setSelectedMonth(target.cycle_id);
+    if (target && cycleMap.get(target.cycle_id)?.type === "month") {
+      setSelectedMonth(target.cycle_id);
+      // Issues use Date.now() request ids. Keep local requests in a separate
+      // namespace so a completed issue reveal cannot suppress this one.
+      setLocateRequest({ cycleId: target.cycle_id, taskId: id, requestId: -++locateRequestId.current });
+      return;
+    }
     const row = [...(viewportRef.current?.querySelectorAll<HTMLElement>("[data-task-id]") ?? [])].find((el) => el.dataset.taskId === id);
     row?.scrollIntoView({ block: "nearest", inline: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
     setSelectedTask(id);
   };
-  const selectMonth = (id: string) => { navigationIntent.current = null; setSelectedMonth(id); onActiveCycleChange?.(id); };
+  const selectMonth = (id: string) => { navigationIntent.current = null; setLocateRequest(undefined); setSelectedMonth(id); onActiveCycleChange?.(id); };
   const selectWeek = (date: string) => {
+    setLocateRequest(undefined);
     setSelectedWeekDate(date);
     setSelectedDayDate(date);
     const target = weeks.find((cycle) => cycle.starts_on === date);
     onActiveCycleChange?.(target?.id ?? null);
   };
   const selectDate = (date: string) => {
+    setLocateRequest(undefined);
     const owner = weekContainingDate(weeks, date, week?.id);
     setSelectedWeekDate(owner?.starts_on ?? weekStartForDate(date, weekStartDay));
     setSelectedDayDate(date);
@@ -280,7 +299,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
         <Horizon label={t("workspace.cycles")} cycles={months} selected={month?.id} onSelect={selectMonth}
           action={<button className="cycle-nav-add" onClick={() => setDurationOpen(true)}>+ {t("workspace.addCycle")}</button>} t={t}>
           <PlanTransition identity={month?.id ?? "month-empty"} ready={monthReady}>
-          {month ? <CycleColumn revealTask={revealTask} active={active} key={month.id} cycle={month} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(month.id)} /> :
+          {month ? <CycleColumn revealTask={revealForCycle(month.id)} active={active} key={month.id} cycle={month} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(month.id)} /> :
             <EmptyState title={t("workspace.emptyTitle")} description={t("workspace.emptyDescription")}
               action={<Button variant="primary" onClick={() => setDurationOpen(true)}>{t("workspace.setGoals")}</Button>} className="plan-card w-plan self-start overflow-hidden" />}
           </PlanTransition>
@@ -289,7 +308,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
           navigation={<WeekNavigation cycles={weeks} selectedDate={visibleWeekDate} today={today} weekStartDay={weekStartDay} active={active}
             onIntent={() => { navigationIntent.current = "week"; }} canCommit={() => navigationIntent.current === "week"} onSelect={selectWeek} />} t={t}>
           <PlanTransition identity={week?.id ?? visibleWeekDate} ready={panelsReady}>
-          {week ? <CycleColumn revealTask={revealTask} active={active} key={week.id} cycle={week} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(week.id)} /> :
+          {week ? <CycleColumn revealTask={revealForCycle(week.id)} active={active} key={week.id} cycle={week} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(week.id)} /> :
             <EmptyState title={formatDate(visibleWeekDate, { year: "numeric", month: "short", day: "numeric" })} description={weekHint}
               action={<Button disabled={creating} onClick={() => void createWeek()}>{t("workspace.createWeek")}</Button>} className="plan-card w-plan self-start overflow-hidden" />}
           </PlanTransition>
@@ -298,14 +317,14 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
           navigation={<DayNavigation selectedDate={visibleDate} today={today} active={active}
             onIntent={() => { navigationIntent.current = "day"; }} canCommit={() => navigationIntent.current === "day"} onSelect={selectDate} />} t={t}>
           <PlanTransition identity={day?.id ?? visibleDate} ready={panelsReady}>
-          {day ? <CycleColumn revealTask={revealTask} active={active} key={day.id} cycle={day} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(day.id)} /> :
+          {day ? <CycleColumn revealTask={revealForCycle(day.id)} active={active} key={day.id} cycle={day} relations={relations} onReviewIssues={onReviewIssues} onPlanWithAI={onPlanWithAI} onSelect={() => onActiveCycleChange?.(day.id)} /> :
             <EmptyState title={formatDate(visibleDate, { month: "short", day: "numeric", weekday: "long" })} description={dayHint}
               action={<Button disabled={creating} onClick={() => void createDay(visibleDate)}>{t("workspace.createDay")}</Button>} className="plan-card plan-enter w-[calc(var(--spacing-plan)+var(--spacing-panel))] self-start overflow-hidden" />}
           </PlanTransition>
         </Horizon>
       </div>
     </div>
-    <RelationLayer viewportRef={viewportRef} edges={edges} tasks={tasks} hidden={dragging} />
+    {settings?.show_relation_lines && <RelationLayer viewportRef={viewportRef} edges={edges} tasks={tasks} hidden={dragging} />}
     </div>
     {selected && <div className="connection-bar flex shrink-0 items-center gap-3 border-t border-light bg-content px-6 py-2 text-caption" aria-label={t("workspace.connections")}>
       <span className="shrink-0 font-medium text-secondary">{t("workspace.connections")}</span>
@@ -326,7 +345,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
 function Horizon({ label, cycles, selected, onSelect, action, navigation, children, t }: {
   label: string; cycles: Cycle[]; selected?: string; onSelect: (id: string) => void; action?: ReactNode; navigation?: ReactNode; children: ReactNode; t: (key: string, options?: Record<string, unknown>) => string;
 }) {
-  return <div className="flex h-full shrink-0 items-start gap-4">
+  return <div data-plan-horizon className="flex h-full shrink-0 items-start gap-4">
     {navigation ?? <nav aria-label={label} className="flex max-h-full min-h-0 w-[88px] shrink-0 flex-col gap-1 pt-1">
       <h2 className="workspace-scroll-heading mb-2 flex items-center justify-between gap-1 px-2 text-caption font-medium text-secondary">{label}<ScrollModeHint /></h2>
       <div data-workspace-scroll-pane className="min-h-0 overflow-y-auto">

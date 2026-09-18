@@ -46,7 +46,7 @@
   "invalid_week_start_day": "请选择星期一至星期日中的一天。",
   "issue_scope_too_large": "当前计划内容过多，请缩小检查范围。",
   "link_cycle_mismatch": "请先把稍后事务移入计划，再设置关联。",
-  "link_level_not_adjacent": "只能关联相邻层级：周任务关联长期目标，日任务关联周任务。",
+  "invalid_link_level": "周任务可关联长期目标，日任务可关联周目标或长期目标。",
   "link_to_self": "任务不能归属于自身。",
   "long_term_duration_required": "请为长期计划选择 1、3 或 6 个月。",
   "invalid_cycle_range": "结束日期必须晚于开始日期。",

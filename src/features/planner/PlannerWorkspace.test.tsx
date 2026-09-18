@@ -1,19 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { useEffect, useRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Cycle } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 const mocks = vi.hoisted(() => ({ getEditorWorkspace: vi.fn(), listSessions: vi.fn(), getPlannerState: vi.fn(), getEditorWorkspacesByCycleIds: vi.fn(), createPlanningCycle: vi.fn(), ensureDay: vi.fn(), getSettings: vi.fn() }));
 vi.mock("../../lib/ipc", async (original) => ({ ...(await original<typeof import("../../lib/ipc")>()), ...mocks }));
 vi.mock("./CycleColumn", () => ({
-  CycleColumn: ({ cycle }: { cycle: Cycle }) => (
-    <article>
-      <header data-testid={`header-${cycle.id}`} className="workspace-scroll-heading">
-        <span data-workspace-scroll-hint hidden data-testid={`hint-${cycle.id}`} />
-      </header>
-      <div data-testid={`pane-${cycle.id}`} data-workspace-scroll-pane className="overflow-y-auto" tabIndex={-1}>{cycle.id}</div>
-    </article>
-  ),
+  CycleColumn: ({ cycle, relations, revealTask }: { cycle: Cycle; relations?: { tasks: Map<string, { id: string; cycle_id: string }>; selectedId: string | null; select: (id: string) => void }; revealTask?: { cycleId: string; taskId: string; requestId: number } }) => {
+    const handled = useRef<number | undefined>(undefined);
+    useEffect(() => {
+      if (!revealTask || revealTask.cycleId !== cycle.id || handled.current === revealTask.requestId) return;
+      const row = document.querySelector<HTMLElement>(`[data-task-id="${revealTask.taskId}"]`);
+      if (!row) return;
+      handled.current = revealTask.requestId;
+      relations?.select(revealTask.taskId);
+      row.scrollIntoView({ block: "nearest", inline: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    }, [cycle.id, relations, revealTask]);
+    const rows = [...(relations?.tasks.values() ?? [])].filter((task) => task.cycle_id === cycle.id);
+    return (
+      <article>
+        <header data-testid={`header-${cycle.id}`} className="workspace-scroll-heading">
+          <span data-workspace-scroll-hint hidden data-testid={`hint-${cycle.id}`} />
+        </header>
+        <div data-testid={`pane-${cycle.id}`} data-workspace-scroll-pane className="overflow-y-auto" tabIndex={-1}>
+          {cycle.id}
+          {rows.map((task) => <div key={task.id} data-testid={`task-${task.id}`} data-task-id={task.id} data-selected={relations?.selectedId === task.id || undefined} onClick={() => relations?.select(task.id)}>{task.id}</div>)}
+        </div>
+      </article>
+    );
+  },
 }));
 vi.mock("./dates", async (original) => ({ ...(await original<typeof import("./dates")>()), todayISO: () => "2026-09-15" }));
 import { PlannerWorkspace } from "./PlannerWorkspace";
@@ -21,9 +37,12 @@ import { PLAN_TRANSITION_LEAVE_MS } from "./PlanTransition";
 function cycle(id: string, type: Cycle["type"], parent_id: string | null, starts_on: string, ends_on: string): Cycle {
   return { id, type, parent_id, starts_on, ends_on, position: 0, title: id, finished: false } as Cycle;
 }
+function relationTask(id: string, cycle_id: string, parent_id: string | null = null) {
+  return { id, cycle_id, parent_id, title: id, children: [], subtasks: [], completed: false } as never;
+}
 const cycles = [cycle("m1", "month", null, "2026-09-01", "2026-12-01"), cycle("m2", "month", null, "2026-12-01", "2027-03-01"), cycle("w1", "week", "m1", "2026-09-14", "2026-09-21"), cycle("w2", "week", "m1", "2026-09-21", "2026-09-28"), cycle("d1", "day", "w1", "2026-09-15", "2026-09-16"), cycle("d2", "day", "w2", "2026-09-22", "2026-09-23")];
 afterEach(() => vi.useRealTimers());
-beforeEach(() => { mocks.getEditorWorkspace.mockResolvedValue({ tasks: [], work_mix: null }); mocks.listSessions.mockResolvedValue([]); mocks.getSettings.mockResolvedValue({ week_start_day: 1, locale: "en", theme: "white" }); mocks.getPlannerState.mockResolvedValue({ cycles }); mocks.getEditorWorkspacesByCycleIds.mockResolvedValue({}); });
+beforeEach(() => { mocks.getEditorWorkspace.mockResolvedValue({ tasks: [], work_mix: null }); mocks.listSessions.mockResolvedValue([]); mocks.getSettings.mockResolvedValue({ week_start_day: 1, locale: "en", theme: "white", show_relation_lines: false }); mocks.getPlannerState.mockResolvedValue({ cycles }); mocks.getEditorWorkspacesByCycleIds.mockResolvedValue({}); });
 function workspaceElement(props: Partial<import("react").ComponentProps<typeof PlannerWorkspace>> = {}, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return <QueryClientProvider client={client}><PlannerWorkspace {...props} /></QueryClientProvider>;
 }
@@ -48,6 +67,15 @@ function dispatchMouseDown(target: HTMLElement, init: Partial<MouseEventInit> = 
   return event;
 }
 describe("time navigation", () => {
+  it("keeps relation lines off by default and responds to the shared settings preference", async () => {
+    const { client, container } = mount();
+    await screen.findByText("d1");
+    expect(container.querySelector("[data-relation-layer]")).toBeNull();
+    act(() => client.setQueryData(qk.settings(), { week_start_day: 1, locale: "en", theme: "white", show_relation_lines: true }));
+    await waitFor(() => expect(container.querySelector("[data-relation-layer]")).toBeTruthy());
+    act(() => client.setQueryData(qk.settings(), { week_start_day: 1, locale: "en", theme: "white", show_relation_lines: false }));
+    await waitFor(() => expect(container.querySelector("[data-relation-layer]")).toBeNull());
+  });
   const weekList = () => screen.getByRole("listbox", { name: "Weeks" });
   const dayList = () => screen.getByRole("listbox", { name: "Days" });
   const articles = () => screen.getAllByRole("article").map((node) => node.textContent);
@@ -120,6 +148,34 @@ describe("time navigation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Dec 1" }));
     await screen.findByTestId("header-m2");
     expect(articles()).toEqual(["m2", "w1", "d1"]);
+  });
+  it("reveals a related long-term task after its replacement panel mounts", async () => {
+    const goal = relationTask("goal", "m2");
+    const daily = relationTask("daily", "d1", "goal");
+    mocks.getEditorWorkspacesByCycleIds.mockResolvedValue({ m2: { tasks: [goal] }, d1: { tasks: [daily] } });
+    let resolveMonth!: (value: unknown) => void;
+    const monthReady = new Promise((resolve) => { resolveMonth = resolve; });
+    mocks.getEditorWorkspace.mockImplementation((id: string) => id === "m2" ? monthReady : Promise.resolve({ tasks: [], work_mix: null }));
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    mount();
+    await screen.findByTestId("task-daily");
+    fireEvent.click(screen.getByTestId("task-daily"));
+    const locate = await screen.findByRole("button", { name: /goal/i });
+    vi.useFakeTimers();
+    fireEvent.click(locate);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("task-goal")).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(PLAN_TRANSITION_LEAVE_MS));
+    expect(screen.queryByTestId("task-goal")).toBeNull();
+    await act(async () => { resolveMonth({ tasks: [goal], work_mix: null }); await Promise.resolve(); });
+    await act(() => vi.advanceTimersByTimeAsync(PLAN_TRANSITION_LEAVE_MS));
+    expect(screen.getByTestId("task-goal")).toBeTruthy();
+    await act(async () => { await Promise.resolve(); });
+    expect(scroll).toHaveBeenCalledWith({ block: "nearest", inline: "center", behavior: "smooth" });
+    expect(screen.getByTestId("task-goal").getAttribute("data-selected")).toBe("true");
+    vi.unstubAllGlobals();
   });
   it("smoothly falls back to the remaining long-term cycle after deletion", async () => {
     const mounted = mount();

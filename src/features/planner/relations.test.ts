@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Cycle, TaskNode } from "../../lib/ipc";
-import { canLink, directRelations, highlightedTasks, indexTasks, ROOT_PALETTE, taskColor } from "./relations";
+import { canAssignParent, canLink, dailyGoal, directRelations, highlightedTasks, indexTasks, ROOT_PALETTE, taskColor } from "./relations";
 const cycles = new Map([
   { id: "m", type: "month", parent_id: null }, { id: "w", type: "week", parent_id: "m" },
   { id: "d", type: "day", parent_id: "w" }, { id: "other", type: "week", parent_id: "elsewhere" },
@@ -10,11 +10,52 @@ const root = task("goal", "m", null, { root_color_key: "blue" });
 const week = task("weekly", "w", root.id);
 const day = task("daily", "d", week.id);
 describe("task ownership", () => {
-  it("links adjacent task levels independently of the container branch", () => {
+  it("resolves direct and weekly goal ownership through daily child steps", () => {
+    const step = task("step", "d", day.id);
+    const graph = indexTasks([[root], [week], [day, step]]);
+    expect(dailyGoal(step, graph, cycles)).toEqual({ goal: root, via: week });
+    graph.set(day.id, { ...day, parent_id: root.id });
+    expect(dailyGoal(step, graph, cycles)).toEqual({ goal: root, via: null });
+    const childGoal = task("goal-step", "m", root.id);
+    graph.set(childGoal.id, childGoal);
+    graph.set(day.id, { ...day, parent_id: childGoal.id });
+    expect(dailyGoal(step, graph, cycles)?.goal).toBe(childGoal);
+  });
+  it("does not invent long-term ownership for independent, broken or cyclic ancestry", () => {
+    const graph = indexTasks([[root], [{ ...week, parent_id: null }], [day]]);
+    expect(dailyGoal(day, graph, cycles)).toBeNull();
+    graph.set(week.id, { ...week, parent_id: day.id });
+    expect(dailyGoal(day, graph, cycles)).toBeNull();
+    expect(dailyGoal({ ...day, parent_id: "missing" }, graph, cycles)).toBeNull();
+    expect(dailyGoal(week, graph, cycles)).toBeNull();
+  });
+  it("links weekly and daily tasks to long-term goals independently of the container branch", () => {
     expect(canLink(week, root, cycles)).toBe(true);
     expect(canLink(day, week, cycles)).toBe(true);
-    expect(canLink(day, root, cycles)).toBe(false);
+    expect(canLink(day, root, cycles)).toBe(true);
+    expect(canLink(root, day, cycles)).toBe(false);
+    expect(canLink(week, day, cycles)).toBe(false);
     expect(canLink(task("unrelated", "other"), root, cycles)).toBe(true);
+  });
+  it("applies the weekly date constraint only to weekly parents", () => {
+    const dated = new Map(cycles);
+    dated.set("d", { ...cycles.get("d")!, starts_on: "2026-09-16" });
+    dated.set("w", { ...cycles.get("w")!, starts_on: "2026-09-01", ends_on: "2026-09-08" });
+    dated.set("m", { ...cycles.get("m")!, starts_on: "2026-10-01", ends_on: "2026-11-01" });
+    expect(canAssignParent(day, week, dated)).toBe(false);
+    expect(canAssignParent(day, root, dated)).toBe(true);
+    expect(canAssignParent(day, { ...root, proposal: "upsert" }, dated)).toBe(false);
+    expect(canAssignParent(day, { ...root, title: " " }, dated)).toBe(false);
+    dated.set("later", { ...dated.get("m")!, id: "later" });
+    expect(canAssignParent(day, { ...root, cycle_id: "later" }, dated)).toBe(false);
+  });
+  it("shows direct daily ownership and inherits its goal color through child steps", () => {
+    const step = task("step", "d", day.id);
+    const directDay = { ...day, parent_id: root.id, children: [step] };
+    const graph = indexTasks([[root], [week], [directDay]]);
+    expect(directRelations(directDay.id, graph, cycles).map(([a, b]) => [a.id, b.id])).toEqual([[root.id, day.id]]);
+    expect(highlightedTasks(root.id, graph, cycles)).toEqual(new Set([root.id, week.id, day.id, step.id]));
+    expect(taskColor(step, graph)).toBe(ROOT_PALETTE.blue);
   });
   it("inherits color through linked goals and same-cycle steps, updates on reassignment", () => {
     const step = task("step", "d", day.id);

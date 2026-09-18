@@ -20,6 +20,7 @@ fn generated_permissions_preserve_business_and_isolate_window_commands() {
         "get_planner_state",
         "get_settings",
         "set_theme",
+        "set_show_relation_lines",
         "get_ai_settings",
         "resolve_coach_task_preview",
     ] {

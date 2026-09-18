@@ -6,7 +6,7 @@
 
 Goal is a local-first personal planning app that keeps long-term goals, weekly plans, daily plans, and focus blocks on one continuous path. Tasks can exist independently or be linked to weekly and long-term goals; long-term goal colors carry through those relationships in Workspace and Calendar.
 
-The current target release is `v0.1.5`. The desktop app, window, system menus, and installers consistently use **Goal**.
+The current target release is `v0.1.6`. The desktop app, window, system menus, and installers consistently use **Goal**.
 
 ## Features
 
@@ -18,7 +18,7 @@ The current target release is `v0.1.5`. The desktop app, window, system menus, a
 - Review rule-based planning Issues; after configuring and testing a model, run AI checks and dismiss or locate issues one at a time.
 - Switch between Simplified Chinese and English, and configure the light theme, week start day, log level, and Coach context retention in Settings.
 
-Voice input, cloud sync, and automatic updates are not available in `v0.1.5`. The app has no account system or telemetry; AI requests are made only when a user configures and invokes a provider.
+Voice input, cloud sync, and automatic updates are not available in `v0.1.6`. The app has no account system or telemetry; AI requests are made only when a user configures and invokes a provider.
 
 ## Downloads
 

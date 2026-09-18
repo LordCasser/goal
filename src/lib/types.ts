@@ -264,6 +264,8 @@ export interface Settings {
   week_start_day: number | null;
   /** Preferred surface theme; null until first chosen (client defaults to white). */
   theme: Theme | null;
+  /** Whether relationship lines are shown in the planner; disabled by default. */
+  show_relation_lines: boolean;
 }
 
 /** The two user-confirmed light themes (design.md §4.4). */
