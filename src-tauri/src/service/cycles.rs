@@ -231,14 +231,168 @@ pub fn create_planning_cycle(
         .map_err(crate::error::from_rusqlite)?;
     }
     let created = repo::require(&tx, &new.id)?;
+    let imported = if matches!(kind, CycleType::Week | CycleType::Day)
+        && auto_carry_enabled(&tx)?
+    {
+        !copy_adjacent_unfinished_in_tx(&tx, &created, now, &HashMap::new())?.is_empty()
+    } else {
+        false
+    };
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
     let mut mutation = Mutation::new(created);
-    mutation.cycles.push(new.id);
+    mutation.cycles.push(new.id.clone());
     if let Some(parent) = parent_id {
         mutation.cycles.push(parent);
     }
+    if imported {
+        mutation.tasks.push(new.id);
+    }
     Ok(mutation)
+}
+
+fn auto_carry_enabled(conn: &Connection) -> AppResult<bool> {
+    Ok(crate::repository::settings::get(
+        conn,
+        crate::repository::settings::KEY_AUTO_CARRY_UNFINISHED,
+    )?
+    .as_deref()
+        == Some("true"))
+}
+
+/// Copies only the immediately adjacent period, preserving external links
+/// unless an explicitly imported weekly parent has a new identity.
+fn copy_adjacent_unfinished_in_tx(
+    conn: &Connection,
+    target: &Cycle,
+    now: i64,
+    external_parent_map: &HashMap<String, String>,
+) -> AppResult<HashMap<String, String>> {
+    let start = target
+        .starts_on
+        .as_deref()
+        .and_then(parse_date)
+        .ok_or_else(|| AppError::Internal("new dated cycle has no valid start".into()))?;
+    let source_key = match target.cycle_type {
+        CycleType::Week => week_key(calendar::add_days(start, -7)),
+        CycleType::Day => day_key(calendar::add_days(start, -1)),
+        _ => return Ok(HashMap::new()),
+    };
+    let Some(source_cycle) = repo::get_by_calendar_key(conn, &source_key)? else {
+        return Ok(HashMap::new());
+    };
+    if source_cycle.archived {
+        return Ok(HashMap::new());
+    }
+    let source = tasks_repo::list_visible_by_cycle(conn, &source_cycle.id)?;
+    let source_ids: std::collections::HashSet<&str> =
+        source.iter().map(|task| task.id.as_str()).collect();
+    let target_tasks = tasks_repo::list_visible_by_cycle(conn, &target.id)?;
+    let target_ids: std::collections::HashSet<String> =
+        target_tasks.iter().map(|task| task.id.clone()).collect();
+    let mut existing_keys: std::collections::HashSet<(String, Option<String>)> = target_tasks
+        .into_iter()
+        .filter(|task| {
+            !task.title.trim().is_empty()
+                && !task.parent_id.as_deref().is_some_and(|id| target_ids.contains(id))
+        })
+        .map(|task| (task.title.trim().to_string(), task.parent_id))
+        .collect();
+    let mut included = std::collections::HashSet::new();
+    for task in &source {
+        if task.completed || task.title.trim().is_empty()
+            || task.parent_id.as_deref().is_some_and(|id| source_ids.contains(id))
+        {
+            continue;
+        }
+        let target_parent = task.parent_id.as_ref().map(|id| {
+            external_parent_map.get(id).cloned().unwrap_or_else(|| id.clone())
+        });
+        if existing_keys.insert((task.title.trim().to_string(), target_parent)) {
+            included.insert(task.id.clone());
+        }
+    }
+    loop {
+        let mut added = false;
+        for task in &source {
+            if task.completed || task.title.trim().is_empty() || included.contains(&task.id) {
+                continue;
+            }
+            if task.parent_id.as_ref().is_some_and(|id| included.contains(id)) {
+                included.insert(task.id.clone());
+                added = true;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    let mut remaining: Vec<&Task> = source.iter().filter(|task| included.contains(&task.id)).collect();
+    let mut id_map = HashMap::new();
+    let mut next_root_position = tasks_repo::max_visible_root_position(conn, &target.id)? + 1;
+    while !remaining.is_empty() {
+        let mut deferred = Vec::new();
+        let mut copied_any = false;
+        for original in remaining {
+            let Some(parent_id) = original.parent_id.as_deref() else {
+                let new_id = uuid::Uuid::new_v4().to_string();
+                tasks_repo::insert(conn, &tasks_repo::NewTask {
+                    id: new_id.clone(),
+                    cycle_id: target.id.clone(),
+                    parent_id: None,
+                    title: original.title.clone(),
+                    subtasks: original.subtasks.clone(),
+                    position: next_root_position,
+                    completed: false,
+                    goal_breakdown: original.goal_breakdown.clone(),
+                    needs_refinement: original.needs_refinement,
+                    needs_breakdown: original.needs_breakdown,
+                    root_color_key: original.root_color_key.clone(),
+                    copied_from_task_id: Some(original.id.clone()),
+                    created_at: now,
+                })?;
+                next_root_position += 1;
+                id_map.insert(original.id.clone(), new_id);
+                copied_any = true;
+                continue;
+            };
+            if source_ids.contains(parent_id) && !id_map.contains_key(parent_id) {
+                deferred.push(original);
+                continue;
+            }
+            let parent_id = id_map.get(parent_id).or_else(|| external_parent_map.get(parent_id))
+                .cloned().unwrap_or_else(|| parent_id.to_string());
+            let is_child = source_ids.contains(original.parent_id.as_deref().unwrap());
+            let position = if is_child { original.position } else {
+                let position = next_root_position;
+                next_root_position += 1;
+                position
+            };
+            let new_id = uuid::Uuid::new_v4().to_string();
+            tasks_repo::insert(conn, &tasks_repo::NewTask {
+                id: new_id.clone(),
+                cycle_id: target.id.clone(),
+                parent_id: Some(parent_id),
+                title: original.title.clone(),
+                subtasks: original.subtasks.clone(),
+                position,
+                completed: false,
+                goal_breakdown: original.goal_breakdown.clone(),
+                needs_refinement: original.needs_refinement,
+                needs_breakdown: original.needs_breakdown,
+                root_color_key: original.root_color_key.clone(),
+                copied_from_task_id: Some(original.id.clone()),
+                created_at: now,
+            })?;
+            id_map.insert(original.id.clone(), new_id);
+            copied_any = true;
+        }
+        if !copied_any {
+            return Err(AppError::Internal("cycle detected in copied task tree".into()));
+        }
+        remaining = deferred;
+    }
+    Ok(id_map)
 }
 
 pub(crate) fn next_cycle_position(conn: &Connection, parent_id: Option<&str>) -> AppResult<i64> {
@@ -266,6 +420,49 @@ pub fn get_or_create_day(db: &Db, date: NaiveDate, now: i64) -> AppResult<Mutati
     if !generated.is_empty() {
         mutation.tasks.push(day.id);
     }
+    Ok(mutation)
+}
+
+/// Explicit user creation path. Shared ensure helpers stay free of carry-over
+/// effects because Later promotion and calendar moves call them too.
+pub fn create_day_plan(db: &Db, date: NaiveDate, now: i64) -> AppResult<Mutation<Cycle>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let week_start_day = settings_service::week_start_day_or_default(&tx)? as u32;
+    let date_str = format_date(date);
+    let day_existed = get_day_by_date(&tx, &date_str)?.is_some();
+    let week_existed = find_covering_cycle(&tx, CycleType::Week, &date_str)?.is_some();
+    let day = get_or_create_day_in_tx(&tx, date, week_start_day, now)?;
+    let generated = crate::service::repeats::generate_for_day_in_tx(&tx, &day.id, now)?;
+    let mut mutation = Mutation::new(day.clone()).touching_cycle(day.id.clone());
+    let mut week_id = None;
+    if let Some(parent_id) = day.parent_id.as_deref() {
+        mutation.cycles.push(parent_id.to_string());
+        week_id = Some(parent_id.to_string());
+    }
+    if !generated.is_empty() {
+        mutation.tasks.push(day.id.clone());
+    }
+    if auto_carry_enabled(&tx)? && !day_existed {
+        let week_map = if !week_existed {
+            if let Some(parent_id) = week_id.as_deref() {
+                let week = repo::require(&tx, parent_id)?;
+                let map = copy_adjacent_unfinished_in_tx(&tx, &week, now, &HashMap::new())?;
+                if !map.is_empty() {
+                    mutation.tasks.push(parent_id.to_string());
+                }
+                map
+            } else {
+                HashMap::new()
+            }
+        } else {
+            HashMap::new()
+        };
+        if !copy_adjacent_unfinished_in_tx(&tx, &day, now, &week_map)?.is_empty() {
+            mutation.tasks.push(day.id.clone());
+        }
+    }
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
     Ok(mutation)
 }
 
@@ -652,6 +849,42 @@ pub fn delete_cycle_confirmed(
     confirmation_token: Option<&str>,
 ) -> AppResult<Mutation<()>> {
     delete_cycle_inner(db, cycle_id, confirmation_token, true)
+}
+
+/// Remove the focus blocks currently shown on one day as one transaction.
+/// The expected IDs prevent a stale calendar menu from silently deleting new blocks.
+pub fn delete_day_focus_blocks(
+    db: &Db,
+    day_cycle_id: &str,
+    expected_ids: &[String],
+) -> AppResult<Mutation<usize>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let day = repo::require(&tx, day_cycle_id)?;
+    if day.cycle_type != CycleType::Day {
+        return Err(AppError::validation("invalid_parent_type", "Focus blocks belong to a day plan"));
+    }
+    let sessions = repo::list_sessions_by_day(&tx, day_cycle_id)?;
+    let mut actual: Vec<_> = sessions.iter().map(|session| session.id.clone()).collect();
+    let mut expected = expected_ids.to_vec();
+    actual.sort();
+    expected.sort();
+    if actual != expected {
+        return Err(AppError::conflict("day_content_changed", "The day's focus blocks changed; review the day and try again"));
+    }
+    let mut mutation = Mutation::new(sessions.len()).touching_cycle(day_cycle_id);
+    for session in sessions {
+        crate::service::proposals::ensure_cycle_tree_unlocked(&tx, &session.id)?;
+        let impact = crate::service::deletion::cycle_impact(&tx, &session.id)?;
+        for task_id in &impact.task_ids {
+            crate::service::tasks::ensure_task_editable(&tx, task_id, true)?;
+        }
+        let changes = crate::service::deletion::prepare_deletion(&tx, &impact)?;
+        repo::delete(&tx, &session.id)?;
+        mutation.merge(changes);
+    }
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    Ok(mutation)
 }
 
 fn delete_cycle_inner(

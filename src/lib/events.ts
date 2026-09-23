@@ -3,8 +3,8 @@
  *
  * Events are invalidation notices only (src-tauri/src/events.rs): payloads
  * name cycles and never carry business data, so the database stays the single
- * source of truth (docs/architecture.md, decision D4). Only drag reordering
- * gets optimistic updates; everything else waits for these notices.
+ * source of truth (docs/architecture.md, decision D4). Query invalidation
+ * refreshes task data after writes.
  *
  * Query key convention — feature modules MUST use the factories below and
  * never hand-write key arrays; the invalidation logic matches on these shapes:
@@ -46,6 +46,7 @@ export interface CycleIdPayload {
 export const qk = {
   plannerState: () => ["planner-state"] as const,
   editorWorkspace: (cycleId: string) => ["editor-workspace", cycleId] as const,
+  taskContinuity: (taskId: string) => ["task-continuity", taskId] as const,
   editorWorkspaces: (cycleIds: string[]) => ["editor-workspaces", cycleIds] as const,
   previewSummary: (cycleId: string) => ["preview-summary", cycleId] as const,
   sessions: (dayCycleId: string) => ["sessions", dayCycleId] as const,
@@ -120,7 +121,7 @@ export async function initEventInvalidation(queryClient: QueryClient): Promise<(
 /** A tool turn may stage edits in another cycle, including before an error.
  * Invalidate existing projections after every settled turn; no second state store. */
 export function invalidateAgentEffects(queryClient: QueryClient): void {
-  for (const root of ["planner-state", "editor-workspace", "editor-workspaces", "preview-summary", "issue-report", "agent-actions", "settings", "app-flag", "ai-settings", "ai-availability", "agent-conversation", "sessions", "calendar", "calendar-range", "schedule-overlaps", "reminders", "repeats", "time-budget", "daily-capacity"]) {
+  for (const root of ["planner-state", "editor-workspace", "editor-workspaces", "task-continuity", "preview-summary", "issue-report", "agent-actions", "settings", "app-flag", "ai-settings", "ai-availability", "agent-conversation", "sessions", "calendar", "calendar-range", "schedule-overlaps", "reminders", "repeats", "time-budget", "daily-capacity"]) {
     void queryClient.invalidateQueries({ queryKey: [root] });
   }
 }
@@ -137,6 +138,7 @@ function invalidateCycles(
   // Length-1 root prefix-matches every batch key built by qk.editorWorkspaces.
   queryClient.invalidateQueries({ queryKey: ["editor-workspaces"] });
   if (opts.taskWrites) queryClient.invalidateQueries({ queryKey: ["editor-workspace"] });
+  if (opts.taskWrites) queryClient.invalidateQueries({ queryKey: ["task-continuity"] });
   for (const cycleId of cycleIds) {
     queryClient.invalidateQueries({ queryKey: qk.editorWorkspace(cycleId) });
     // Session mutations (add/start/finish/repeat) emit cycles:changed for the

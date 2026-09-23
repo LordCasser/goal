@@ -24,6 +24,7 @@ function task(id: string, title: string, cycle_id: string, over: Partial<TaskNod
     cycle_id,
     parent_id: null,
     title,
+    note: "",
     subtasks: [],
     position: 0,
     completed: false,

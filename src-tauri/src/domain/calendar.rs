@@ -88,6 +88,11 @@ pub fn add_days(date: NaiveDate, days: i64) -> NaiveDate {
     date + Duration::days(days)
 }
 
+/// Number of local calendar dates in the closed interval [start, end].
+pub fn inclusive_span_days(start: NaiveDate, end: NaiveDate) -> i64 {
+    (end - start).num_days() + 1
+}
+
 pub fn day_key(date: NaiveDate) -> String {
     format!("{}{}", DAY_KEY_PREFIX, format_date(date))
 }

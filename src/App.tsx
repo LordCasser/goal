@@ -15,6 +15,7 @@ import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { getSettings, startPlanning, type AgentPageContext } from "./lib/ipc";
 import { completeAgentTurn, initEventInvalidation, invalidateAgentEffects, qk } from "./lib/events";
 import { PanelMotion } from "./ui/PanelMotion";
+import { AppContextMenu } from "./ui/AppContextMenu";
 import { applyTheme, isTheme } from "./lib/theme";
 import { applyLocale, isLocale } from "./lib/i18n";
 
@@ -198,6 +199,7 @@ export default function App() {
           if (resolution !== "continued") window.close();
         }}
       />
+      <AppContextMenu onOpenSettings={() => setSettingsOpen(true)} />
     </div>
   );
 }

@@ -139,7 +139,7 @@ describe("time navigation", () => {
     await screen.findByText("m1");
     fireEvent.click(within(weekList()).getByRole("option", { name: /W39/ }));
     await screen.findByText("w2");
-    expect(articles()).toEqual(["m1", "w2"]);
+    await waitFor(() => expect(articles()).toEqual(["m1", "w2"]));
     expect(screen.getByRole("button", { name: "Create daily plan" })).toBeTruthy();
     expect(mocks.ensureDay).not.toHaveBeenCalled();
   });

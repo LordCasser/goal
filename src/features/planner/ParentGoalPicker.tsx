@@ -32,7 +32,7 @@ export function ParentGoalPicker({ task, relations, locked, nested, descriptionI
     setSaving(false);
   };
   return <>
-    <button ref={anchorRef} type="button" className="task-color-control"
+    <button ref={anchorRef} type="button" data-parent-picker className="task-color-control"
       aria-label={parent ? t("parent.change", { title: task.title }) : t("parent.link", { title: task.title, parent: parentLabel })}
       aria-describedby={descriptionId}
       title={dailyGoal(task, relations.tasks, relations.cycles) ? undefined : parent ? t("parent.linked", { title: parent.title }) : t("parent.linkA", { parent: parentLabel })}

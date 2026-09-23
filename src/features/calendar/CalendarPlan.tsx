@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Cycle, EditorWorkspace, TaskNode } from "../../lib/ipc";
 import { Button, cn } from "../../ui";
 import { TaskList } from "../planner/TaskList";
@@ -40,14 +41,20 @@ export function CalendarPlan({ active = true, date, day, cycles, workspaces, rel
   };
   collectGoals([...weeklyTasks, ...dailyTasks]);
   const goalRow = (task: TaskNode) => <button key={task.id} type="button" title={task.title}
+    data-goal-row={task.id}
+    data-related={relations.highlighted.has(task.id) || undefined}
+    data-selected={relations.selectedId === task.id || undefined}
+    style={{ "--task-color": taskColor(task, relations.tasks) ?? "var(--color-focus)" } as CSSProperties}
     aria-label={t("calendar.showConnections", { title: task.title })} onClick={() => relations.select(task.id)}
-    className={cn("flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-menu hover:bg-hover",
-      relations.highlighted.has(task.id) && "bg-focus-surface", task.completed && "text-hint line-through")}>
+    onMouseEnter={() => relations.preview(task.id)} onMouseLeave={() => relations.preview(null)}
+    className={cn("task-row flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-menu hover:bg-hover focus-visible:outline-2 focus-visible:outline-focus",
+      task.completed && "text-hint line-through")}>
     <span className="task-color-slot mt-0.5 shrink-0" aria-hidden="true" style={{ backgroundColor: taskColor(task, relations.tasks) ?? "transparent", borderColor: taskColor(task, relations.tasks) ?? undefined }} />
     <span>{task.title}</span>
   </button>;
 
-  return <div className="min-h-0 flex-1 overflow-y-auto" aria-label={t("calendar.dayPlan", { date: displayDate })}>
+  return <div className="min-h-0 flex-1 overflow-y-auto" aria-label={t("calendar.dayPlan", { date: displayDate })}
+    onClick={(event) => { if (relations.selectedId && !(event.target as HTMLElement).closest("[data-task-id], [data-goal-row], button, textarea, input")) relations.select(relations.selectedId); }}>
     <section className="plan-ai-scope pb-4">
       <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.06em] text-secondary">{t("calendar.dailyTasks")}</h3>
       {day ? <TaskList active={active} key={day.id} cycleId={day.id} cycleType="day" locked={day.finished} relations={relations}

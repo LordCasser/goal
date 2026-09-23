@@ -10,7 +10,7 @@ const root = { id: "goal", title: "Launch the product", cycle_id: "m", root_colo
 const week = { id: "weekly", title: "Validate prototype", cycle_id: "w", parent_id: null, children: [] } as unknown as TaskNode;
 const day = { ...week, id: "daily", title: "Interview users", cycle_id: "d" };
 function mount(task = week, options = { locked: false, nested: false }) {
-  const relations: RelationView = { tasks: new Map([[root.id, root], [week.id, week], [task.id, task]]), cycles: new Map([["m", { id: "m", type: "month" } as Cycle], ["w", { id: "w", type: "week", parent_id: "m" } as Cycle], ["d", { id: "d", type: "day", parent_id: "w" } as Cycle]]), selectedId: null, highlighted: new Set(), select: vi.fn(), preview: vi.fn(), setDragging: vi.fn() };
+  const relations: RelationView = { tasks: new Map([[root.id, root], [week.id, week], [task.id, task]]), cycles: new Map([["m", { id: "m", type: "month" } as Cycle], ["w", { id: "w", type: "week", parent_id: "m" } as Cycle], ["d", { id: "d", type: "day", parent_id: "w" } as Cycle]]), selectedId: null, highlighted: new Set(), select: vi.fn(), preview: vi.fn() };
   render(<QueryClientProvider client={new QueryClient()}><ParentGoalPicker task={task} relations={relations} {...options} /></QueryClientProvider>);
   fireEvent.click(screen.getByRole("button"));
   return relations;

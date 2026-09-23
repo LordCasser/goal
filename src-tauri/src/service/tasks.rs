@@ -5,10 +5,123 @@ use rusqlite::Connection;
 
 use crate::db::Db;
 use crate::domain::cycle::{CycleType, LATER_CYCLE_ID};
-use crate::domain::task::{is_valid_root_color_key, Subtask, Task};
+use crate::domain::calendar;
+use crate::domain::task::{is_empty_input_row, is_valid_root_color_key, Subtask, Task};
 use crate::error::{AppError, AppResult};
 use crate::repository::{cycles as cycles_repo, tasks as repo};
 use crate::service::Mutation;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DatedTaskRecord {
+    pub task_id: String,
+    pub date: String,
+    pub note: String,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TaskEpisode {
+    pub started_on: String,
+    pub last_recorded_on: String,
+    pub completed: bool,
+    pub elapsed_days: i64,
+    pub recorded_days: usize,
+    pub records: Vec<DatedTaskRecord>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TaskContinuity {
+    pub title: String,
+    pub parent_goal_id: Option<String>,
+    pub selected_episode_index: usize,
+    pub episodes: Vec<TaskEpisode>,
+}
+
+/// Read-only projection of all episodes sharing the selected daily root's
+/// current title and direct goal link. Completion closes a whole date bucket.
+pub fn get_task_continuity(db: &Db, task_id: &str) -> AppResult<Option<TaskContinuity>> {
+    let conn = db.pool().get()?;
+    let selected = repo::require(&conn, task_id)?;
+    let cycle = cycles_repo::require(&conn, &selected.cycle_id)?;
+    if cycle.cycle_type != CycleType::Day
+        || cycle.archived
+        || selected.proposal.is_some()
+        || selected.title.trim().is_empty()
+    {
+        return Ok(None);
+    }
+    if let Some(parent_id) = selected.parent_id.as_deref() {
+        let parent = repo::require(&conn, parent_id)?;
+        if parent.cycle_id == selected.cycle_id {
+            return Ok(None);
+        }
+    }
+    let title = selected.title.trim();
+    let mut records: Vec<DatedTaskRecord> = repo::list_dated_daily_roots(&conn)?
+        .into_iter()
+        .filter(|(_, task)| {
+            task.title.trim() == title && task.parent_id == selected.parent_id
+        })
+        .map(|(date, task)| DatedTaskRecord {
+            task_id: task.id,
+            date,
+            note: task.note,
+            completed: task.completed,
+        })
+        .collect();
+    records.sort_by(|a, b| a.date.cmp(&b.date).then(a.task_id.cmp(&b.task_id)));
+
+    let mut episodes = Vec::new();
+    let mut current: Vec<DatedTaskRecord> = Vec::new();
+    let mut current_date = String::new();
+    for record in records {
+        if !current.is_empty() && record.date != current_date
+            && current.iter().any(|item| item.date == current_date && item.completed)
+        {
+            episodes.push(build_episode(std::mem::take(&mut current))?);
+        }
+        current_date = record.date.clone();
+        current.push(record);
+    }
+    if !current.is_empty() {
+        episodes.push(build_episode(current)?);
+    }
+    let selected_episode_index = episodes
+        .iter()
+        .position(|episode: &TaskEpisode| episode.records.iter().any(|r| r.task_id == task_id))
+        .ok_or_else(|| AppError::Internal("selected daily task is absent from continuity".into()))?;
+    Ok(Some(TaskContinuity {
+        title: title.to_string(),
+        parent_goal_id: selected.parent_id,
+        selected_episode_index,
+        episodes,
+    }))
+}
+
+fn build_episode(records: Vec<DatedTaskRecord>) -> AppResult<TaskEpisode> {
+    let started_on = records.first().expect("nonempty episode").date.clone();
+    let last_recorded_on = records.last().expect("nonempty episode").date.clone();
+    let start = calendar::parse_date(&started_on)
+        .ok_or_else(|| AppError::Internal("invalid saved daily date".into()))?;
+    let end = calendar::parse_date(&last_recorded_on)
+        .ok_or_else(|| AppError::Internal("invalid saved daily date".into()))?;
+    let completed = records
+        .iter()
+        .any(|record| record.date == last_recorded_on && record.completed);
+    let recorded_days = records
+        .iter()
+        .map(|record| record.date.as_str())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    Ok(TaskEpisode {
+        started_on,
+        last_recorded_on,
+        completed,
+        elapsed_days: calendar::inclusive_span_days(start, end),
+        recorded_days,
+        records,
+    })
+}
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct AddTaskArgs {
@@ -173,6 +286,7 @@ pub fn add_task(db: &Db, args: &AddTaskArgs, now: i64) -> AppResult<Mutation<Tas
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct TaskPatch {
     pub title: Option<String>,
+    pub note: Option<String>,
     pub subtasks: Option<Vec<Subtask>>,
     pub completed: Option<bool>,
     pub goal_breakdown: Option<serde_json::Value>,
@@ -201,6 +315,7 @@ fn apply_patch(
 ) -> AppResult<Task> {
     let mut update = repo::TaskUpdate::empty();
     update.title = patch.title.clone();
+    update.note = patch.note.clone();
     update.subtasks = patch.subtasks.clone();
     update.completed = patch.completed;
     update.goal_breakdown = patch.goal_breakdown.clone().map(Some);
@@ -402,6 +517,16 @@ fn move_task_in_tx(
     repo::update(conn, task_id, &update)?;
 
     let task = repo::require(conn, task_id)?;
+    if existing.cycle_id == LATER_CYCLE_ID && target_cycle_id != LATER_CYCLE_ID {
+        let has_same_cycle_parent = match task.parent_id.as_deref() {
+            Some(parent_id) => repo::get(conn, parent_id)?
+                .is_some_and(|parent| parent.cycle_id == target_cycle_id),
+            None => false,
+        };
+        if !has_same_cycle_parent {
+            move_empty_input_rows_to_bottom(conn, target_cycle_id)?;
+        }
+    }
     let mut mutation = Mutation::new(task).touching_tasks(target_cycle_id);
     if !unlinked_sessions.is_empty() {
         mutation.cycles.push(&existing.cycle_id);
@@ -411,6 +536,74 @@ fn move_task_in_tx(
     }
     mutation.tasks.push(existing.cycle_id);
     Ok(mutation)
+}
+
+/// Keep the editor's blank input rows after visible root content when a Later
+/// item enters a plan. Rows with children or pending proposals are content.
+fn move_empty_input_rows_to_bottom(conn: &Connection, cycle_id: &str) -> AppResult<()> {
+    let tasks = repo::list_with_proposals_by_cycle(conn, cycle_id)?;
+    let parent_ids: std::collections::HashSet<&str> = tasks
+        .iter()
+        .filter_map(|task| task.parent_id.as_deref())
+        .collect();
+    let by_id: std::collections::HashMap<&str, &Task> = tasks
+        .iter()
+        .map(|task| (task.id.as_str(), task))
+        .collect();
+    let visible_roots: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| {
+            task.parent_id
+                .as_deref()
+                .and_then(|parent_id| by_id.get(parent_id))
+                .is_none_or(|parent| parent.cycle_id != cycle_id)
+        })
+        .collect();
+    let empty_rows: Vec<&Task> = visible_roots
+        .iter()
+        .copied()
+        .filter(|task| {
+            task.proposal.is_none()
+                && task.parent_id.is_none()
+                && is_empty_input_row(task)
+                && !parent_ids.contains(task.id.as_str())
+        })
+        .collect();
+    let content_roots: Vec<&Task> = visible_roots
+        .iter()
+        .copied()
+        .filter(|task| {
+            task.proposal.is_some()
+                || !is_empty_input_row(task)
+                || parent_ids.contains(task.id.as_str())
+        })
+        .collect();
+    if empty_rows.is_empty() {
+        return Ok(());
+    }
+    let empty_row_precedes_content = empty_rows.iter().any(|empty_row| {
+        content_roots.iter().any(|content| {
+            (empty_row.position, empty_row.created_at, empty_row.id.as_str())
+                < (content.position, content.created_at, content.id.as_str())
+        })
+    });
+    if !empty_row_precedes_content {
+        return Ok(());
+    }
+
+    let mut next_position = content_roots
+        .iter()
+        .map(|task| task.position)
+        .max()
+        .unwrap_or(-1)
+        + 1;
+    for empty_row in empty_rows {
+        let mut update = repo::TaskUpdate::empty();
+        update.position = Some(next_position);
+        next_position += 1;
+        repo::update(conn, &empty_row.id, &update)?;
+    }
+    Ok(())
 }
 
 /// Arrange a parked task at its recorded level. Resolve calendar identities and

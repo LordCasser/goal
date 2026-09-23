@@ -181,6 +181,91 @@ fn independent_weeks_copy_unfinished_tasks_from_the_previous_date() {
 }
 
 #[test]
+fn notes_are_per_occurrence_and_survive_move_and_agent_previews() {
+    let db = TestDb::open();
+    let week_args = CreateCycleArgs {
+        cycle_type: "week".into(),
+        ..Default::default()
+    };
+    let first = cycles::create_planning_cycle(&db.db, &week_args, common::today(), NOW)
+        .unwrap()
+        .value;
+    let source = add_task(&db.db, &first.id, "Recurring work", NOW);
+    tasks::patch_task(
+        &db.db,
+        &source.id,
+        &tasks::TaskPatch {
+            note: Some("Monday progress".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let next = cycles::create_planning_cycle(
+        &db.db,
+        &week_args,
+        planner_lib::domain::calendar::add_days(common::today(), 7),
+        NOW + 1,
+    )
+    .unwrap()
+    .value;
+    let copy = cycles::copy_uncompleted_from_previous(&db.db, &next.id, NOW + 2)
+        .unwrap()
+        .value
+        .remove(0);
+    assert!(copy.note.is_empty());
+    assert_eq!(
+        planner_lib::repository::tasks::require(&db.conn(), &source.id)
+            .unwrap()
+            .note,
+        "Monday progress"
+    );
+    tasks::patch_task(
+        &db.db,
+        &copy.id,
+        &tasks::TaskPatch {
+            note: Some("Tuesday progress".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let moved = tasks::move_task(
+        &db.db,
+        &copy.id,
+        planner_lib::domain::cycle::LATER_CYCLE_ID,
+        None,
+    )
+    .unwrap()
+    .value;
+    assert_eq!(moved.note, "Tuesday progress");
+
+    let month = create_long_term(&db.db, TODAY, 1);
+    let goal = add_task(&db.db, &month.id, "Goal", NOW);
+    tasks::patch_task(
+        &db.db,
+        &goal.id,
+        &tasks::TaskPatch {
+            note: Some("Private detail".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    proposals::apply_update_preview(&db.db, &goal.id, &input("AI title")).unwrap();
+    assert_eq!(
+        planner_lib::repository::tasks::require(&db.conn(), &goal.id)
+            .unwrap()
+            .note,
+        "Private detail"
+    );
+    proposals::undo_task_preview(&db.db, &goal.id).unwrap();
+    assert_eq!(
+        planner_lib::repository::tasks::require(&db.conn(), &goal.id)
+            .unwrap()
+            .note,
+        "Private detail"
+    );
+}
+
+#[test]
 fn work_mix_counts_real_commitments_and_follows_optional_goal_links() {
     use planner_lib::service::editor;
     let db = TestDb::open();
@@ -1386,6 +1471,11 @@ fn coach_preview_locks_only_affected_tasks_and_rejection_restores_the_exact_tree
         ..Default::default()
     };
     assert!(tasks::patch_task(&db.db, &root.id, &patch).is_err());
+    assert!(tasks::patch_task(
+        &db.db,
+        &root.id,
+        &tasks::TaskPatch { note: Some("blocked".into()), ..Default::default() },
+    ).is_err());
     assert!(tasks::delete_task(&db.db, &root.id).is_err());
     assert!(tasks::set_task_root_color(&db.db, &root.id, Some("blue")).is_err());
     assert!(tasks::move_task(&db.db, &root.id, &month.id, None).is_err());
@@ -1415,4 +1505,33 @@ fn coach_preview_locks_only_affected_tasks_and_rejection_restores_the_exact_tree
     proposals::apply_update_preview(&db.db, &root.id, &input("Confirmed title")).unwrap();
     proposals::keep_task_preview(&db.db, &root.id).unwrap();
     tasks::patch_task(&db.db, &root.id, &patch).unwrap();
+}
+
+#[test]
+fn ended_plan_note_is_readable_but_cannot_be_changed() {
+    let db = TestDb::open();
+    let week = cycles::create_planning_cycle(
+        &db.db,
+        &CreateCycleArgs { cycle_type: "week".into(), ..Default::default() },
+        common::today(),
+        NOW,
+    )
+    .unwrap()
+    .value;
+    let task = add_task(&db.db, &week.id, "Read-only note", NOW);
+    tasks::patch_task(
+        &db.db,
+        &task.id,
+        &tasks::TaskPatch { note: Some("Saved detail".into()), ..Default::default() },
+    )
+    .unwrap();
+    cycles::start_cycle(&db.db, &week.id, NOW + 1).unwrap();
+    cycles::finish_cycle(&db.db, &week.id, NOW + 2).unwrap();
+    let stored = planner_lib::repository::tasks::require(&db.conn(), &task.id).unwrap();
+    assert_eq!(stored.note, "Saved detail");
+    assert!(tasks::patch_task(
+        &db.db,
+        &task.id,
+        &tasks::TaskPatch { note: Some("New detail".into()), ..Default::default() },
+    ).is_err());
 }

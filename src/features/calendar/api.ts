@@ -77,6 +77,8 @@ const commands = {
   getCalendarRange: "get_calendar_range",
   moveDayCycle: "move_day_cycle",
   setSessionSchedule: "set_session_schedule",
+  deleteDayFocusBlocks: "delete_day_focus_blocks",
+  clearDaySchedules: "clear_day_schedules",
   getScheduleOverlaps: "get_schedule_overlaps",
   getTimeBudget: "get_time_budget",
 } as const;
@@ -106,6 +108,14 @@ export function setSessionSchedule(
     startsAt: starts_at,
     durationMs: duration_ms,
   });
+}
+
+export function deleteDayFocusBlocks(day_cycle_id: string, expected_ids: string[]): Promise<number> {
+  return invoke<number>(commands.deleteDayFocusBlocks, { dayCycleId: day_cycle_id, expectedIds: expected_ids });
+}
+
+export function clearDaySchedules(day_cycle_id: string, expected_ids: string[]): Promise<number> {
+  return invoke<number>(commands.clearDaySchedules, { dayCycleId: day_cycle_id, expectedIds: expected_ids });
 }
 
 /** 某日全部重叠排期对（纯查询，后端不改数据）。 */

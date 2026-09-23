@@ -632,6 +632,42 @@ pub fn set_session_schedule(
     Ok(mutation)
 }
 
+/// Clear every scheduled slot on a day while keeping blocks and durations.
+/// The expected IDs make the confirmation apply to precisely the visible set.
+pub fn clear_day_schedules(
+    db: &Db,
+    day_cycle_id: &str,
+    expected_ids: &[String],
+) -> AppResult<Mutation<usize>> {
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction().map_err(|e| AppError::Db(e.to_string()))?;
+    let day = repo::require(&tx, day_cycle_id)?;
+    if day.cycle_type != CycleType::Day {
+        return Err(AppError::validation("invalid_parent_type", "Schedules belong to a day plan"));
+    }
+    cycles_service::ensure_cycle_mutable(&day)?;
+    let schedules = repo::list_scheduled_in_day(&tx, day_cycle_id)?;
+    let mut actual: Vec<_> = schedules.iter().map(|row| row.session_id.clone()).collect();
+    let mut expected = expected_ids.to_vec();
+    actual.sort();
+    expected.sort();
+    if actual != expected {
+        return Err(AppError::conflict("day_content_changed", "The day's schedules changed; review the day and try again"));
+    }
+    let mut mutation = Mutation::new(schedules.len()).touching_cycle(day_cycle_id);
+    for row in schedules {
+        let session = repo::require(&tx, &row.session_id)?;
+        if session.started {
+            return Err(AppError::conflict("cycle_started", "A started focus block cannot change its schedule"));
+        }
+        cycles_service::ensure_cycle_mutable(&session)?;
+        repo::set_session_schedule(&tx, &session.id, None, None)?;
+        mutation.cycles.push(session.id);
+    }
+    tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    Ok(mutation)
+}
+
 /// All overlapping schedule pairs of one day, as a query result. Nothing is
 /// moved, merged or deleted: conflicting blocks both stay and the timeline
 /// renders them as overlapping (spec: 时间冲突).
@@ -1605,6 +1641,46 @@ mod tests {
             "cycle_ended"
         );
         assert!(is_scheduled(&f.db, &block.id));
+    }
+
+    #[test]
+    fn bulk_clear_schedules_preserves_blocks_and_rejects_a_stale_or_started_set() {
+        let (f, _month, week) = fixture_with_week();
+        let day = create_day(&f.db, &week.id, TODAY);
+        let first = add_block(&f.db, &day.id, "first", 25);
+        let second = add_block(&f.db, &day.id, "second", 30);
+        set_session_schedule(&f.db, &first.id, Some(NOW), None).unwrap();
+        set_session_schedule(&f.db, &second.id, Some(NOW + 3_600_000), None).unwrap();
+        assert_eq!(conflict_code(clear_day_schedules(&f.db, &day.id, &[first.id.clone()])), "day_content_changed");
+        assert!(is_scheduled(&f.db, &first.id));
+        assert!(is_scheduled(&f.db, &second.id));
+        cycles_service::start_cycle(&f.db, &second.id, NOW).unwrap();
+        let both = vec![first.id.clone(), second.id.clone()];
+        assert_eq!(conflict_code(clear_day_schedules(&f.db, &day.id, &both)), "cycle_started");
+        assert!(is_scheduled(&f.db, &first.id));
+        cycles_service::delete_cycle(&f.db, &second.id).unwrap();
+        let cleared = clear_day_schedules(&f.db, &day.id, &[first.id.clone()]).unwrap();
+        assert_eq!(cleared.value, 1);
+        assert!(!is_scheduled(&f.db, &first.id));
+        assert_eq!(repo::require(&f.db.pool().get().unwrap(), &first.id).unwrap().duration, Some(25 * 60_000));
+    }
+
+    #[test]
+    fn bulk_delete_focus_blocks_preserves_day_and_tasks_and_rejects_stale_set() {
+        let (f, _month, week) = fixture_with_week();
+        let day = create_day(&f.db, &week.id, TODAY);
+        let task = add_day_task(&f.db, &day.id, "keep this task");
+        let first = add_block(&f.db, &day.id, "first", 25);
+        let second = add_block(&f.db, &day.id, "second", 30);
+        assert_eq!(conflict_code(cycles_service::delete_day_focus_blocks(&f.db, &day.id, &[first.id.clone()])), "day_content_changed");
+        assert_eq!(session_count(&f.db), 2);
+        let removed = cycles_service::delete_day_focus_blocks(&f.db, &day.id, &[first.id, second.id]).unwrap();
+        assert_eq!(removed.value, 2);
+        assert!(removed.cycles.ids().contains(&day.id));
+        assert_eq!(session_count(&f.db), 0);
+        let conn = f.db.pool().get().unwrap();
+        assert!(repo::require(&conn, &day.id).is_ok());
+        assert!(tasks_repo::require(&conn, &task.id).is_ok());
     }
 
     // --- §4 time budget ------------------------------------------------------

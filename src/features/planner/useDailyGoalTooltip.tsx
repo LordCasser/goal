@@ -63,7 +63,6 @@ export function useDailyGoalTooltip(task: TaskNode, relations: RelationView | un
     };
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("dragstart", dismiss, true);
     document.addEventListener("focusin", onFocus, true);
     document.addEventListener("mouseover", onMouseOver, true);
     window.addEventListener("scroll", onScroll, true);
@@ -78,7 +77,6 @@ export function useDailyGoalTooltip(task: TaskNode, relations: RelationView | un
     return () => {
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("dragstart", dismiss, true);
       document.removeEventListener("focusin", onFocus, true);
       document.removeEventListener("mouseover", onMouseOver, true);
       window.removeEventListener("scroll", onScroll, true);
@@ -94,6 +92,7 @@ export function useDailyGoalTooltip(task: TaskNode, relations: RelationView | un
     onPointerDownCapture: (event) => {
       if (!panelRef.current?.contains(event.target as Node)) dismiss();
     },
+    onDragStartCapture: dismiss,
     onFocusCapture: (event) => {
       if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
       focused.current = true;

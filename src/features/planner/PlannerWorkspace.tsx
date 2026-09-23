@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState } from "../../ui";
-import { createPlanningCycle, ensureDay, getEditorWorkspace, getEditorWorkspacesByCycleIds, getPlannerState, getSettings, listSessions, LATER_CYCLE_ID, type AgentPageContext, type Cycle } from "../../lib/ipc";
+import { createPlanningCycle, createDayPlan, getEditorWorkspace, getEditorWorkspacesByCycleIds, getPlannerState, getSettings, listSessions, LATER_CYCLE_ID, type AgentPageContext, type Cycle } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import { isoWeekNumber, todayISO, weekdayName } from "./dates";
 import { invalidateCycles, useActionError } from "./actions";
@@ -10,7 +10,6 @@ import { CycleColumn } from "./CycleColumn";
 import { DurationDialog } from "./DurationDialog";
 import { directRelations, highlightedTasks, indexTasks, type RelationView } from "./relations";
 import { RelationLayer } from "./RelationLayer";
-import { TaskDragProvider } from "./TaskDragContext";
 import { ScrollModeHint } from "./ScrollModeHint";
 import { WeekNavigation, weekStartForDate } from "./WeekNavigation";
 import { DayNavigation, weekContainingDate } from "./DayNavigation";
@@ -181,7 +180,6 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
   const viewportRef = useRef<HTMLDivElement>(null);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [hoveredTask, setHoveredTask] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
   const visibleCycles = [month, week, day].filter((c): c is Cycle => c !== null);
   const contextKey = [week?.id, day?.id].join(":");
   const contextIds = [...new Set([...months.map((cycle) => cycle.id), ...visibleCycles.map((cycle) => cycle.id)])].sort();
@@ -191,7 +189,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
   const focusId = selectedTask ?? hoveredTask;
   const edges = directRelations(focusId, tasks, cycleMap);
   const relations: RelationView = { tasks, cycles: cycleMap, selectedId: selectedTask,
-    highlighted: highlightedTasks(focusId, tasks, cycleMap), select: setSelectedTask, preview: setHoveredTask, setDragging };
+    highlighted: highlightedTasks(focusId, tasks, cycleMap), select: setSelectedTask, preview: setHoveredTask };
   const selected = selectedTask ? tasks.get(selectedTask) : undefined;
   useWorkspaceWheelRouting(workspaceRef, horizontalScrollRef, active && !isLoading && !isError && state !== undefined);
   useEffect(() => { setSelectedTask(null); setHoveredTask(null); }, [contextKey]);
@@ -273,7 +271,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
     navigationIntent.current = null;
     if (creating) return;
     setCreating(true);
-    const created = await run(() => ensureDay(date));
+    const created = await run(() => createDayPlan(date));
     if (created) {
       setSelectedWeekDate(weekContainingDate(weeks, date)?.starts_on ?? weekStartForDate(date, weekStartDay));
       setSelectedDayDate(created.starts_on);
@@ -289,7 +287,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
   const weekHint = t("workspace.weekHint");
   const dayHint = t("workspace.dayHint");
 
-  return <TaskDragProvider>
+  return <>
     <div ref={workspaceRef} className="flex h-full min-h-0 flex-col" onPointerDownCapture={(event) => {
       if (!(event.target instanceof Element) || !event.target.closest("[data-date-drum]")) navigationIntent.current = null;
     }}>
@@ -324,7 +322,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
         </Horizon>
       </div>
     </div>
-    {settings?.show_relation_lines && <RelationLayer viewportRef={viewportRef} edges={edges} tasks={tasks} hidden={dragging} />}
+    {settings?.show_relation_lines && <RelationLayer viewportRef={viewportRef} edges={edges} tasks={tasks} hidden={false} />}
     </div>
     {selected && <div className="connection-bar flex shrink-0 items-center gap-3 border-t border-light bg-content px-6 py-2 text-caption" aria-label={t("workspace.connections")}>
       <span className="shrink-0 font-medium text-secondary">{t("workspace.connections")}</span>
@@ -339,7 +337,7 @@ export function PlannerWorkspace({ active = true, onActiveCycleChange, onPageCon
     </div>
     <DurationDialog open={durationOpen} onClose={() => setDurationOpen(false)} onCreated={(cycle) => { selectMonth(cycle.id); invalidateCycles(qc); }} />
     {error && <div role="alert" className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-light bg-content px-4 py-3 text-caption text-danger shadow-lg">{error}<button className="ml-3 underline" onClick={dismiss}>{t("workspace.dismiss")}</button></div>}
-  </TaskDragProvider>;
+  </>;
 }
 
 function Horizon({ label, cycles, selected, onSelect, action, navigation, children, t }: {

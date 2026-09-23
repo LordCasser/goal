@@ -47,7 +47,7 @@ export function Checkbox({
           "mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] border",
           "transition-colors duration-100 group-disabled:opacity-45",
           indeterminate || checked
-            ? "border-primary bg-primary text-white"
+            ? "border-secondary bg-content text-primary"
             : "border-control bg-content",
         )}
       >

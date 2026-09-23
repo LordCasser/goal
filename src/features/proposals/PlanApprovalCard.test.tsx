@@ -8,7 +8,7 @@ import { commands, getEditorWorkspace, type PreviewSummary, type Task, type Task
 import { qk } from "../../lib/events";
 import { applyLocale } from "../../lib/i18n";
 
-const task: Task = { id: "t1", cycle_id: "day", later_plan_type: null, parent_id: null, title: "Revised goal", completed: false, subtasks: [], position: 0, goal_breakdown: null, needs_refinement: null, needs_breakdown: null, root_color_key: null, copied_from_task_id: null, proposal: "upsert", created_at: 1 };
+const task: Task = { id: "t1", cycle_id: "day", later_plan_type: null, parent_id: null, title: "Revised goal", note: "", completed: false, subtasks: [], position: 0, goal_breakdown: null, needs_refinement: null, needs_breakdown: null, root_color_key: null, copied_from_task_id: null, proposal: "upsert", created_at: 1 };
 const original: TaskSnapshot = { ...task, original_exists: true, title: "Original goal" };
 let pending: PreviewSummary;
 let committed: Task[];

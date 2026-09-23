@@ -24,7 +24,7 @@ Linux 的凭据运行时需要可用的 Secret Service（例如 `gnome-keyring`�
 - `src-tauri/tauri.windows.conf.json`：NSIS，启动时 `visible: false` 且 `decorations: true`。
 - `src-tauri/tauri.linux.conf.json`：AppImage 与 deb，使用 WebKitGTK 4.1。
 
-所有平台的完整 `app.windows` 数组都必须设置 `dragDropEnabled: false`。这是关闭 Tauri 原生文件拖放拦截，将任务排序、归属关联、日计划移动和时间轴排期交回 HTML5 拖放；不影响标题栏拖窗。只改基础配置无效，因为平台配置会替换整个窗口数组。配置检查脚本对此作强制校验。
+所有平台的完整 `app.windows` 数组都必须设置 `dragDropEnabled: false`。这会关闭 Tauri 原生文件拖放拦截，使任务行首小把手可通过 HTML5 拖放在同一计划列表内排序；不增加右侧独立排序按钮。跨列表或跨周期拖动、目标关联、日计划改期和时间轴排期使用菜单或表单完成，不依赖拖放。此设置不影响标题栏拖窗。只改基础配置无效，因为平台配置会替换整个窗口数组。配置检查脚本对此作强制校验。
 
 应用授权由 build.rs 从现有命令注册生成：一项有限的业务命令组与三个 Windows 窗口权限，产物只存在于 Cargo OUT_DIR。公共 capability 仅授予本地主窗口业务组，Windows capability 额外授予窗口操作；不维护第二份业务命令名单，也不授予通配符。
 

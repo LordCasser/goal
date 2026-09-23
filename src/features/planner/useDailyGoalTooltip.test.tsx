@@ -9,7 +9,7 @@ const goal = { id: "goal", cycle_id: "m", title: "Validate the product", parent_
 const daily = { ...goal, id: "daily", cycle_id: "d", title: "Interview a user", root_color_key: null, parent_id: "goal" };
 const relations: RelationView = {
   tasks: indexTasks([[goal], [daily]]), cycles: new Map([["m", { id: "m", type: "month" } as Cycle], ["d", { id: "d", type: "day" } as Cycle]]),
-  selectedId: null, highlighted: new Set(), select: vi.fn(), preview: vi.fn(), setDragging: vi.fn(),
+  selectedId: null, highlighted: new Set(), select: vi.fn(), preview: vi.fn(),
 };
 function Example({ active = true, task = daily }: { active?: boolean; task?: TaskNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -54,6 +54,11 @@ describe("daily goal hover context", () => {
     advance(120);
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
+  it("dismisses the goal hint when local ordering starts", () => {
+    render(<Example />); hover();
+    fireEvent.dragStart(screen.getByTestId("row"));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
   it("supports keyboard focus and Escape without stealing or blurring editor focus", () => {
     render(<Example />);
     const input = screen.getByRole("textbox");
@@ -75,12 +80,12 @@ describe("daily goal hover context", () => {
     expect(screen.getByRole("tooltip")).toBe(card);
     expect(relations.select).not.toHaveBeenCalled();
   });
-  it.each(["pointerdown", "dragstart", "scroll", "resize", "blur"])("dismisses on %s, including a pending reveal", (event) => {
+  it.each(["pointerdown", "scroll", "resize", "blur"])("dismisses on %s, including a pending reveal", (event) => {
     render(<Example />); hover();
-    fireEvent(event === "pointerdown" || event === "dragstart" ? document : window, new Event(event, { bubbles: true }));
+    fireEvent(event === "pointerdown" ? document : window, new Event(event, { bubbles: true }));
     expect(screen.queryByRole("tooltip")).toBeNull();
     fireEvent.mouseEnter(screen.getByTestId("row")); advance(50);
-    fireEvent(event === "pointerdown" || event === "dragstart" ? document : window, new Event(event, { bubbles: true }));
+    fireEvent(event === "pointerdown" ? document : window, new Event(event, { bubbles: true }));
     advance(500);
     expect(screen.queryByRole("tooltip")).toBeNull();
   });

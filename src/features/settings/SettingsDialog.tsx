@@ -21,8 +21,10 @@ import {
   getDebugLogDir,
   getSchemaVersion,
   getSettings,
+  setAutoCarryUnfinished,
   setLocale,
   setLogLevel,
+  setShowLaterCount,
   setShowRelationLines,
   setTheme,
   setWeekStartDay,
@@ -159,6 +161,46 @@ export function SettingsDialog({
     },
   });
 
+  const autoCarryMutation = useMutation({
+    mutationFn: setAutoCarryUnfinished,
+    onMutate: async (auto_carry_unfinished) => {
+      await queryClient.cancelQueries({ queryKey: qk.settings() });
+      const previous = queryClient.getQueryData<Settings>(qk.settings());
+      queryClient.setQueryData<Settings>(qk.settings(), (current) =>
+        current ? { ...current, auto_carry_unfinished } : current,
+      );
+      return { previous };
+    },
+    onError: (_error, _auto_carry_unfinished, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(qk.settings(), context.previous);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.settings() });
+    },
+  });
+
+  const laterCountMutation = useMutation({
+    mutationFn: setShowLaterCount,
+    onMutate: async (show_later_count) => {
+      await queryClient.cancelQueries({ queryKey: qk.settings() });
+      const previous = queryClient.getQueryData<Settings>(qk.settings());
+      queryClient.setQueryData<Settings>(qk.settings(), (current) =>
+        current ? { ...current, show_later_count } : current,
+      );
+      return { previous };
+    },
+    onError: (_error, _show_later_count, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(qk.settings(), context.previous);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.settings() });
+    },
+  });
+
   const localeMutation = useMutation({
     mutationFn: async (locale: Settings["locale"]) => {
       await setLocale(locale);
@@ -189,6 +231,8 @@ export function SettingsDialog({
   const selectedTheme = settingsQuery.data?.theme ?? "white";
   const weekStartDay = settingsQuery.data?.week_start_day ?? 1;
   const showRelationLines = settingsQuery.data?.show_relation_lines ?? false;
+  const autoCarryUnfinished = settingsQuery.data?.auto_carry_unfinished ?? false;
+  const showLaterCount = settingsQuery.data?.show_later_count ?? true;
   const selectedLocale = settingsQuery.data?.locale ?? "en";
 
   const chooseTheme = (theme: Theme) => {
@@ -315,12 +359,42 @@ export function SettingsDialog({
               </div>
               <InlineError error={relationLinesMutation.error} />
             </section>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-body font-medium text-primary">{t("settings.autoCarry.label")}</h3>
+                  <p className="mt-1 text-caption text-secondary">{t("settings.autoCarry.description")}</p>
+                </div>
+                <Checkbox
+                  aria-label={t("settings.autoCarry.label")}
+                  checked={autoCarryUnfinished}
+                  disabled={settingsQuery.isPending || autoCarryMutation.isPending}
+                  onChange={(enabled) => autoCarryMutation.mutate(enabled)}
+                />
+              </div>
+              <InlineError error={autoCarryMutation.error} />
+            </section>
+            <section className="border-t border-light pt-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-body font-medium text-primary">{t("settings.laterCount.label")}</h3>
+                  <p className="mt-1 text-caption text-secondary">{t("settings.laterCount.description")}</p>
+                </div>
+                <Checkbox
+                  aria-label={t("settings.laterCount.label")}
+                  checked={showLaterCount}
+                  disabled={settingsQuery.isPending || laterCountMutation.isPending}
+                  onChange={(enabled) => laterCountMutation.mutate(enabled)}
+                />
+              </div>
+              <InlineError error={laterCountMutation.error} />
+            </section>
             {onPreviewExitPoll && <section className="flex items-center justify-between gap-4 border-t border-light pt-5">
               <div><h3 className="text-body font-medium text-primary">{t("settings.feedback.title")}</h3><p className="mt-1 text-caption text-secondary">{t("settings.feedback.description")}</p></div>
               <Button size="compact" onClick={onPreviewExitPoll}>{t("settings.feedback.action")}</Button>
             </section>}
             <InlineError error={settingsQuery.error} />
-            <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending || relationLinesMutation.isPending || localeMutation.isPending ? t("settings.saveStatus.saving") : t("settings.saveStatus.auto")}</p>
+            <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending || relationLinesMutation.isPending || autoCarryMutation.isPending || laterCountMutation.isPending || localeMutation.isPending ? t("settings.saveStatus.saving") : t("settings.saveStatus.auto")}</p>
           </div>}
           {section === "ai" && <AiSettingsPage />}
           {section === "reminders" && <div className="flex flex-col gap-6"><div><h3 className="text-section-title font-semibold text-primary">{t("settings.reminders.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.reminders.description")}</p></div><ReminderSettingsSection /></div>}

@@ -95,6 +95,7 @@ export interface Task {
   later_plan_type: LaterPlanType | null;
   parent_id: string | null;
   title: string;
+  note: string;
   subtasks: Subtask[];
   position: number;
   completed: boolean;
@@ -120,6 +121,21 @@ export interface TaskNode extends Task {
   subtasks_markdown: string;
   /** Accumulated focus time from linked focus blocks, in milliseconds. */
   focused_time: number;
+}
+
+/** Read-only episodes derived from current daily task titles and direct goal links. */
+export interface TaskContinuity {
+  title: string;
+  parent_goal_id: string | null;
+  selected_episode_index: number;
+  episodes: Array<{
+    started_on: string;
+    last_recorded_on: string;
+    completed: boolean;
+    elapsed_days: number;
+    recorded_days: number;
+    records: Array<{ task_id: string; date: string; note: string; completed: boolean }>;
+  }>;
 }
 
 /** `domain::repeat::Repeat`. */
@@ -213,6 +229,7 @@ export interface AddTaskArgs {
  */
 export interface TaskPatch {
   title?: string | null;
+  note?: string | null;
   subtasks?: Subtask[] | null;
   completed?: boolean | null;
   goal_breakdown?: Json | null;
@@ -241,7 +258,7 @@ export interface PreviewSummary {
 }
 
 /** Existing proposal snapshot; returned only for review, never edited by UI. */
-export type TaskSnapshot = Omit<Task, "id" | "cycle_id" | "proposal" | "copied_from_task_id" | "title" | "completed" | "subtasks" | "position" | "created_at"> & {
+export type TaskSnapshot = Omit<Task, "id" | "cycle_id" | "proposal" | "copied_from_task_id" | "title" | "note" | "completed" | "subtasks" | "position" | "created_at"> & {
   original_exists: boolean;
   title: string | null;
   completed: boolean | null;
@@ -266,6 +283,10 @@ export interface Settings {
   theme: Theme | null;
   /** Whether relationship lines are shown in the planner; disabled by default. */
   show_relation_lines: boolean;
+  /** Whether new planning cycles import unfinished items from the adjacent cycle. */
+  auto_carry_unfinished: boolean;
+  /** Whether the Later entry shows its item count; enabled by default. */
+  show_later_count: boolean;
 }
 
 /** The two user-confirmed light themes (design.md §4.4). */

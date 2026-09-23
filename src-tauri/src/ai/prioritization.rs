@@ -434,6 +434,7 @@ mod tests {
             cycle_id: "c1".into(),
             parent_id: None,
             title: format!("task {id}"),
+            note: String::new(),
             subtasks: vec![],
             position,
             completed: false,

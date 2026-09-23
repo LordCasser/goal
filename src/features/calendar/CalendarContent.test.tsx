@@ -17,7 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("../planner/dates", async (original) => ({ ...(await original<typeof import("../planner/dates")>()), todayISO: () => "2026-09-15" }));
 
 import CalendarView from "./CalendarView";
-import { applyLocale, formatDate, t } from "../../lib/i18n";
+import { applyLocale, t } from "../../lib/i18n";
 import { TaskList } from "../planner/TaskList";
 import { calendarPlanCycleIds, calendarTasks, PREFERRED_VIEW_KEY, savePreferredView } from "./calendar-model";
 
@@ -55,7 +55,7 @@ function mount() {
 }
 
 describe("calendar content uses the workspace tasks", () => {
-  it.each(["en", "zh-CN"] as const)("shows one compact focus progress summary separate from the day-move grip (%s)", async (locale) => {
+  it.each(["en", "zh-CN"] as const)("keeps task progress beside the date and focus progress separate (%s)", async (locale) => {
     applyLocale(locale);
     backend.getCalendarRange.mockResolvedValue({ start: day.starts_on, end: day.starts_on, grid_start: day.starts_on, grid_end: day.starts_on,
       days: [{ date: day.starts_on, in_range: true, day_cycle: day, sessions: [{ session: { id: "focus", title: "Focus", duration: 1500000, finished: false }, schedule: null }] }] });
@@ -65,9 +65,9 @@ describe("calendar content uses the workspace tasks", () => {
     expect(count.textContent).toBe("0/1");
     expect(count.closest('[draggable="true"]')).toBeNull();
     expect(count.className).toContain("cursor-default");
-    const grip = screen.getByTitle(t("planning:calendar.moveDay", { date: formatDate("2026-09-15", { year: "numeric", month: "short", day: "numeric" }) }));
-    expect(grip.draggable).toBe(true);
-    expect(grip.textContent).not.toContain("block");
+    const cell = document.querySelector('[data-day-cell="2026-09-15"]')!;
+    expect(cell.querySelector("[data-day-move]")).toBeNull();
+    expect(cell.querySelector("[data-day-progress]")?.parentElement).toBe(cell.querySelector("button[aria-haspopup=menu]")?.parentElement);
   });
   it("completes a task directly in Week and locates the same task in the detail editor", async () => {
     localStorage.setItem(PREFERRED_VIEW_KEY, "week");
@@ -104,11 +104,33 @@ describe("calendar content uses the workspace tasks", () => {
     mount();
     const preview = await screen.findByRole("button", { name: "View task Review the layout" });
     expect(preview.querySelector<HTMLElement>(".task-color-slot")?.style.backgroundColor).toBe("rgb(22, 163, 74)");
-    expect(screen.getByText("0/1 tasks")).toBeTruthy();
+    expect(document.querySelector('[data-day-progress="2026-09-15"]')?.textContent).toBe("0/1");
+    expect(document.querySelector('[data-day-progress="2026-09-15"]')?.getAttribute("aria-label")).toBe("0/1 tasks");
     expect(within(screen.getByRole("region", { name: "Weekly goals" })).getByText("Validate the prototype")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Long-term goals" })).getByText("Launch the product")).toBeTruthy();
     expect(backend.getEditorWorkspacesByCycleIds).toHaveBeenCalledWith(["day", "month", "week"]);
     expect(backend.addTask).not.toHaveBeenCalled();
+  });
+
+  it("previews the full day-week-long-term path and lets a pinned highlight toggle off", async () => {
+    mount();
+    const calendar = within(await screen.findByLabelText("Day plan Sep 15, 2026"));
+    const daily = calendar.getByDisplayValue("Review the layout").closest("[data-task-id]")!;
+    const weekly = calendar.getByRole("button", { name: "Show connections for Validate the prototype" });
+    const longTerm = calendar.getByRole("button", { name: "Show connections for Launch the product" });
+    fireEvent.mouseEnter(weekly);
+    expect(daily.hasAttribute("data-related")).toBe(true);
+    expect(weekly.hasAttribute("data-related")).toBe(true);
+    expect(longTerm.hasAttribute("data-related")).toBe(true);
+    fireEvent.mouseLeave(weekly);
+    expect(daily.hasAttribute("data-related")).toBe(false);
+    fireEvent.click(weekly);
+    expect(daily.hasAttribute("data-related")).toBe(true);
+    expect(longTerm.hasAttribute("data-related")).toBe(true);
+    fireEvent.click(weekly);
+    expect(daily.hasAttribute("data-related")).toBe(false);
+    expect(weekly.hasAttribute("data-related")).toBe(false);
+    expect(longTerm.hasAttribute("data-related")).toBe(false);
   });
 
   it("shows a directly linked daily long-term goal when the week has no tasks", async () => {
@@ -132,7 +154,7 @@ describe("calendar content uses the workspace tasks", () => {
     const workspace = within(screen.getByRole("region", { name: "Workspace editor" }));
     const calendar = within(await screen.findByLabelText("Day plan Sep 15, 2026"));
     fireEvent.click(await workspace.findByRole("checkbox", { name: "Mark “Review the layout” complete" }));
-    await waitFor(() => expect(screen.getByText("1/1 tasks")).toBeTruthy());
+    await waitFor(() => expect(document.querySelector('[data-day-progress="2026-09-15"]')?.getAttribute("aria-label")).toBe("1/1 tasks"));
     expect(calendar.getByRole("checkbox", { name: "Mark “Review the layout” complete" }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(calendar.getByRole("checkbox", { name: "Mark “Review the layout” complete" }));
     await waitFor(() => expect(workspace.getByRole("checkbox", { name: "Mark “Review the layout” complete" }).getAttribute("aria-checked")).toBe("false"));
@@ -167,7 +189,7 @@ describe("calendar content uses the workspace tasks", () => {
   it("a failed task query is not presented as zero work or missing goals", async () => {
     backend.getEditorWorkspacesByCycleIds.mockRejectedValue(new Error("Read failed"));
     mount();
-    expect(await screen.findByText("Tasks unavailable")).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('[data-day-progress="2026-09-15"]')?.getAttribute("aria-label")).toBe("Tasks unavailable"));
     expect(screen.queryByText("0/0 tasks")).toBeNull();
     expect(screen.queryByText("No tasks in this week yet.")).toBeNull();
   });
@@ -198,7 +220,7 @@ it("shows the same pending task in Week and locks completion until confirmation"
   const checkbox=await screen.findByRole("checkbox",{name:"Mark “Review the layout” complete in calendar"});
   expect(checkbox.hasAttribute("disabled")).toBe(true);
   expect(screen.getByRole("button",{name:"View task Review the layout"}).textContent).toContain("Preview");
-  expect(screen.getByText("0/0 tasks · 1 preview item")).toBeTruthy();
+  expect(document.querySelector('[data-day-progress="2026-09-15"]')?.getAttribute("aria-label")).toBe("0/0 tasks · 1 preview item");
   fireEvent.click(checkbox);
   expect(backend.patchTask).not.toHaveBeenCalled();
 });

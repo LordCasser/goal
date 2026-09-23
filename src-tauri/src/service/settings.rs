@@ -12,6 +12,8 @@ use crate::repository::settings as repo;
 /// (spec: 首次确定周起始日 — 之后不再变更).
 pub const DEFAULT_WEEK_START_DAY: i64 = 1;
 pub const DEFAULT_SHOW_RELATION_LINES: bool = false;
+pub const DEFAULT_AUTO_CARRY_UNFINISHED: bool = false;
+pub const DEFAULT_SHOW_LATER_COUNT: bool = true;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Settings {
@@ -23,6 +25,10 @@ pub struct Settings {
     pub theme: Option<String>,
     /// Whether relationship lines are shown in the planner; disabled by default.
     pub show_relation_lines: bool,
+    /// Whether new planning cycles import unfinished items from the adjacent cycle.
+    pub auto_carry_unfinished: bool,
+    /// Whether the Later entry shows its item count; enabled by default.
+    pub show_later_count: bool,
 }
 
 pub fn get(db: &Db) -> AppResult<Settings> {
@@ -34,11 +40,19 @@ pub fn get(db: &Db) -> AppResult<Settings> {
     let show_relation_lines = repo::get(&conn, repo::KEY_SHOW_RELATION_LINES)?
         .and_then(|v| v.parse::<bool>().ok())
         .unwrap_or(DEFAULT_SHOW_RELATION_LINES);
+    let auto_carry_unfinished = repo::get(&conn, repo::KEY_AUTO_CARRY_UNFINISHED)?
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(DEFAULT_AUTO_CARRY_UNFINISHED);
+    let show_later_count = repo::get(&conn, repo::KEY_SHOW_LATER_COUNT)?
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(DEFAULT_SHOW_LATER_COUNT);
     Ok(Settings {
         locale: crate::i18n::current(&conn)?,
         week_start_day,
         theme,
         show_relation_lines,
+        auto_carry_unfinished,
+        show_later_count,
     })
 }
 
@@ -70,6 +84,24 @@ pub fn set_show_relation_lines(db: &Db, show: bool) -> AppResult<()> {
     repo::set(
         &conn,
         repo::KEY_SHOW_RELATION_LINES,
+        if show { "true" } else { "false" },
+    )
+}
+
+pub fn set_auto_carry_unfinished(db: &Db, enabled: bool) -> AppResult<()> {
+    let conn = db.pool().get()?;
+    repo::set(
+        &conn,
+        repo::KEY_AUTO_CARRY_UNFINISHED,
+        if enabled { "true" } else { "false" },
+    )
+}
+
+pub fn set_show_later_count(db: &Db, show: bool) -> AppResult<()> {
+    let conn = db.pool().get()?;
+    repo::set(
+        &conn,
+        repo::KEY_SHOW_LATER_COUNT,
         if show { "true" } else { "false" },
     )
 }
@@ -163,4 +195,34 @@ pub fn week_start_day_or_default(conn: &Connection) -> AppResult<i64> {
         &DEFAULT_WEEK_START_DAY.to_string(),
     )?;
     Ok(DEFAULT_WEEK_START_DAY)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_settings_have_product_defaults() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::open_at(&dir.path().join("settings.db")).expect("db");
+
+        let settings = get(&db).expect("settings");
+        assert!(!settings.auto_carry_unfinished);
+        assert!(settings.show_later_count);
+    }
+
+    #[test]
+    fn new_settings_persist_across_database_reopen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.db");
+        let db = crate::db::open_at(&path).expect("db");
+        set_auto_carry_unfinished(&db, true).expect("enable auto carry");
+        set_show_later_count(&db, false).expect("disable Later count");
+        drop(db);
+
+        let reopened = crate::db::open_at(&path).expect("reopen db");
+        let settings = get(&reopened).expect("settings after reopen");
+        assert!(settings.auto_carry_unfinished);
+        assert!(!settings.show_later_count);
+    }
 }

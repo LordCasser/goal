@@ -15,6 +15,8 @@ export type PopoverProps = {
   onClose: () => void;
   /** 锚定元素：菜单出现在其下方，视口放不下时翻到上方。 */
   anchorRef: RefObject<HTMLElement | null>;
+  /** Context menus can anchor at the pointer rather than the whole control. */
+  point?: { x: number; y: number };
   /** 菜单的可访问名称；锚点按钮自行携带 aria-haspopup/aria-expanded。 */
   label?: string;
   /** Form editors are non-modal dialogs, not arrow-key menu navigation. */
@@ -40,6 +42,7 @@ export function Popover({
   open,
   onClose,
   anchorRef,
+  point,
   label,
   role = "menu",
   className,
@@ -56,7 +59,9 @@ export function Popover({
     const anchor = anchorRef.current;
     if (!anchor) return;
     const update = () => {
-    const rect = anchor.getBoundingClientRect();
+    const rect = point
+      ? { top: point.y, bottom: point.y, left: point.x }
+      : anchor.getBoundingClientRect();
     const panel = panelRef.current;
     const height = panel?.offsetHeight ?? 0;
     const width = panel?.offsetWidth ?? 0;
@@ -79,7 +84,7 @@ export function Popover({
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => { observer?.disconnect(); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, point?.x, point?.y]);
 
   useEffect(() => {
     if (!open) return;
@@ -116,6 +121,11 @@ export function Popover({
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (role !== "menu" || e.nativeEvent.isComposing) return;
+    if ((e.key === "Enter" || e.key === " ") && e.target instanceof HTMLButtonElement && e.target.getAttribute("role") === "menuitem") {
+      e.preventDefault();
+      if (!e.target.disabled) e.target.click();
+      return;
+    }
     if (e.target instanceof Element && e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();

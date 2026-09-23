@@ -13,7 +13,9 @@ import { qk } from "../../lib/events";
 
 const mocks = vi.hoisted(() => ({
   getSettings: vi.fn(),
+  setAutoCarryUnfinished: vi.fn(),
   setLocale: vi.fn(),
+  setShowLaterCount: vi.fn(),
   setShowRelationLines: vi.fn(),
   setTheme: vi.fn(),
   setWeekStartDay: vi.fn(),
@@ -27,7 +29,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/ipc")>()),
   getSettings: mocks.getSettings,
+  setAutoCarryUnfinished: mocks.setAutoCarryUnfinished,
   setLocale: mocks.setLocale,
+  setShowLaterCount: mocks.setShowLaterCount,
   setShowRelationLines: mocks.setShowRelationLines,
   setTheme: mocks.setTheme,
   setWeekStartDay: mocks.setWeekStartDay,
@@ -57,8 +61,15 @@ function renderDialog(open: boolean) {
 beforeEach(() => {
   applyLocale("zh-CN");
   vi.clearAllMocks();
-  mocks.getSettings.mockResolvedValue({ locale: "zh-CN", week_start_day: 1, theme: "white", show_relation_lines: false });
+  const settings = { locale: "zh-CN" as const, week_start_day: 1, theme: "white" as const, show_relation_lines: false, auto_carry_unfinished: false, show_later_count: true };
+  mocks.getSettings.mockResolvedValue(settings);
+  mocks.setAutoCarryUnfinished.mockImplementation(async (enabled: boolean) => {
+    settings.auto_carry_unfinished = enabled;
+  });
   mocks.setLocale.mockResolvedValue(undefined);
+  mocks.setShowLaterCount.mockImplementation(async (show: boolean) => {
+    settings.show_later_count = show;
+  });
   mocks.setShowRelationLines.mockResolvedValue(undefined);
   mocks.setTheme.mockResolvedValue(undefined);
   mocks.setWeekStartDay.mockResolvedValue(undefined);
@@ -122,6 +133,30 @@ describe("SettingsDialog", () => {
     await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
     expect(client.getQueryData<{ show_relation_lines: boolean }>(qk.settings())?.show_relation_lines).toBe(false);
     expect(mocks.setShowRelationLines).toHaveBeenCalledWith(true, expect.anything());
+  });
+
+  it("persists the auto-carry preference, disabled by default", async () => {
+    const { client } = renderDialog(true);
+    const toggle = await screen.findByRole("checkbox", { name: "带入未完成事项" });
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(mocks.setAutoCarryUnfinished).toHaveBeenCalledWith(true, expect.anything()));
+    expect(client.getQueryData<{ auto_carry_unfinished: boolean }>(qk.settings())?.auto_carry_unfinished).toBe(true);
+  });
+
+  it("persists the Later count preference, enabled by default", async () => {
+    const { client } = renderDialog(true);
+    const toggle = await screen.findByRole("checkbox", { name: "显示稍后事项数量" });
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(mocks.setShowLaterCount).toHaveBeenCalledWith(false, expect.anything()));
+    expect(client.getQueryData<{ show_later_count: boolean }>(qk.settings())?.show_later_count).toBe(false);
   });
 
   it("applies the selected language only after the setting is saved", async () => {

@@ -33,6 +33,7 @@ import type {
   RepeatPatch,
   Settings,
   Task,
+  TaskContinuity,
   TaskPatch,
   Theme,
   TurnResult,
@@ -69,10 +70,12 @@ export const commands = {
   reorderSessions: "reorder_sessions",
   copyUncompletedFromPrevious: "copy_uncompleted_from_previous",
   ensureDay: "ensure_day",
+  createDayPlan: "create_day_plan",
   // tasks
   addTask: "add_task",
   updateTask: "update_task",
   patchTask: "patch_task",
+  getTaskContinuity: "get_task_continuity",
   deleteTask: "delete_task",
   getTaskDeletionPreview: "get_task_deletion_preview",
   moveTask: "move_task",
@@ -100,6 +103,8 @@ export const commands = {
   setWeekStartDay: "set_week_start_day",
   setTheme: "set_theme",
   setShowRelationLines: "set_show_relation_lines",
+  setAutoCarryUnfinished: "set_auto_carry_unfinished",
+  setShowLaterCount: "set_show_later_count",
   setLocale: "set_locale",
   setLogLevel: "set_log_level",
   getAppFlag: "get_app_flag",
@@ -206,6 +211,10 @@ export function ensureDay(date?: string | null): Promise<Cycle> {
   return invoke<Cycle>(commands.ensureDay, { date });
 }
 
+export function createDayPlan(date: string): Promise<Cycle> {
+  return invoke<Cycle>(commands.createDayPlan, { date });
+}
+
 // --- tasks ------------------------------------------------------------------
 
 export function addTask(args: AddTaskArgs): Promise<Task> {
@@ -224,6 +233,10 @@ export function updateTask(
 /** Partial editor save: every field optional. */
 export function patchTask(task_id: string, patch: TaskPatch): Promise<Task> {
   return invoke<Task>(commands.patchTask, { taskId: task_id, patch });
+}
+
+export function getTaskContinuity(task_id: string): Promise<TaskContinuity | null> {
+  return invoke<TaskContinuity | null>(commands.getTaskContinuity, { taskId: task_id });
 }
 
 export function getTaskDeletionPreview(task_id: string): Promise<TaskDeletionPreview> {
@@ -356,6 +369,14 @@ export function setTheme(theme: Theme): Promise<void> {
 
 export function setShowRelationLines(show: boolean): Promise<void> {
   return invoke<void>(commands.setShowRelationLines, { show });
+}
+
+export function setAutoCarryUnfinished(enabled: boolean): Promise<void> {
+  return invoke<void>(commands.setAutoCarryUnfinished, { enabled });
+}
+
+export function setShowLaterCount(show: boolean): Promise<void> {
+  return invoke<void>(commands.setShowLaterCount, { show });
 }
 
 export function setLocale(locale: import("./i18n").Locale): Promise<void> {

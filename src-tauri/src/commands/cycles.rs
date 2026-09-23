@@ -147,6 +147,18 @@ pub fn ensure_day(
     Ok(mutation.value)
 }
 
+#[tauri::command]
+pub fn create_day_plan(
+    app: tauri::AppHandle<tauri::Wry>,
+    db: State<'_, Db>,
+    date: String,
+) -> AppResult<crate::domain::cycle::Cycle> {
+    let date = parse_command_date(&date)?;
+    let mutation = cycles::create_day_plan(&db, date, crate::service::now_ms())?;
+    emit_mutation(&app, &mutation);
+    Ok(mutation.value)
+}
+
 /// Parsed local date, exposed for tests of command-layer date validation.
 #[allow(dead_code)]
 pub(crate) fn parse_command_date(raw: &str) -> AppResult<NaiveDate> {

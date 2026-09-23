@@ -211,6 +211,134 @@ fn month_promotion_requires_an_explicit_target_and_clears_metadata() {
 }
 
 #[test]
+fn restoring_later_item_keeps_the_plan_input_row_last() {
+    let db = TestDb::open();
+    let source = create_long_term(&db.db, TODAY, 1);
+    let target = create_long_term(&db.db, "2026-10-16", 1);
+    let existing = add_task(&db.db, &target.id, "already planned", NOW);
+    let input_row = add_task(&db.db, &target.id, "", NOW + 1);
+    let parked = add_task(&db.db, &source.id, "restore me", NOW + 2);
+    tasks::move_task(&db.db, &parked.id, LATER_CYCLE_ID, None).unwrap();
+
+    tasks::promote_later_task(
+        &db.db,
+        &parked.id,
+        Some(&target.id),
+        common::today(),
+        NOW + 3,
+    )
+    .unwrap();
+
+    let workspace = editor::get_editor_workspace(&db.db, &target.id).unwrap();
+    let ordered_ids: Vec<&str> = workspace
+        .tasks
+        .iter()
+        .map(|node| node.task.id.as_str())
+        .collect();
+    assert_eq!(
+        ordered_ids,
+        [
+            existing.id.as_str(),
+            parked.id.as_str(),
+            input_row.id.as_str()
+        ],
+        "the restored plan item must appear above the persistent input row"
+    );
+}
+
+#[test]
+fn restoring_cross_cycle_linked_root_moves_all_preceding_input_rows_after_it() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let goal = add_task(&db.db, &month.id, "long-term goal", NOW);
+    let source = create_week(&db.db, &month.id, "2026-09-09");
+    let target = create_week(&db.db, &month.id, "2026-09-16");
+
+    let first = tasks::add_task(
+        &db.db,
+        &tasks::AddTaskArgs {
+            cycle_id: target.id.clone(),
+            title: "first linked item".into(),
+            position: Some(0),
+            ..Default::default()
+        },
+        NOW,
+    )
+    .unwrap()
+    .value;
+    let second = tasks::add_task(
+        &db.db,
+        &tasks::AddTaskArgs {
+            cycle_id: target.id.clone(),
+            title: "second linked item".into(),
+            position: Some(1),
+            ..Default::default()
+        },
+        NOW + 1,
+    )
+    .unwrap()
+    .value;
+    tasks::set_task_parent_link(&db.db, &first.id, Some(&goal.id)).unwrap();
+    tasks::set_task_parent_link(&db.db, &second.id, Some(&goal.id)).unwrap();
+    let first_input = tasks::add_task(
+        &db.db,
+        &tasks::AddTaskArgs {
+            cycle_id: target.id.clone(),
+            title: String::new(),
+            position: Some(2),
+            ..Default::default()
+        },
+        NOW + 2,
+    )
+    .unwrap()
+    .value;
+    let second_input = tasks::add_task(
+        &db.db,
+        &tasks::AddTaskArgs {
+            cycle_id: target.id.clone(),
+            title: String::new(),
+            position: Some(3),
+            ..Default::default()
+        },
+        NOW + 3,
+    )
+    .unwrap()
+    .value;
+
+    let parked = add_task(&db.db, &source.id, "restore under goal", NOW + 4);
+    tasks::set_task_parent_link(&db.db, &parked.id, Some(&goal.id)).unwrap();
+    tasks::move_task(&db.db, &parked.id, LATER_CYCLE_ID, None).unwrap();
+    tasks::promote_later_task(
+        &db.db,
+        &parked.id,
+        Some(&target.id),
+        common::today(),
+        NOW + 5,
+    )
+    .unwrap();
+
+    let restored = task(&db, &parked.id);
+    assert_eq!(restored.parent_id.as_deref(), Some(goal.id.as_str()));
+    let workspace = editor::get_editor_workspace(&db.db, &target.id).unwrap();
+    let ordered_ids: Vec<&str> = workspace
+        .tasks
+        .iter()
+        .map(|node| node.task.id.as_str())
+        .collect();
+    assert_eq!(
+        ordered_ids,
+        [
+            first.id.as_str(),
+            second.id.as_str(),
+            parked.id.as_str(),
+            first_input.id.as_str(),
+            second_input.id.as_str()
+        ],
+        "cross-cycle links render as roots, and every input row follows them"
+    );
+}
+
+#[test]
 fn promotion_failures_are_atomic_and_duplicate_promotion_does_not_create_data() {
     // A proposal lock rejects the operation before any move or target
     // creation.  The Later row and its type remain inspectable.

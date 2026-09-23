@@ -387,7 +387,7 @@ function EditRepeatDialog({
  * message（past_cycle / has_started_session / not_latest_n 等）通过稳定错误码
  * 本地化，未知错误码仍保留后端诊断信息。
  */
-function DeleteCycleDialog({
+export function DeleteCycleDialog({
   cycle,
   open,
   onClose,

@@ -11,9 +11,7 @@ import { RemovalList } from "../../ui/RemovalList";
  * - 行内编辑：Enter 提交并在下方建新行聚焦；Tab/Shift+Tab 调整层级
  *   （set_task_parent_link，同周期自由嵌套）；中文输入法组合期间的
  *   Enter 只确认候选（e.nativeEvent.isComposing，§5.1）。
- * - 拖拽：固定把手触发 HTML5 DnD，在视觉兄弟组内排序，跨栏关联上级；
- *   先写 react-query 缓存（乐观），再调 reorder_tasks，失败回滚缓存并
- *   行内提示。
+ * - 固定把手只在本计划的同级任务之间排序；跨周期关联由 ParentGoalPicker 完成。
  * - 待确认行原位预览并锁定；确认入口仅在 Coach，删除线仅用于任务标题。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode, type CSSProperties } from "react";
@@ -37,12 +35,12 @@ import {
 import { qk } from "../../lib/events";
 import { errorMessage, invalidateTasks, useActionError } from "./actions";
 
-import { canAssignParent, ROOT_PALETTE, taskColor, type RelationView } from "./relations";
+import { ROOT_PALETTE, taskColor, type RelationView } from "./relations";
 import { ParentGoalPicker } from "./ParentGoalPicker";
 import { useDailyGoalTooltip } from "./useDailyGoalTooltip";
-import { TASK_DRAG_TYPE, useTaskDrag } from "./TaskDragContext";
 import { useTranslation } from "../../lib/i18n";
 import { useTaskDeletion } from "./TaskDeletion";
+import { TaskDetailDialog } from "./TaskDetailDialog";
 
 /** 列表尾空行的判定（对齐 domain::task::is_empty_input_row 的可见部分）。 */
 function isEmptyRow(task: { title: string; completed: boolean; children: TaskNode[] }): boolean {
@@ -50,7 +48,7 @@ function isEmptyRow(task: { title: string; completed: boolean; children: TaskNod
 }
 
 type VisibleRow = { kind: "task"; node: TaskNode; depth: number };
-
+const TASK_ORDER_DRAG_TYPE = "application/x-goal-task-order";
 
 function flattenTasks(nodes: TaskNode[], depth: number, out: VisibleRow[]): void {
   for (const node of nodes) {
@@ -95,9 +93,19 @@ export function TaskList({
   const deletion = useTaskDeletion();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  const [dragged, setDragged] = useState<{ id: string; parentId: string | null } | null>(null);
+  const [dropHint, setDropHint] = useState<{ id: string; before: boolean } | null>(null);
   const inputRefs = useRef(new Map<string, HTMLTextAreaElement>());
-  const [drag, setDrag] = useTaskDrag();
-  const [dropHint, setDropHint] = useState<{ id: string; before: boolean; kind: "reorder" | "link" } | null>(null);
+
+  const resetDrag = () => { setDragged(null); setDropHint(null); };
+  useEffect(() => {
+    if (!dragged) return;
+    const end = () => resetDrag();
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") resetDrag(); };
+    window.addEventListener("dragend", end);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("dragend", end); window.removeEventListener("keydown", escape); };
+  }, [dragged]);
 
   const tree = workspace.data?.tasks ?? [];
   const rows = useMemo(() => {
@@ -110,7 +118,13 @@ export function TaskList({
       && !drafts[row.node.id] && row.node.id !== focusTarget);
     const last = blanks[blanks.length - 1];
     const redundant = new Set(blanks.filter((row) => row !== last).map((row) => row.node.id));
-    return all.filter((row) => row.kind !== "task" || !redundant.has(row.node.id));
+    const visible = all.filter((row) => row.kind !== "task" || !redundant.has(row.node.id));
+    // A restored Later item can have a position after the persisted input row.
+    // Keep the input affordance at the end even for plans saved before the move fix.
+    const inputRows = visible.filter((row) => row.depth === 0 && row.node.parent_id === null
+      && row.node.proposal == null && isEmptyRow(row.node) && !row.node.subtasks?.length && !drafts[row.node.id]);
+    const inputIds = new Set(inputRows.map((row) => row.node.id));
+    return [...visible.filter((row) => !inputIds.has(row.node.id)), ...inputRows];
   }, [tree, drafts, focusTarget]);
   const discardDraft = (id: string) => setDrafts((current) => {
     if (!(id in current)) return current;
@@ -226,7 +240,8 @@ export function TaskList({
 
   const nest = async (row: VisibleRow) => {
     // Cross-cycle ownership does not make a root row visually nested.
-    const siblings = currentFlat().filter((r) => row.depth === 0 ? r.depth === 0 : r.node.parent_id === row.node.parent_id);
+    const siblings = currentFlat().filter((r) => !isEmptyRow(r.node)
+      && (row.depth === 0 ? r.depth === 0 : r.node.parent_id === row.node.parent_id));
     const idx = siblings.findIndex((r) => r.node.id === row.node.id);
     const previous = idx > 0 ? siblings[idx - 1] : undefined;
     if (!previous) return; // 没有上一个兄弟：无法成为其子步骤
@@ -257,31 +272,6 @@ export function TaskList({
     if (await run(() => setTaskRootColor(taskId, colorKey))) invalidateTasks(qc, cycleId);
   };
 
-  /* --- 拖拽排序（7.8，乐观更新） ------------------------------------- */
-
-  const resetDrag = () => {
-    relations?.setDragging(false);
-    setDrag(null);
-    setDropHint(null);
-  };
-
-  useEffect(() => { if (!drag) setDropHint(null); }, [drag]);
-
-  useEffect(() => {
-    if (!drag || drag.task.cycle_id !== cycleId) return;
-    if (!active || locked) { resetDrag(); return; }
-    const cancel = () => resetDrag();
-    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") cancel(); };
-    window.addEventListener("dragend", cancel);
-    window.addEventListener("keydown", escape);
-    return () => {
-      window.removeEventListener("dragend", cancel);
-      window.removeEventListener("keydown", escape);
-      relations?.setDragging(false);
-      setDrag((current) => current?.task.id === drag.task.id ? null : current);
-    };
-  }, [drag, active, locked, cycleId]);
-
   const applyReorder = (parentId: string | null, orderedIds: string[]) => {
     const key = qk.editorWorkspace(cycleId);
     const snapshot = qc.getQueryData<EditorWorkspace>(key) ?? null;
@@ -299,43 +289,40 @@ export function TaskList({
   };
 
   const visualParent = (row: VisibleRow) => row.depth === 0 ? null : row.node.parent_id;
-  const dropKind = (target: VisibleRow): "reorder" | "link" | null => {
-    if (!drag || !active || locked || target.node.proposal || drag.task.id === target.node.id) return null;
-    if (drag.task.cycle_id === cycleId) {
-      if (drag.parentId !== visualParent(target)) return null;
-      // A proposal's position is locked along with its contents.
-      return currentFlat().some((row) => visualParent(row) === drag.parentId && row.node.proposal) ? null : "reorder";
-    }
-    const hasProposal = (task: TaskNode): boolean => !!task.proposal || task.children.some(hasProposal);
-    return relations && drag.parentId === null && drag.task.parent_id !== target.node.id
-      && !hasProposal(drag.task) && canAssignParent(drag.task, target.node, relations.cycles) ? "link" : null;
+  const canDropOn = (target: VisibleRow) => {
+    if (!dragged || !active || locked || target.node.proposal || target.node.id === dragged.id
+      || visualParent(target) !== dragged.parentId) return false;
+    if (!currentFlat().some((item) => item.node.id === dragged.id && !isEmptyRow(item.node))) return false;
+    return !currentFlat().some((item) => visualParent(item) === dragged.parentId && item.node.proposal);
   };
-
-  const onDropRow = (target: VisibleRow, before: boolean) => {
-    const kind = dropKind(target);
-    const source = drag;
+  const dropOnRow = (target: VisibleRow, before: boolean) => {
+    const source = dragged;
+    if (!source || !canDropOn(target)) { resetDrag(); return; }
+    const siblings = currentFlat().filter((item) => visualParent(item) === source.parentId);
+    const titled = siblings.filter((item) => !isEmptyRow(item.node));
+    const ordered = titled.map((item) => item.node.id).filter((id) => id !== source.id);
+    const targetIndex = isEmptyRow(target.node) ? ordered.length : ordered.indexOf(target.node.id);
+    if (targetIndex < 0) { resetDrag(); return; }
+    ordered.splice(targetIndex + (before ? 0 : 1), 0, source.id);
+    ordered.push(...siblings.filter((item) => isEmptyRow(item.node)).map((item) => item.node.id));
     resetDrag();
-    if (!source || !kind) return;
-    if (kind === "link") {
-      void run(async () => {
-        await setTaskParentLink(source.task.id, target.node.id);
-        invalidateTasks(qc, source.task.cycle_id);
-        relations?.select(source.task.id);
-      });
-      return;
-    }
-    const dragId = source.task.id;
-    const siblingIds = currentFlat().filter((row) => visualParent(row) === source.parentId).map((row) => row.node.id);
-    const without = siblingIds.filter((id) => id !== dragId);
-    const idx = without.indexOf(target.node.id);
-    if (idx < 0) return;
-    // The typing affordance stays last; dropping on it means append a task.
-    if (isEmptyRow(target.node)) before = true;
-    const insertAt = before ? idx : idx + 1;
-    const ordered = [...without.slice(0, insertAt), dragId, ...without.slice(insertAt)];
-    if (ordered.some((id, index) => id !== siblingIds[index])) applyReorder(source.parentId, ordered);
+    if (ordered.some((id, index) => id !== siblings[index]?.node.id)) applyReorder(source.parentId, ordered);
   };
-
+  const reorderRow = (row: VisibleRow, direction: -1 | 1) => {
+    const parentId = visualParent(row);
+    const siblings = currentFlat().filter((item) => visualParent(item) === parentId);
+    if (siblings.some((item) => item.node.proposal)) return;
+    const titled = siblings.filter((item) => !isEmptyRow(item.node));
+    const index = titled.findIndex((item) => item.node.id === row.node.id);
+    const next = index + direction;
+    const neighbour = titled[next];
+    if (index < 0 || !neighbour) return;
+    const ordered = titled.map((item) => item.node.id);
+    ordered[index] = neighbour.node.id;
+    ordered[next] = row.node.id;
+    ordered.push(...siblings.filter((item) => isEmptyRow(item.node)).map((item) => item.node.id));
+    applyReorder(parentId, ordered);
+  };
   const allowColor = cycleType === "month";
 
   const summary = workspace.data?.work_mix && workspace.data.work_mix.total > 0 && (
@@ -353,9 +340,7 @@ export function TaskList({
   );
 
   const content = (
-    <div className="flex flex-col" data-task-list={cycleId} onDragLeave={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropHint(null);
-    }}>
+    <div className="flex flex-col" data-task-list={cycleId}>
       {locked && (
         <p className="px-2 pb-1 text-caption text-hint">
           {t("workspace.ended")}
@@ -367,15 +352,13 @@ export function TaskList({
             key={row.node.id}
             active={active}
             row={row}
+            cycleLabel={workspace.data?.cycle?.title}
             locked={locked || row.node.proposal != null}
             allowColor={allowColor}
             relations={relations}
             onReviewIssues={onReviewIssues}
             draft={row.node.proposal ? row.node.title : drafts[row.node.id] ?? row.node.title}
-            dragging={drag?.task.id === row.node.id}
-            goalHintEnabled={active && !drag}
-            dropBefore={drag && dropHint?.id === row.node.id && dropHint.kind === "reorder" ? dropHint.before : null}
-            linkHint={!!drag && dropHint?.id === row.node.id && dropHint.kind === "link"}
+            goalHintEnabled={active}
             placeholder={cycleType === "month" ? t("task.addGoal") : t("task.addTask")}
             onDraftChange={(value) => setDrafts((d) => ({ ...d, [row.node.id]: value }))}
             onInputRef={(el) => {
@@ -412,46 +395,30 @@ export function TaskList({
             onDelete={() => void deletion.requestDelete(row.node)}
             onSendToLater={() => void sendToLater(row.node)}
             onPickColor={(key) => void pickColor(row.node.id, key)}
-            onDragStart={(e) => {
-              e.dataTransfer.setData(TASK_DRAG_TYPE, row.node.id);
-              e.dataTransfer.effectAllowed = "move";
-              const element = e.currentTarget.closest<HTMLElement>("[data-task-id]");
-              if (element) e.dataTransfer.setDragImage(element, 12, 16);
-              setDrag({ task: { ...row.node, cycle_id: cycleId }, parentId: visualParent(row) });
-              relations?.setDragging(true);
+            onReorder={(direction) => reorderRow(row, direction)}
+            dragging={dragged?.id === row.node.id}
+            dropBefore={dropHint?.id === row.node.id ? dropHint.before : null}
+            onDragStart={(event) => {
+              if (!active || locked || row.node.proposal || isEmptyRow(row.node)) return;
+              event.dataTransfer.setData(TASK_ORDER_DRAG_TYPE, row.node.id);
+              event.dataTransfer.effectAllowed = "move";
+              if (event.dataTransfer.setDragImage) event.dataTransfer.setDragImage(event.currentTarget.closest("[data-task-id]")!, 12, 16);
+              setDragged({ id: row.node.id, parentId: visualParent(row) });
+              setDropHint(null);
             }}
             onDragEnd={resetDrag}
-            onHandleKeyDown={(event) => {
-              if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+            onDragOver={(event) => {
+              if (!canDropOn(row)) return;
               event.preventDefault();
-              const parentId = visualParent(row);
-              const siblings = currentFlat().filter((item) => visualParent(item) === parentId);
-              if (siblings.some((item) => item.node.proposal)) return;
-              const index = siblings.findIndex((item) => item.node.id === row.node.id);
-              const next = index + (event.key === "ArrowUp" ? -1 : 1);
-              const neighbour = siblings[next];
-              if (index < 0 || !neighbour || isEmptyRow(neighbour.node)) return;
-              const ordered = siblings.map((item) => item.node.id);
-              ordered[index] = neighbour.node.id;
-              ordered[next] = row.node.id;
-              applyReorder(parentId, ordered);
+              event.dataTransfer.dropEffect = "move";
+              const before = isEmptyRow(row.node) || event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2;
+              setDropHint({ id: row.node.id, before });
             }}
-            onDragOver={(e) => {
-              const kind = e.dataTransfer.types.includes(TASK_DRAG_TYPE) ? dropKind(row) : null;
-              if (!kind) { setDropHint(null); return; }
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              const rect = e.currentTarget.getBoundingClientRect();
-              const before = isEmptyRow(row.node) || e.clientY < rect.top + rect.height / 2;
-              setDropHint((prev) =>
-                prev?.id === row.node.id && prev.before === before && prev.kind === kind ? prev : { id: row.node.id, before, kind },
-              );
-            }}
-            onDrop={(e) => {
-              if (!drag || e.dataTransfer.getData(TASK_DRAG_TYPE) !== drag.task.id) return;
-              e.preventDefault();
-              const rect = e.currentTarget.getBoundingClientRect();
-              onDropRow(row, e.clientY < rect.top + rect.height / 2);
+            onDrop={(event) => {
+              if (!canDropOn(row)) return;
+              event.preventDefault();
+              const before = isEmptyRow(row.node) || event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2;
+              dropOnRow(row, before);
             }}
           />
         ),
@@ -491,15 +458,13 @@ export function TaskList({
 function TaskRow({
   active,
   row,
+  cycleLabel,
   locked,
   allowColor,
   relations,
   onReviewIssues,
   draft,
-  dragging,
   goalHintEnabled,
-  dropBefore,
-  linkHint,
   placeholder,
   onDraftChange,
   onInputRef,
@@ -509,23 +474,23 @@ function TaskRow({
   onDelete,
   onSendToLater,
   onPickColor,
+  onReorder,
+  dragging,
+  dropBefore,
   onDragStart,
   onDragEnd,
-  onHandleKeyDown,
   onDragOver,
   onDrop,
 }: {
   active: boolean;
   row: VisibleRow;
+  cycleLabel?: string;
   locked: boolean;
   allowColor: boolean;
   relations?: RelationView;
   onReviewIssues?: () => void;
   draft: string;
-  dragging: boolean;
   goalHintEnabled: boolean;
-  dropBefore: boolean | null;
-  linkHint: boolean;
   placeholder: string;
   onDraftChange: (value: string) => void;
   onInputRef: (el: HTMLTextAreaElement | null) => void;
@@ -535,16 +500,19 @@ function TaskRow({
   onDelete: () => void;
   onSendToLater: () => void;
   onPickColor: (colorKey: string | null) => void;
-  onDragStart: (e: DragEvent<HTMLSpanElement>) => void;
+  onReorder: (direction: -1 | 1) => void;
+  dragging: boolean;
+  dropBefore: boolean | null;
+  onDragStart: (event: DragEvent<HTMLSpanElement>) => void;
   onDragEnd: () => void;
-  onHandleKeyDown: (e: KeyboardEvent<HTMLSpanElement>) => void;
-  onDragOver: (e: DragEvent<HTMLDivElement>) => void;
-  onDrop: (e: DragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation("planning");
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
-  const goalTooltip = useDailyGoalTooltip(row.node, relations, goalHintEnabled && !linkHint, rowRef);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const goalTooltip = useDailyGoalTooltip(row.node, relations, goalHintEnabled, rowRef);
   useLayoutEffect(() => {
     const field = titleRef.current;
     if (!field) return;
@@ -556,58 +524,64 @@ function TaskRow({
   const color = relations ? taskColor(node, relations.tasks) : null;
   const highlighted = relations?.highlighted.has(node.id) ?? false;
   const hints = [node.needs_refinement === true ? t("task.clarify") : null, node.needs_breakdown === true ? t("task.breakdown") : null].filter(Boolean).join(" · ");
-  return (
+  return (<>
     <div
       ref={rowRef}
       {...goalTooltip.rowProps}
       data-task-id={node.id}
+      data-task-detail
+      data-task-empty={empty || undefined}
       data-proposal={node.proposal ?? undefined}
       title={node.proposal ? t("task.previewLockedCn") : undefined}
       data-related={highlighted || undefined}
       data-selected={relations?.selectedId === node.id || undefined}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       onClick={(event) => {
-        if (!empty && !(event.target as HTMLElement).closest("button, [role=menu]")) relations?.select(node.id);
+        if (!empty && !(event.target as HTMLElement).closest("button, [role=menu], [data-task-drag-handle]")) relations?.select(node.id);
       }}
-      onDragOver={locked ? undefined : onDragOver}
-      onDrop={locked ? undefined : onDrop}
+      onDoubleClick={(event) => {
+        if (empty || (event.target as HTMLElement).closest("button, [role=menu], [data-task-drag-handle]")) return;
+        const title = titleRef.current;
+        if (title && title.selectionStart !== title.selectionEnd) {
+          title.setSelectionRange(title.selectionEnd, title.selectionEnd);
+        }
+        setDetailOpen(true);
+      }}
       className={[
         "task-row group relative flex items-start gap-1 rounded-md py-1 pr-1",
         "transition-colors duration-150",
+        dragging ? "opacity-45" : "",
         node.proposal ? "bg-focus-surface/60 ring-1 ring-inset ring-focus/15" : "hover:bg-hover",
-        dragging ? "opacity-50" : "",
-        linkHint ? "bg-focus-surface ring-1 ring-inset ring-focus" : "",
       ].join(" ")}
       style={{ marginLeft: row.depth * 20, "--task-color": color ?? "var(--color-focus)" } as CSSProperties}
     >
-      {dropBefore && <InsertLine position="top" />}
-      {linkHint && <span role="status" className="pointer-events-none absolute bottom-full left-4 z-20 mb-1 max-w-full truncate rounded-md bg-focus px-2 py-1 text-caption text-white shadow-sm">{t("task.linkTo", { title: node.title })}</span>}
-      {/* The handle is draggable before pointer-down; the editable row never is. */}
-      {empty || locked ? (
-        <span className="w-4 shrink-0" aria-hidden="true" />
-      ) : (
+      {dropBefore !== null && <span aria-hidden="true" className={`pointer-events-none absolute left-1 right-1 z-10 h-0.5 rounded-full bg-focus ${dropBefore ? "top-0" : "bottom-0"}`} />}
+      {!empty && !locked ? (
         <span
           role="button"
           tabIndex={active ? 0 : -1}
-          aria-label={t("task.reorder", { title: node.title || t("task.reorderRow") })}
+          data-task-drag-handle
+          aria-label={t("task.reorder", { title: node.title })}
           aria-describedby={goalTooltip.descriptionId}
           title={t("task.reorderTitle")}
           draggable={active}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
-          onKeyDown={onHandleKeyDown}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+              event.preventDefault();
+              onReorder(event.key === "ArrowUp" ? -1 : 1);
+            }
+          }}
+          onClick={(event) => { event.preventDefault(); event.stopPropagation(); }}
           className="task-drag-handle flex h-7 w-4 shrink-0 cursor-grab items-center justify-center rounded-sm text-hint opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing"
         >
           <svg viewBox="0 0 12 16" className="pointer-events-none h-3.5 w-3" aria-hidden="true">
-            <circle cx="3" cy="4" r="1.1" fill="currentColor" />
-            <circle cx="9" cy="4" r="1.1" fill="currentColor" />
-            <circle cx="3" cy="8" r="1.1" fill="currentColor" />
-            <circle cx="9" cy="8" r="1.1" fill="currentColor" />
-            <circle cx="3" cy="12" r="1.1" fill="currentColor" />
-            <circle cx="9" cy="12" r="1.1" fill="currentColor" />
+            {[4, 8, 12].flatMap((y) => [3, 9].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.1" fill="currentColor" />))}
           </svg>
         </span>
-      )}
+      ) : <span className="w-4 shrink-0" aria-hidden="true" />}
       <Checkbox
         checked={node.completed}
         disabled={locked || empty}
@@ -660,19 +634,13 @@ function TaskRow({
           </IconButton>
         </span>
       )}
-      {dropBefore === false && <InsertLine position="bottom" />}
       {goalTooltip.tooltip}
     </div>
-  );
-}
-
-function InsertLine({ position }: { position: "top" | "bottom" }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`absolute ${position === "top" ? "-top-px" : "-bottom-px"} left-0 right-0 h-0.5 rounded-full bg-accent`}
-    />
-  );
+    {detailOpen && <TaskDetailDialog task={node} locked={locked} onClose={() => setDetailOpen(false)}
+      returnFocusTo={titleRef} cycleLabel={cycleLabel}
+      parentGoalTitle={node.parent_id && relations?.tasks.get(node.parent_id)?.cycle_id !== node.cycle_id
+        ? relations?.tasks.get(node.parent_id)?.title : undefined} />}
+  </>);
 }
 
 function IconButton({
@@ -695,7 +663,7 @@ function IconButton({
       aria-describedby={descriptionId}
       title={title}
       onClick={onClick}
-      className="flex h-7 w-7 items-center justify-center rounded-sm text-secondary transition-colors duration-100 hover:bg-hover"
+      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-sm text-secondary transition-colors duration-100 hover:bg-hover focus-visible:outline-2 focus-visible:outline-focus"
     >
       {children}
     </button>

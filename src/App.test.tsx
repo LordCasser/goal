@@ -8,10 +8,11 @@ vi.mock("./lib/ipc", () => ({
   LATER_CYCLE_ID: "later",
   getPlannerState: async () => ({ cycles: ["month", "week", "day"].map((type) => ({ type, id: `${type}-plan` })) }),
   getSettings: async () => ({ theme: "gray" }),
+  getEditorWorkspace: async () => ({ tasks: [] }),
   startPlanning: planning,
 }));
 vi.mock("./lib/events", () => ({
-  qk: { plannerState: () => ["planner"], settings: () => ["settings"], agentConversation: () => ["conversation"], agentDecision: () => ["agent-decision"] },
+  qk: { plannerState: () => ["planner"], editorWorkspace: (id: string) => ["editor-workspace", id], settings: () => ["settings"], agentConversation: () => ["conversation"], agentDecision: () => ["agent-decision"] },
   initEventInvalidation: async () => () => {},
   invalidateAgentEffects: () => {},
   completeAgentTurn: () => {},

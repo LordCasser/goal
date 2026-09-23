@@ -20,6 +20,7 @@ import { qk } from "../../lib/events";
 import { Button, Checkbox, Popover, PopoverItem, cn } from "../../ui";
 import { errorMessage, useTranslation } from "../../lib/i18n";
 import { useTaskDeletion } from "../planner/TaskDeletion";
+import { TaskDetailDialog } from "../planner/TaskDetailDialog";
 
 export type LaterTaskRowProps = {
   task: TaskNode;
@@ -45,6 +46,8 @@ export function LaterTaskRow({
   const deletion = useTaskDeletion();
   const preview = task.proposal != null;
   const [title, setTitle] = useState(task.title);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
   const [promoteOpen, setPromoteOpen] = useState(false);
   const promoteAnchor = useRef<HTMLSpanElement>(null);
   const laterPlanType = task.later_plan_type ?? "month";
@@ -135,12 +138,23 @@ export function LaterTaskRow({
     setPromoteOpen((open) => !open);
   };
 
-  return (
+  return (<>
     <div
+      data-task-detail
+      data-task-empty={!task.title.trim() || undefined}
+      data-task-id={task.id}
       data-proposal={task.proposal ?? undefined}
       title={preview ? t("later.previewLocked") : undefined}
       className={cn("group rounded-md py-0.5", preview && "bg-focus-surface/60 ring-1 ring-inset ring-focus/15")}
       style={{ paddingLeft: depth * 20 }}
+      onDoubleClick={(event) => {
+        if (!task.title.trim() || (event.target as HTMLElement).closest("button, [role=menu]")) return;
+        const field = titleRef.current;
+        if (field && field.selectionStart !== field.selectionEnd) {
+          field.setSelectionRange(field.selectionEnd, field.selectionEnd);
+        }
+        setDetailOpen(true);
+      }}
     >
       <div className="flex items-start gap-1">
         <Checkbox
@@ -151,6 +165,7 @@ export function LaterTaskRow({
         />
         {/* 行内标题编辑器：无边线，完成态用提示文字色 + 删除线（design.md 5.2）。 */}
         <input
+          ref={titleRef}
           autoFocus={autoFocusTitle}
           value={preview ? task.title : title}
           readOnly={preview || promote.isPending}
@@ -217,7 +232,10 @@ export function LaterTaskRow({
         ))}
       </Popover>
     </div>
-  );
+    {detailOpen && <TaskDetailDialog task={task} locked={preview || promote.isPending}
+      onClose={() => setDetailOpen(false)} returnFocusTo={titleRef}
+      cycleLabel={planTypeLabel} />}
+  </>);
 }
 
 /** 细线几何图标：16px、1.5 描边（design.md 4.3 图标语言）。 */

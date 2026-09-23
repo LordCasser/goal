@@ -48,6 +48,14 @@ pub fn patch_task(
 }
 
 #[tauri::command]
+pub fn get_task_continuity(
+    db: State<'_, Db>,
+    task_id: String,
+) -> AppResult<Option<tasks::TaskContinuity>> {
+    tasks::get_task_continuity(&db, &task_id)
+}
+
+#[tauri::command]
 pub fn delete_task(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,

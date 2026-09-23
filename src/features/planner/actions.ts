@@ -41,6 +41,7 @@ export function useActionError(): {
 
 /** 任务写入后的补充失效（事件矩阵见 lib/events.ts）。 */
 export function invalidateTasks(qc: QueryClient, cycleId: string): void {
+  void qc.invalidateQueries({ queryKey: ["task-continuity"] });
   void qc.invalidateQueries({ queryKey: qk.editorWorkspace(cycleId) });
   // A parent goal link changes the work mix of its descendants too.
   void qc.invalidateQueries({ queryKey: ["editor-workspace"] });

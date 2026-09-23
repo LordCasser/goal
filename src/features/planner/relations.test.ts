@@ -67,11 +67,12 @@ describe("task ownership", () => {
     graph.set(week.id, { ...week, parent_id: null });
     expect(taskColor(step, graph)).toBeNull();
   });
-  it("shows direct relations without expanding transitive descendants", () => {
+  it("reveals the full selected goal path and its own descendants", () => {
     const graph = indexTasks([[root], [week], [day]]);
     expect(directRelations(root.id, graph, cycles).map(([a,b]) => [a.id,b.id])).toEqual([[root.id,week.id]]);
     expect(directRelations(week.id, graph, cycles)).toHaveLength(2);
-    expect(highlightedTasks(root.id, graph, cycles).has(day.id)).toBe(false);
+    expect(highlightedTasks(root.id, graph, cycles).has(day.id)).toBe(true);
+    expect(highlightedTasks(day.id, graph, cycles)).toEqual(new Set([day.id, week.id, root.id]));
   });
   it("keeps preview identity in the graph while excluding empty inputs", () => {
     const step = task("step", "w", week.id);

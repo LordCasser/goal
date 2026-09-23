@@ -1,6 +1,9 @@
 import { useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { platform, primaryShortcut } from "../../lib/platform";
 import { useTranslation } from "../../lib/i18n";
+import { qk } from "../../lib/events";
+import { getEditorWorkspace, getSettings, LATER_CYCLE_ID } from "../../lib/ipc";
 import { ProposalsBar } from "../proposals/ProposalsBar";
 import { useDesktopWindow } from "./useDesktopWindow";
 
@@ -35,6 +38,19 @@ export function WindowBar({
 }) {
   const headerRef = useRef<HTMLElement>(null);
   const { t } = useTranslation("shell");
+  // Shares the same cache entry as LaterPanel so task events refresh both the
+  // panel and its navigation count together.
+  const laterWorkspace = useQuery({
+    queryKey: qk.editorWorkspace(LATER_CYCLE_ID),
+    queryFn: () => getEditorWorkspace(LATER_CYCLE_ID),
+  });
+  const settings = useQuery({ queryKey: qk.settings(), queryFn: getSettings });
+  const showLaterCount = settings.data?.show_later_count ?? true;
+  const laterCount = (laterWorkspace.data?.tasks ?? []).filter(
+    (task) => task.proposal === null && task.title.trim().length > 0,
+  ).length;
+  const showCount = showLaterCount && laterWorkspace.data !== undefined;
+  const visibleCount = laterCount > 99 ? "99+" : String(laterCount);
   const maximizeRef = useRef<HTMLButtonElement>(null);
   const dragRef = useRef<HTMLDivElement>(null);
   const shell = useDesktopWindow(headerRef, maximizeRef, dragRef);
@@ -51,12 +67,17 @@ export function WindowBar({
       <button
         type="button"
         aria-pressed={laterActive}
+        aria-label={showCount ? t("desktop.laterCountLabel", { count: laterCount }) : undefined}
         title={t("desktop.laterTitle", { shortcut: primaryShortcut("L", true) })}
         className={`${buttonBase} ${laterActive ? active : hover}`}
         onClick={onToggleLater}
       >
         <ClockIcon />
         {t("desktop.later")}
+        {showCount && <span data-testid="later-count-badge" aria-hidden="true"
+          className="rounded-full bg-subtle px-1.5 text-[11px] leading-4 tabular-nums text-secondary">
+          {visibleCount}
+        </span>}
       </button>
       {/* The spacer keeps dragging and double-click zoom native to the window. */}
       <div ref={dragRef} className="window-drag-area" data-tauri-drag-region={platform === "macos" ? true : undefined} />

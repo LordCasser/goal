@@ -12,7 +12,6 @@ export type RelationView = {
   highlighted: Set<string>;
   select: (id: string) => void;
   preview: (id: string | null) => void;
-  setDragging: (dragging: boolean) => void;
 };
 
 export function indexTasks(trees: TaskNode[][]): TaskGraph {
@@ -34,7 +33,7 @@ export function canLink(child: TaskNode, parent: TaskNode, cycles: Map<string, C
       || (childCycle.type === "day" && (parentCycle.type === "week" || parentCycle.type === "month")));
 }
 
-/** Menu and drag ownership use the same planning/date constraints. */
+/** Parent links respect planning/date constraints. */
 export function canAssignParent(child: TaskNode, parent: TaskNode, cycles: Map<string, Cycle>): boolean {
   if (child.proposal || parent.proposal || !parent.title.trim() || !canLink(child, parent, cycles)) return false;
   const day = cycles.get(child.cycle_id);
@@ -82,15 +81,32 @@ export function directRelations(id: string | null, tasks: TaskGraph, cycles: Map
   return edges;
 }
 
-export function highlightedTasks(id: string | null, tasks: TaskGraph, cycles: Map<string, Cycle>): Set<string> {
+export function highlightedTasks(id: string | null, tasks: TaskGraph, _cycles: Map<string, Cycle>): Set<string> {
   const result = new Set<string>();
-  if (!id || !tasks.has(id)) return result;
-  result.add(id);
-  directRelations(id, tasks, cycles).forEach(([a, b]) => { result.add(a.id); result.add(b.id); });
-  // Include the steps of related rows, without recursively opening other horizons.
-  const visit = (task: TaskNode) => task.children.forEach((child) => {
-    if (!result.has(child.id)) { result.add(child.id); visit(child); }
-  });
-  [...result].forEach((key) => { const task = tasks.get(key); if (task) visit(task); });
+  const selected = id ? tasks.get(id) : undefined;
+  if (!selected) return result;
+  // Follow the selected work toward its goals, then down through its own
+  // steps. A daily step reveals its weekly and long-term path without also
+  // lighting unrelated siblings of those goals.
+  let parent: TaskNode | undefined = selected;
+  while (parent && !result.has(parent.id)) {
+    result.add(parent.id);
+    parent = parent.parent_id ? tasks.get(parent.parent_id) : undefined;
+  }
+  const children = new Map<string, TaskNode[]>();
+  for (const task of tasks.values()) {
+    if (!task.parent_id) continue;
+    const group = children.get(task.parent_id) ?? [];
+    group.push(task);
+    children.set(task.parent_id, group);
+  }
+  const visit = (task: TaskNode) => {
+    for (const child of children.get(task.id) ?? []) {
+      if (result.has(child.id)) continue;
+      result.add(child.id);
+      visit(child);
+    }
+  };
+  visit(selected);
   return result;
 }

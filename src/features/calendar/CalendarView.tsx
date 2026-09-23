@@ -4,25 +4,23 @@
  * 同一份数据的两个投影——本组件不维护任何独立副本，写入后靠 cycles:changed
  * 事件与主动失效回到数据库真相（spec：日历与层级的双向一致）。
  *
- * 拖拽策略沿用工作台的乐观更新（TaskList.applyReorder）：拖到空日期先改
- * react-query 缓存快照，请求失败整体回滚并提示；目标已被占用则弹策略
- * 弹窗（merge / swap），由用户显式选择，绝不静默覆盖。
+ * 日计划通过日期选择改期；目标已被占用时由用户选择合并或交换。
  *
  * 顶栏视图切换由协调者接线（App 窗口栏）；本组件内部提供密度切换并把
  * 密度偏好写入 localStorage（key：planner.calendar-density，spec：记住偏好），
  * 并在提供 onClose 时渲染关闭按钮。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import { Button, cn } from "../../ui";
-import { ensureDay, getPlannerState, getEditorWorkspacesByCycleIds, getSettings, LATER_CYCLE_ID, type AgentPageContext } from "../../lib/ipc";
+import { Button, Dialog, cn } from "../../ui";
+import { createDayPlan, getPlannerState, getEditorWorkspacesByCycleIds, getSettings, LATER_CYCLE_ID, type AgentPageContext } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import { addDaysISO, todayISO } from "../planner/dates";
 import { weekStartForDate } from "../planner/WeekNavigation";
-import { errorMessage, useActionError } from "../planner/actions";
+import { invalidateCycles, useActionError } from "../planner/actions";
+import { DeleteCycleDialog } from "../planner/CycleOptionsMenu";
 import {
   addMonthsISO,
   loadPreferredView,
@@ -30,14 +28,13 @@ import {
   overlapIds,
   savePreferredView,
   weekBounds,
-  applyMoveToRange,
   calendarPlanCycleIds,
   calendarTasks,
   type CalendarViewMode,
 } from "./calendar-model";
 import { DayCell } from "./DayCell";
+import { CalendarDatePicker } from "./CalendarDatePicker";
 import { DayTimeline } from "./DayTimeline";
-import { DAY_DRAG_TYPE, readDragToken } from "./calendar-dnd";
 import { CalendarPlan } from "./CalendarPlan";
 import { highlightedTasks, indexTasks, type RelationView } from "../planner/relations";
 import { StrategyDialog, type StrategyChoice } from "./StrategyDialog";
@@ -48,7 +45,9 @@ import {
   getTimeBudget,
   moveDayCycle,
   setSessionSchedule,
-  type CalendarRange,
+  deleteDayFocusBlocks,
+  clearDaySchedules,
+  type CalendarDay,
 } from "./api";
 
 /** 本视图自己的查询键前缀；lib/events 的事件矩阵不认识它们，所以
@@ -74,13 +73,18 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
   const [detail, setDetail] = useState<"plan" | "schedule">("plan");
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [hoveredTask, setHoveredTask] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<{ dayId: string; date: string; token: string } | null>(null);
+  const [movingDay, setMovingDay] = useState<{ dayId: string; date: string } | null>(null);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [movingBusy, setMovingBusy] = useState(false);
   const [strategyChoice, setStrategyChoice] = useState<StrategyChoice | null>(null);
+  const [deletingDay, setDeletingDay] = useState<CalendarDay | null>(null);
+  const [bulkAction, setBulkAction] = useState<{ kind: "focus" | "schedule"; day: CalendarDay } | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const datesViewport = useRef<HTMLDivElement>(null);
   const detailsRef = useRef<HTMLElement>(null);
   const [detailTarget, setDetailTarget] = useState<{ kind: "task" | "session"; id: string } | null>(null);
   const [weekScrollTarget, setWeekScrollTarget] = useState<{ date: string; animate: boolean } | null>(() => ({ date: todayISO(), animate: false }));
-  const { error, run, fail, dismiss } = useActionError();
+  const { error, run, dismiss } = useActionError();
 
   const bounds = view === "month" ? monthBounds(anchor) : weekBounds(anchor);
   const visibleStart = formatDate(bounds.start, { year: "numeric", month: "short", day: "numeric" });
@@ -104,8 +108,11 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
   const graph = useMemo(() => indexTasks(Object.values(plans.data ?? {}).map((workspace) => workspace.tasks)), [plans.data]);
   const cycleMap = new Map(cycles.map((cycle) => [cycle.id, cycle]));
   const relations: RelationView = { tasks: graph, cycles: cycleMap, selectedId: selectedTask,
-    highlighted: highlightedTasks(selectedTask ?? hoveredTask, graph, cycleMap), select: setSelectedTask,
-    preview: setHoveredTask, setDragging: () => {} };
+    highlighted: highlightedTasks(hoveredTask ?? selectedTask, graph, cycleMap), select: (id) => {
+      setHoveredTask(null);
+      setSelectedTask((current) => current === id ? null : id);
+    },
+    preview: setHoveredTask };
 
   // 后端事件 → 失效本视图查询（工作台由 lib/events 负责，两边共享数据库）。
   useEffect(() => {
@@ -127,14 +134,6 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
       for (const unlisten of unlisteners) unlisten();
     };
   }, [qc]);
-
-  useEffect(() => {
-    const cancelDrag = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDragging(null);
-    };
-    window.addEventListener("keydown", cancelDrag);
-    return () => window.removeEventListener("keydown", cancelDrag);
-  }, []);
 
   const days = range?.days ?? [];
   const today = todayISO();
@@ -168,6 +167,7 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
     setAnchor(next);
     setSelectedDate(next);
     setSelectedTask(null);
+    setHoveredTask(null);
     setWeekScrollTarget({ date: next, animate: false });
   };
 
@@ -181,13 +181,14 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
     setAnchor(date);
     setDetail("plan");
     setSelectedTask(null);
+    setHoveredTask(null);
     onActiveCycleChange?.(cell?.day_cycle?.id ?? null);
     dismiss();
   };
 
   const createDay = (date: string) => {
     void run(async () => {
-      const created = await ensureDay(date); // 空格子一键创建当日计划（带日期）
+      const created = await createDayPlan(date); // 空格子一键创建当日计划（带日期）
       setSelectedDate(date);
       setDetail("plan");
       onActiveCycleChange?.(created.id);
@@ -216,50 +217,44 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
     setDetailTarget(null);
   }, [active, detailTarget, plans.data, range]);
 
-  // 拖到空日期：乐观更新（快照 → 改缓存 → 失败回滚），沿用工作台策略。
-  const onDropOnCell = (targetDate: string, event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const source = dragging;
-    const token = readDragToken(event.dataTransfer, DAY_DRAG_TYPE);
-    setDragging(null);
-    if (!source || token !== source.token || source.date === targetDate) return;
-    const targetCell = days.find((d) => d.date === targetDate);
-    if (!targetCell?.in_range) return; // 弱化格不可作为落点
-    const sourceCell = days.find((d) => d.day_cycle?.id === source.dayId);
-    if (!sourceCell?.day_cycle) return;
-
-    if (targetCell.day_cycle) {
-      // 已占用：让用户显式选择，绝不静默处理。
-      setStrategyChoice({ sourceDayId: source.dayId, sourceDate: sourceCell.date, targetDate });
-      return;
-    }
-
-    const snapshot = qc.getQueryData<CalendarRange>(rangeKey) ?? null;
-    if (snapshot) {
-      qc.setQueryData<CalendarRange>(rangeKey, applyMoveToRange(snapshot, source.dayId, targetDate));
-    }
-    moveDayCycle(source.dayId, targetDate, null).then(
-      () => {
-        invalidateCalendar(qc);
-        // move 会新建目标日周期（id 变化），工作台列也要刷新。
-        void qc.invalidateQueries({ queryKey: qk.plannerState() });
-      },
-      (e: unknown) => {
-        if (snapshot) qc.setQueryData<CalendarRange>(rangeKey, snapshot);
-        fail(errorMessage(e));
-      },
-    );
+  const moveSelectedDay = () => {
+    const source = movingDay;
+    const targetDate = moveTarget;
+    if (!source || movingBusy || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate) || source.date === targetDate) return;
+    setMovingBusy(true);
+    void run(async () => {
+      const targetRange = await getCalendarRange(targetDate, targetDate);
+      const occupied = targetRange.days.find((day) => day.date === targetDate)?.day_cycle;
+      if (occupied) {
+        setMovingDay(null);
+        setStrategyChoice({ sourceDayId: source.dayId, sourceDate: source.date, targetDate });
+        return;
+      }
+      await moveDayCycle(source.dayId, targetDate, null);
+      setMovingDay(null);
+      setSelectedDate(targetDate);
+      setAnchor(targetDate);
+      invalidateCalendar(qc);
+      void qc.invalidateQueries({ queryKey: qk.plannerState() });
+    }).finally(() => setMovingBusy(false));
   };
 
   const pickStrategy = (strategy: "merge" | "swap") => {
     const choice = strategyChoice;
-    setStrategyChoice(null);
-    if (!choice) return;
+    if (!choice || movingBusy) return;
+    setMovingBusy(true);
     void run(async () => {
       await moveDayCycle(choice.sourceDayId, choice.targetDate, strategy);
       invalidateCalendar(qc);
       void qc.invalidateQueries({ queryKey: qk.plannerState() });
-    });
+      return true;
+    }).then((succeeded) => {
+      if (succeeded) {
+        setStrategyChoice(null);
+        setSelectedDate(choice.targetDate);
+        setAnchor(choice.targetDate);
+      }
+    }).finally(() => setMovingBusy(false));
   };
 
   const selectedDay = selectedDate === null ? undefined : days.find((d) => d.date === selectedDate);
@@ -306,16 +301,26 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
     })) !== null;
   };
 
-  const onDragOverCell = (event: DragEvent<HTMLDivElement>) => {
-    // The browser can hide custom payload values during dragover; validation
-    // happens on drop, while the live source state controls acceptance here.
-    if (dragging) event.preventDefault();
+  const confirmBulkAction = () => {
+    if (!bulkAction || bulkBusy || bulkAction.day.day_cycle === null) return;
+    const { kind, day } = bulkAction;
+    const ids = day.sessions.filter(({ schedule }) => kind === "focus" || schedule !== null).map(({ session }) => session.id);
+    setBulkBusy(true);
+    void run(async () => {
+      if (kind === "focus") await deleteDayFocusBlocks(day.day_cycle!.id, ids);
+      else await clearDaySchedules(day.day_cycle!.id, ids);
+      invalidateCycles(qc);
+      invalidateCalendar(qc);
+      setBulkAction(null);
+    }).finally(() => setBulkBusy(false));
   };
+  const scheduleBulkLocked = bulkAction?.kind === "schedule" && (
+    bulkAction.day.day_cycle?.finished || bulkAction.day.sessions.some(({ session, schedule }) => schedule !== null && (session.started || session.finished))
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-calendar-view={view}
-      onDragEnd={() => setDragging(null)}
-      onKeyDown={(event) => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) { setDragging(null); setSelectedTask(null); setHoveredTask(null); } }}>
+      onKeyDown={(event) => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) { setSelectedTask(null); setHoveredTask(null); } }}>
       {/* 视图工具条：密度切换 + 期间导航 + 偏好记忆；顶栏入口由 App 接线。 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-light bg-canvas px-4 py-2">
         <div role="tablist" aria-label={t("workspace.calendarDensity")}>
@@ -391,10 +396,10 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
                       onCreate={createDay}
                       onOpenTask={openTask}
                       onOpenSession={openSession}
-                      onDayDragStart={(dayId, date, token) => setDragging({ dayId, date, token })}
-                      onDayDragEnd={() => setDragging(null)}
-                      onDragOverCell={onDragOverCell}
-                      onDropOnCell={onDropOnCell}
+                      onMoveDay={(dayId, date) => { setMovingDay({ dayId, date }); setMoveTarget(date); }}
+                      onDeleteDayPlan={setDeletingDay}
+                      onDeleteFocusBlocks={(day) => { dismiss(); setBulkAction({ kind: "focus", day }); }}
+                      onClearSchedules={(day) => { dismiss(); setBulkAction({ kind: "schedule", day }); }}
                     />
                   ))}
             </div>
@@ -437,12 +442,40 @@ export function CalendarView({ active = true, onClose, onActiveCycleChange, onPa
         </aside>
       </div>
 
+      <Dialog open={movingDay !== null} onClose={() => { if (!movingBusy) setMovingDay(null); }} title={t("calendar.moveDayPlan")}
+        footer={<>
+          <Button variant="ghost" onClick={() => setMovingDay(null)} disabled={movingBusy}>{t("calendar.cancel")}</Button>
+          <Button variant="primary" onClick={moveSelectedDay} disabled={movingBusy || !moveTarget || moveTarget === movingDay?.date}>{t("calendar.moveDayConfirm")}</Button>
+        </>}>
+        <p className="text-menu text-secondary">{t("calendar.moveDayTarget")}</p>
+        <div id="move-day-target" className="mt-2 rounded-md bg-subtle px-3 py-2 text-menu font-medium text-primary">{formatDate(moveTarget, { year: "numeric", month: "long", day: "numeric", weekday: "long" })}</div>
+        <CalendarDatePicker value={moveTarget} onChange={setMoveTarget} weekStartDay={weekStartDay} disabled={movingBusy} />
+      </Dialog>
       <StrategyDialog
         choice={strategyChoice}
-        onClose={() => setStrategyChoice(null)}
+        busy={movingBusy}
+        onClose={() => { if (!movingBusy) setStrategyChoice(null); }}
         onPick={pickStrategy}
       />
-      {error && (
+      {deletingDay?.day_cycle && <DeleteCycleDialog cycle={deletingDay.day_cycle} open onClose={() => {
+        setDeletingDay(null);
+        invalidateCalendar(qc);
+      }} />}
+      <Dialog open={bulkAction !== null} onClose={() => { if (!bulkBusy) { setBulkAction(null); dismiss(); } }}
+        title={bulkAction?.kind === "focus" ? t("calendar.deleteDayFocusBlocks") : t("calendar.clearDaySchedules")}
+        footer={<>
+          <Button onClick={() => { setBulkAction(null); dismiss(); }} disabled={bulkBusy} autoFocus>{t("calendar.cancel")}</Button>
+          <Button variant="primary" loading={bulkBusy} disabled={bulkBusy || !!scheduleBulkLocked} style={{ backgroundColor: "var(--color-danger)" }} onClick={confirmBulkAction}>
+            {bulkAction?.kind === "focus" ? t("calendar.deleteDayFocusBlocks") : t("calendar.clearDaySchedules")}
+          </Button>
+        </>}>
+        {bulkAction && <p className="text-body text-primary">{bulkAction.kind === "focus"
+          ? t("calendar.deleteFocusBlocksHelp", { count: bulkAction.day.sessions.length })
+          : t("calendar.clearSchedulesHelp", { count: bulkAction.day.sessions.filter(({ schedule }) => schedule !== null).length })}</p>}
+        {scheduleBulkLocked && <p role="alert" className="mt-3 text-caption text-danger">{t("calendar.scheduleLocked")}</p>}
+        {error && <p role="alert" className="mt-3 text-caption text-danger">{error}</p>}
+      </Dialog>
+      {error && !bulkAction && (
         <div
           role="alert"
           className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-sm border border-light bg-content px-3 py-2 text-caption text-danger shadow-[0_8px_24px_rgba(0,0,0,0.12)]"

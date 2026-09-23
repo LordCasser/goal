@@ -58,6 +58,8 @@ pub struct Task {
     pub cycle_id: String,
     pub parent_id: Option<String>,
     pub title: String,
+    #[serde(default)]
+    pub note: String,
     pub subtasks: Vec<Subtask>,
     pub position: i64,
     pub completed: bool,
@@ -322,6 +324,7 @@ mod tests {
             cycle_id: "c1".into(),
             parent_id: parent.map(Into::into),
             title: format!("task {id}"),
+            note: String::new(),
             subtasks: vec![],
             position,
             completed: false,

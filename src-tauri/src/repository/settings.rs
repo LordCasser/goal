@@ -11,6 +11,8 @@ pub const KEY_WEEK_START_DAY: &str = "week_start_day";
 pub const KEY_LOG_LEVEL: &str = "log_level";
 pub const KEY_THEME: &str = "theme";
 pub const KEY_SHOW_RELATION_LINES: &str = "show_relation_lines";
+pub const KEY_AUTO_CARRY_UNFINISHED: &str = "auto_carry_unfinished";
+pub const KEY_SHOW_LATER_COUNT: &str = "show_later_count";
 
 pub fn get(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     conn.query_row(

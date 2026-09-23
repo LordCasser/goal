@@ -90,7 +90,16 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "global Coach conversation",
         sql: M0014_GLOBAL_COACH_CONVERSATION,
     },
+    Migration {
+        version: 15,
+        description: "task notes",
+        sql: M0015_TASK_NOTES,
+    },
 ];
+
+const M0015_TASK_NOTES: &str = r#"
+ALTER TABLE tasks ADD COLUMN note TEXT NOT NULL DEFAULT '';
+"#;
 
 const M0013_LATER_PLAN_TYPE: &str = r#"
 ALTER TABLE tasks ADD COLUMN later_plan_type TEXT CHECK (
@@ -489,6 +498,27 @@ CREATE INDEX ix_dismissals_cycle ON planning_issue_dismissals(cycle_id);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_tasks_gain_empty_notes() {
+        let mut conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = ON").expect("foreign keys");
+        apply_up_to(&mut conn, 14);
+        conn.execute("INSERT INTO cycles (id, title, type) VALUES ('d1', 'Day', 'day')", [])
+            .expect("cycle");
+        conn.execute(
+            "INSERT INTO tasks (id, cycle_id, title) VALUES ('t1', 'd1', 'Existing')",
+            [],
+        )
+        .expect("task");
+
+        apply(&mut conn).expect("upgrade");
+        let note: String = conn
+            .query_row("SELECT note FROM tasks WHERE id = 't1'", [], |row| row.get(0))
+            .expect("note");
+        assert!(note.is_empty());
+        assert!(columns(&conn, "tasks").contains(&"note".to_string()));
+    }
 
     /// Applies only migrations up to `max_version`, the state a database
     /// created by an older binary is in (the runner itself has no "stop at"

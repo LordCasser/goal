@@ -1,15 +1,13 @@
 /**
- * 日历纯函数层测试（tasks.md §5.8 的预算三态部分 + 乐观移动 + 网格区间）。
+ * 日历纯函数层测试（tasks.md §5.8 的预算三态与网格区间）。
  * 全部无 IO、无时区依赖：ISO 日期按 UTC 午夜整数运算。
  */
 import { describe, expect, it } from "vitest";
 
 import type { Cycle } from "../../lib/types";
-import type { CalendarDay, CalendarRange } from "./api";
 import {
   PREFERRED_VIEW_KEY,
   addMonthsISO,
-  applyMoveToRange,
   budgetState,
   loadPreferredView,
   monthBounds,
@@ -42,30 +40,6 @@ function makeCycle(overrides: Record<string, unknown>): Cycle {
   } as Cycle;
 }
 
-function cell(date: string, day: CalendarDay["day_cycle"], sessions: CalendarDay["sessions"] = []): CalendarDay {
-  return { date, in_range: true, day_cycle: day, sessions };
-}
-
-const SOURCE_DAY = makeCycle({ id: "day-a", starts_on: "2026-09-16", calendar_key: "day:2026-09-16" });
-
-const RANGE: CalendarRange = {
-  start: "2026-09-01",
-  end: "2026-09-30",
-  grid_start: "2026-08-31",
-  grid_end: "2026-10-04",
-  week_start_day: 1,
-  days: [
-    cell("2026-09-16", SOURCE_DAY, [
-      {
-        session: makeCycle({ id: "s-1", type: "session", parent_id: "day-a" }),
-        schedule: null,
-      },
-    ]),
-    cell("2026-09-17", null),
-    cell("2026-09-18", makeCycle({ id: "day-b", starts_on: "2026-09-18" })),
-  ],
-};
-
 describe("grid bounds", () => {
   it("monthBounds covers the whole calendar month", () => {
     expect(monthBounds("2026-09-16")).toEqual({ start: "2026-09-01", end: "2026-09-30" });
@@ -83,34 +57,6 @@ describe("grid bounds", () => {
     expect(addMonthsISO("2026-09-16", -1)).toBe("2026-08-16");
     expect(addMonthsISO("2026-11-30", 2)).toBe("2027-01-30");
     expect(addMonthsISO("2026-09-16", 1)).toBe("2026-10-16");
-  });
-});
-
-describe("applyMoveToRange (optimistic drag)", () => {
-  it("moves the day cycle and its sessions onto the empty target date", () => {
-    const next = applyMoveToRange(RANGE, "day-a", "2026-09-17");
-    const source = next.days.find((d) => d.date === "2026-09-16");
-    const target = next.days.find((d) => d.date === "2026-09-17");
-    expect(source?.day_cycle).toBeNull();
-    expect(source?.sessions).toEqual([]);
-    expect(target?.day_cycle?.id).toBe("day-a");
-    // 日期身份同步改写为后端将要落库的值。
-    expect(target?.day_cycle?.starts_on).toBe("2026-09-17");
-    expect(target?.day_cycle?.calendar_key).toBe("day:2026-09-17");
-    expect(target?.sessions).toHaveLength(1);
-    // 其余格子不受影响。
-    expect(next.days.find((d) => d.date === "2026-09-18")?.day_cycle?.id).toBe("day-b");
-  });
-
-  it("never mutates the snapshot (rollback needs it intact)", () => {
-    applyMoveToRange(RANGE, "day-a", "2026-09-17");
-    expect(RANGE.days.find((d) => d.date === "2026-09-16")?.day_cycle?.id).toBe("day-a");
-    expect(RANGE.days.find((d) => d.date === "2026-09-17")?.day_cycle).toBeNull();
-  });
-
-  it("refuses to overwrite an occupied target or an unknown source", () => {
-    expect(applyMoveToRange(RANGE, "day-a", "2026-09-18")).toBe(RANGE);
-    expect(applyMoveToRange(RANGE, "day-zz", "2026-09-17")).toBe(RANGE);
   });
 });
 

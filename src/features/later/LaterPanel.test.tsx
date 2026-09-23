@@ -53,6 +53,7 @@ function taskFixture(id: string, title: string, over: Partial<TaskNode> = {}): T
     cycle_id: LATER_CYCLE_ID,
     parent_id: null,
     title,
+    note: "",
     subtasks: [],
     position: 0,
     completed: false,
@@ -215,6 +216,19 @@ describe("LaterPanel", () => {
         patch: { completed: true },
       }),
     );
+  });
+
+  it("clears a double-clicked title selection when closing Later details", async () => {
+    mockBackend({ tasks: [taskFixture("t1", "Read a book")] });
+    renderPanel();
+    const title = await screen.findByLabelText("Task title") as HTMLInputElement;
+    title.focus();
+    title.setSelectionRange(0, title.value.length);
+    fireEvent.doubleClick(title);
+    expect(await screen.findByRole("textbox", { name: "Note" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(title));
+    expect(title.selectionStart).toBe(title.selectionEnd);
   });
 
   it("Enter in a row commits the title and opens an empty row below", async () => {

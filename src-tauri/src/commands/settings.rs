@@ -27,6 +27,16 @@ pub fn set_show_relation_lines(db: State<'_, Db>, show: bool) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub fn set_auto_carry_unfinished(db: State<'_, Db>, enabled: bool) -> AppResult<()> {
+    settings::set_auto_carry_unfinished(&db, enabled)
+}
+
+#[tauri::command]
+pub fn set_show_later_count(db: State<'_, Db>, show: bool) -> AppResult<()> {
+    settings::set_show_later_count(&db, show)
+}
+
+#[tauri::command]
 pub fn set_locale(db: State<'_, Db>, locale: String) -> AppResult<()> {
     settings::set_locale(&db, locale)
 }

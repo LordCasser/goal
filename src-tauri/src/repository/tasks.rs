@@ -7,7 +7,7 @@ use crate::domain::cycle::CycleType;
 use crate::domain::task::{Subtask, Task, ROOT_COLOR_KEYS};
 use crate::error::{from_rusqlite, AppError, AppResult};
 
-const TASK_COLUMNS: &str = "id, cycle_id, parent_id, title, subtasks, position, completed, \
+const TASK_COLUMNS: &str = "id, cycle_id, parent_id, title, note, subtasks, position, completed, \
      goal_breakdown, needs_refinement, needs_breakdown, root_color_key, copied_from_task_id, \
      proposal, created_at, later_plan_type";
 
@@ -19,9 +19,10 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         cycle_id: row.get("cycle_id")?,
         parent_id: row.get("parent_id")?,
         title: row.get("title")?,
+        note: row.get("note")?,
         subtasks: serde_json::from_str(&subtasks_json).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
-                4, // ordinal of `subtasks` in TASK_COLUMNS
+                5, // ordinal of `subtasks` in TASK_COLUMNS
                 rusqlite::types::Type::Text,
                 Box::new(e),
             )
@@ -147,6 +148,29 @@ pub fn list_all_proposal_tasks(conn: &Connection) -> AppResult<Vec<Task>> {
     Ok(rows)
 }
 
+/// Confirmed top-level daily rows with their local dates. A cross-cycle link
+/// remains a visible root; a parent inside the same day makes a row a step.
+pub fn list_dated_daily_roots(conn: &Connection) -> AppResult<Vec<(String, Task)>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.*, c.starts_on AS task_date FROM tasks t
+             JOIN cycles c ON c.id = t.cycle_id
+             LEFT JOIN tasks parent ON parent.id = t.parent_id
+             WHERE c.type = 'day' AND c.archived = 0 AND c.starts_on IS NOT NULL
+               AND t.proposal IS NULL
+               AND (parent.id IS NULL OR parent.cycle_id <> t.cycle_id)
+             ORDER BY c.starts_on, t.position, t.id",
+        )
+        .map_err(from_rusqlite)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>("task_date")?, row_to_task(row)?))
+    })
+    .map_err(from_rusqlite)?
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
 /// The highest-position visible empty row — the one agent creation replaces.
 pub fn last_empty_visible_row(conn: &Connection, cycle_id: &str) -> AppResult<Option<Task>> {
     conn.query_row(
@@ -236,6 +260,7 @@ pub fn count_by_cycle(conn: &Connection, cycle_id: &str) -> AppResult<i64> {
 
 pub struct TaskUpdate {
     pub title: Option<String>,
+    pub note: Option<String>,
     pub subtasks: Option<Vec<Subtask>>,
     pub completed: Option<bool>,
     pub goal_breakdown: Option<Option<serde_json::Value>>,
@@ -254,6 +279,7 @@ impl TaskUpdate {
     pub fn empty() -> Self {
         Self {
             title: None,
+            note: None,
             subtasks: None,
             completed: None,
             goal_breakdown: None,
@@ -271,6 +297,7 @@ impl TaskUpdate {
 
     pub fn is_empty(&self) -> bool {
         self.title.is_none()
+            && self.note.is_none()
             && self.subtasks.is_none()
             && self.completed.is_none()
             && self.goal_breakdown.is_none()
@@ -299,6 +326,9 @@ pub fn update(conn: &Connection, id: &str, update: &TaskUpdate) -> AppResult<()>
     if let Some(v) = &update.title {
         let v = v.clone();
         push("title", Box::new(v));
+    }
+    if let Some(v) = &update.note {
+        push("note", Box::new(v.clone()));
     }
     if let Some(v) = &update.subtasks {
         let v = subtasks_to_json(v)?;

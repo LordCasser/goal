@@ -1,16 +1,16 @@
 /**
  * 日历视图的纯函数层（测试重点，对应 tasks.md §5.8）：
- * 视图偏好的本地记忆、月/周网格区间推导、拖拽移动的乐观缓存改写、
+ * 视图偏好的本地记忆、月/周网格区间推导、
  * 时间预算的三态判定与重叠标记收集。
  *
  * 日期算术沿用 features/planner/dates.ts 的约束：ISO 日期按 UTC 午夜整数
  * 运算，不引入时区偏移；唯一的时间轴本地 midnight 换算在 DayTimeline 内，
- * 因为「拖到几点」本质是本地墙钟问题。
+ * 因为排期时间是本地墙钟概念。
  */
 import { addDaysISO, parseISODay } from "../planner/dates";
 import { LATER_CYCLE_ID, type Cycle, type TaskNode } from "../../lib/ipc";
 
-import type { CalendarDay, CalendarRange, ScheduleOverlap, TimeBudget } from "./api";
+import type { CalendarDay, ScheduleOverlap, TimeBudget } from "./api";
 
 export type CalendarViewMode = "month" | "week";
 
@@ -99,41 +99,6 @@ export function dayProgress(day: CalendarDay): { total: number; finished: number
   const total = day.sessions.length;
   const finished = day.sessions.filter((s) => s.session.finished).length;
   return { total, finished };
-}
-
-/**
- * 拖拽到空日期的乐观改写（沿用工作台策略：调用方先快照，失败整体回滚）：
- * 源格清空，目标格接管日周期与全部专注块，日期身份同步改写为后端将会
- * 落库的值。注意后端 move 会新建目标日周期（id 变化），所以成功后仍以
- * 服务器数据为准整体失效重取。
- */
-export function applyMoveToRange(
-  range: CalendarRange,
-  sourceDayId: string,
-  targetDate: string,
-): CalendarRange {
-  const sourceIndex = range.days.findIndex((d) => d.day_cycle?.id === sourceDayId);
-  const targetIndex = range.days.findIndex((d) => d.date === targetDate);
-  const source = sourceIndex >= 0 ? range.days[sourceIndex] : undefined;
-  const target = targetIndex >= 0 ? range.days[targetIndex] : undefined;
-  if (!source || !target) return range;
-  if (!source.day_cycle || target.day_cycle) return range;
-
-  const movedDay: CalendarDay = {
-    ...target,
-    day_cycle: {
-      ...source.day_cycle,
-      starts_on: target.date,
-      ends_on: addDaysISO(target.date, 1),
-      calendar_key: `day:${target.date}`,
-    },
-    sessions: source.sessions,
-  };
-  const emptiedSource: CalendarDay = { ...source, day_cycle: null, sessions: [] };
-  const days = [...range.days];
-  days[sourceIndex] = emptiedSource;
-  days[targetIndex] = movedDay;
-  return { ...range, days };
 }
 
 /** 重叠色标只需 session id 集合（时间轴上出现几次都标同一色）。 */

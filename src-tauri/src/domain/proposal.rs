@@ -36,8 +36,9 @@ impl ProposalKind {
 /// Pre-proposal state of one task row, stored in `task_preview_originals`.
 ///
 /// `original_exists = false` records "the task did not exist before the agent
-/// touched it" — reverting must delete the row. Otherwise every field is the
-/// value the row had when it entered preview mode, including `None` for fields
+/// touched it" — reverting must delete the row. Otherwise every proposal-
+/// controlled field is the value it had when it entered preview mode. User
+/// notes are not proposal-controlled and remain on the task row. `None` for fields
 /// that were SQL `NULL` (`Some(None)` in the snapshot, flattened to `None`
 /// columns in storage).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -120,6 +121,7 @@ mod tests {
             cycle_id: "c1".into(),
             parent_id: None,
             title: "original".into(),
+            note: String::new(),
             subtasks: vec![Subtask::new("step", false)],
             position: 2,
             completed: false,

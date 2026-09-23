@@ -63,6 +63,30 @@ pub fn set_session_schedule(
     Ok(mutation.value)
 }
 
+#[tauri::command]
+pub fn delete_day_focus_blocks(
+    app: tauri::AppHandle<tauri::Wry>,
+    db: State<'_, Db>,
+    day_cycle_id: String,
+    expected_ids: Vec<String>,
+) -> AppResult<usize> {
+    let mutation = crate::service::cycles::delete_day_focus_blocks(&db, &day_cycle_id, &expected_ids)?;
+    emit_mutation(&app, &mutation);
+    Ok(mutation.value)
+}
+
+#[tauri::command]
+pub fn clear_day_schedules(
+    app: tauri::AppHandle<tauri::Wry>,
+    db: State<'_, Db>,
+    day_cycle_id: String,
+    expected_ids: Vec<String>,
+) -> AppResult<usize> {
+    let mutation = calendar::clear_day_schedules(&db, &day_cycle_id, &expected_ids)?;
+    emit_mutation(&app, &mutation);
+    Ok(mutation.value)
+}
+
 /// Overlapping schedule pairs of one day. A pure query — conflicts are shown,
 /// never auto-resolved.
 #[tauri::command]
