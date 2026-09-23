@@ -28,7 +28,7 @@ it("shows the complete descendant count and cancels without mutation", async () 
 
 it("sends the preview token only after confirmation", async () => {
   mount(); fireEvent.click(screen.getByText("Delete"));
-  fireEvent.click(await screen.findByRole("button", { name: "Delete task and descendants" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }));
   await waitFor(() => expect(mocks.deleteTask).toHaveBeenCalledWith("goal", "v1"));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
@@ -51,10 +51,10 @@ it("confirms linked focus blocks and describes started impact including finished
   });
   mount(); fireEvent.click(screen.getByText("Delete"));
   await screen.findByRole("dialog");
-  expect(screen.getByText("2 linked focus blocks will also be deleted")).toBeTruthy();
+  expect(screen.getByText("2 linked focus blocks will move with it")).toBeTruthy();
   expect(screen.getByText("1 linked focus block has already started")).toBeTruthy();
   expect(screen.queryByText(/currently running/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Delete task and descendants" }));
+  fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
   await waitFor(() => expect(mocks.deleteTask).toHaveBeenCalledWith("goal", "focus-leaf"));
 });
 
@@ -63,11 +63,11 @@ it("refreshes changed impact and requires a second explicit confirmation", async
   mocks.getTaskDeletionPreview.mockResolvedValueOnce({ task_id: target.id, descendant_tasks: 3, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "v1" })
     .mockResolvedValue({ task_id: target.id, descendant_tasks: 4, total_focus_blocks: 0, started_focus_count: 0, confirmation_token: "v2" });
   mount(); fireEvent.click(screen.getByText("Delete"));
-  fireEvent.click(await screen.findByRole("button", { name: "Delete task and descendants" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }));
   await screen.findByText("This task and 4 linked descendants");
   expect(mocks.deleteTask).toHaveBeenCalledTimes(1);
   expect((await screen.findByRole("alert")).textContent).toContain("Review the updated impact");
-  fireEvent.click(screen.getByRole("button", { name: "Delete task and descendants" }));
+  fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
   await waitFor(() => expect(mocks.deleteTask).toHaveBeenLastCalledWith("goal", "v2"));
 });
 

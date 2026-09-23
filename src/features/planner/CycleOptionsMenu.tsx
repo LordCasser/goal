@@ -158,12 +158,12 @@ export function CycleOptionsMenu({
             {t("cycle.copyPrevious")}
           </PopoverItem>
         )}
-        {cycle.type === "session" && !finished && !started && (
+        {(cycle.type === "session" || (cycle.type === "month" && !cycle.ends_on)) && !finished && !started && (
           <PopoverItem
             onSelect={() => void onStart()}
-            disabled={runningElsewhere || noDuration}
+            disabled={cycle.type === "session" && (runningElsewhere || noDuration)}
             title={
-              runningElsewhere
+              cycle.type === "month" ? t("cycle.start") : runningElsewhere
                 ? t("cycle.anotherRunning")
                 : noDuration
                   ? t("cycle.durationRequired")

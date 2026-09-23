@@ -27,7 +27,7 @@ import {
 import { ReminderPicker } from "./ReminderPicker";
 
 function reminderTitle(t: (key: string, options?: Record<string, unknown>) => string, reminder: Reminder): string {
-  return `${t(`reminders.target.${reminder.target_kind}`)} · ${reminder.target_id.slice(0, 8)}`;
+  return reminder.title?.trim() || t(`reminders.target.${reminder.target_kind}`);
 }
 
 export function ReminderList({ cycleId }: { cycleId?: string }): JSX.Element {

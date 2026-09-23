@@ -696,11 +696,133 @@ pub fn list_planning_cycles_overlapping(
     start: &str,
     end: &str,
 ) -> AppResult<Vec<Cycle>> {
-    let mut stmt = conn.prepare(&format!("SELECT {CYCLE_COLUMNS} FROM cycles WHERE id != 'later' AND type != 'session' AND starts_on <= ?2 AND (ends_on > ?1 OR (ends_on IS NULL AND starts_on >= ?1)) ORDER BY starts_on, type, id")).map_err(from_rusqlite)?;
+    let mut stmt = conn.prepare(&format!("SELECT {CYCLE_COLUMNS} FROM cycles WHERE id != 'later' AND type != 'session' AND starts_on <= ?2 AND (ends_on > ?1 OR (type = 'month' AND ends_on IS NULL)) ORDER BY starts_on, type, id")).map_err(from_rusqlite)?;
     let result = stmt
         .query_map(params![start, end], row_to_cycle)
         .map_err(from_rusqlite)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(from_rusqlite)?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn planning_cycles_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open test database");
+        conn.execute_batch(
+            "CREATE TABLE cycles (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL,
+                parent_id TEXT, position INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0, started INTEGER NOT NULL DEFAULT 0,
+                finished INTEGER NOT NULL DEFAULT 0, started_at INTEGER, finished_at INTEGER,
+                duration INTEGER, focused_time INTEGER NOT NULL DEFAULT 0,
+                starts_on TEXT, ends_on TEXT, calendar_key TEXT, repeat_id TEXT,
+                task_id TEXT, progress_check TEXT, created_at INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX ux_cycles_calendar_key
+                ON cycles(calendar_key) WHERE calendar_key IS NOT NULL;",
+        )
+        .expect("create test schema");
+        conn
+    }
+
+    fn insert_planning_cycle(
+        conn: &Connection,
+        id: &str,
+        cycle_type: &str,
+        starts_on: &str,
+        ends_on: Option<&str>,
+        calendar_key: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO cycles (id, title, type, starts_on, ends_on, calendar_key)
+             VALUES (?1, ?1, ?2, ?3, ?4, ?5)",
+            params![id, cycle_type, starts_on, ends_on, calendar_key],
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn overlapping_range_includes_open_long_term_cycles_started_before_range() {
+        let conn = planning_cycles_db();
+        insert_planning_cycle(
+            &conn,
+            "open-before-range",
+            "month",
+            "2026-01-01",
+            None,
+            Some("long-term:2026-01-01:open"),
+        )
+        .unwrap();
+        insert_planning_cycle(
+            &conn,
+            "bounded-overlap",
+            "month",
+            "2026-08-20",
+            Some("2026-09-10"),
+            Some("long-term:2026-08-20:2026-09-10"),
+        )
+        .unwrap();
+        insert_planning_cycle(
+            &conn,
+            "open-after-range",
+            "month",
+            "2026-10-01",
+            None,
+            Some("long-term:2026-10-01:open"),
+        )
+        .unwrap();
+        insert_planning_cycle(
+            &conn,
+            "bounded-before-range",
+            "month",
+            "2026-08-01",
+            Some("2026-09-01"),
+            Some("long-term:2026-08-01:2026-09-01"),
+        )
+        .unwrap();
+
+        let cycles = list_planning_cycles_overlapping(&conn, "2026-09-01", "2026-09-30")
+            .expect("query overlapping cycles");
+        let ids = cycles.iter().map(|cycle| cycle.id.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(ids, ["open-before-range", "bounded-overlap"]);
+    }
+
+    #[test]
+    fn open_long_term_calendar_identity_rejects_duplicate_start_date() {
+        let conn = planning_cycles_db();
+        let key = "long-term:2026-09-14:open";
+        insert_planning_cycle(
+            &conn,
+            "first",
+            "month",
+            "2026-09-14",
+            None,
+            Some(key),
+        )
+        .unwrap();
+
+        let duplicate = insert_planning_cycle(
+            &conn,
+            "duplicate",
+            "month",
+            "2026-09-14",
+            None,
+            Some(key),
+        );
+        assert!(matches!(duplicate, Err(rusqlite::Error::SqliteFailure(_, _))));
+
+        insert_planning_cycle(
+            &conn,
+            "bounded-same-start",
+            "month",
+            "2026-09-14",
+            Some("2026-12-07"),
+            Some("long-term:2026-09-14:2026-12-07"),
+        )
+        .expect("bounded cycle with same start date has a distinct identity");
+    }
 }

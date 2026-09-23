@@ -286,10 +286,16 @@ pub(crate) fn keep_one(
         return Err(AppError::not_found("preview", task_id));
     }
     match task.proposal {
-        // A confirmed deletion physically removes the row — no tombstones
-        // (spec: 已确认的删除).
+        // A confirmed proposed deletion is a user deletion as well.
         Some(ProposalKind::Delete) => {
+            let mut update = tasks_repo::TaskUpdate::empty();
+            update.proposal = Some(None);
+            tasks_repo::update(conn, task_id, &update)?;
+            repo::delete_snapshot(conn, task_id)?;
             let impact = crate::service::deletion::task_impact(conn, task_id)?;
+            let cycle = crate::repository::cycles::require(conn, &task.cycle_id)?;
+            crate::service::trash::archive_in_tx(conn, "task", task_id, &task.title, &cycle.title, &impact)?;
+            mutation.trash_changed = true;
             mutation.merge(crate::service::deletion::prepare_deletion(conn, &impact)?);
             tasks_repo::delete(conn, task_id)?;
         }

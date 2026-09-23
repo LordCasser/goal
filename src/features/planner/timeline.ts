@@ -30,7 +30,7 @@ export type CustomTimelineError = "invalid_cycle_range" | "invalid_progress_chec
 export type CustomTimeline = {
   days: number | null;
   checkDates: string[];
-  totalChecks: number;
+  totalChecks: number | null;
   error: CustomTimelineError | null;
 };
 
@@ -42,34 +42,34 @@ export type CustomTimeline = {
  */
 export function deriveCustomTimeline(
   startISO: string,
-  endISO: string,
+  endISO: string | null,
   check: import("../../lib/types").ProgressCheck | null,
   previewLimit = 4,
 ): CustomTimeline {
   const start = toEpochDay(startISO);
-  const end = toEpochDay(endISO);
-  if (start === null || end === null || end <= start) {
+  const end = endISO === null ? null : toEpochDay(endISO);
+  if (start === null || (endISO !== null && (end === null || end <= start))) {
     return { days: null, checkDates: [], totalChecks: 0, error: "invalid_cycle_range" };
   }
+  const days = end === null ? null : end - start;
   if (!check) {
-    return { days: end - start, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
+    return { days, checkDates: [], totalChecks: 0, error: null };
   }
 
   if (check.kind === "once") {
     const date = toEpochDay(check.date);
-    if (date === null || date < start || date >= end) {
-      return { days: end - start, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
+    if (date === null || date < start || (end !== null && date >= end)) {
+      return { days, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
     }
-    return { days: end - start, checkDates: [check.date], totalChecks: 1, error: null };
+    return { days, checkDates: [check.date], totalChecks: 1, error: null };
   }
 
   if (!Number.isSafeInteger(check.every_days) || check.every_days <= 0) {
-    return { days: end - start, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
+    return { days, checkDates: [], totalChecks: 0, error: "invalid_progress_check" };
   }
   const interval = check.every_days;
-  const days = end - start;
-  const totalChecks = Math.max(0, Math.floor((days - 1) / interval));
-  const count = Math.min(totalChecks, Math.max(0, previewLimit));
+  const totalChecks = days === null ? null : Math.max(0, Math.floor((days - 1) / interval));
+  const count = totalChecks === null ? Math.max(0, previewLimit) : Math.min(totalChecks, Math.max(0, previewLimit));
   const checkDates = Array.from({ length: count }, (_, index) =>
     fromEpochDay(start + (index + 1) * interval),
   );

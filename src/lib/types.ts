@@ -138,6 +138,15 @@ export interface TaskContinuity {
   }>;
 }
 
+/** First-level cross-plan item linked by its direct parent task. */
+export interface DirectLinkedChild {
+  id: string;
+  title: string;
+  cycle_type: "week" | "day";
+  starts_on: string | null;
+  completed: boolean;
+}
+
 /** `domain::repeat::Repeat`. */
 export interface Repeat {
   id: string;
@@ -164,7 +173,7 @@ export interface CreateCycleArgs {
   parent_id?: string | null;
   /** Long-term only: 1, 3 or 6 product months (28 days each). */
   duration_months?: number | null;
-  /** Explicit long-term bounds, mutually exclusive with duration_months. */
+  /** Explicit long-term start and optional end, mutually exclusive with duration_months. */
   starts_on?: string | null;
   ends_on?: string | null;
   progress_check?: ProgressCheck | null;

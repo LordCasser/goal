@@ -121,6 +121,8 @@
   "unknown_issue_type": "This planning issue type is not recognized.",
   "unknown_tool": "This Coach tool is not recognized.",
   "deletion_impact_changed": "The linked content changed. Review the updated impact and confirm again.",
+  "trash_restore_conflict": "The original location is unavailable or occupied. Restore its parent plan first or resolve the conflict.",
+  "trash_selection_changed": "The selected trash items have changed. Refresh and try again.",
   "day_content_changed": "This day's content changed. Review it and try again.",
   "deletion_confirmation_required": "Review the linked content before confirming deletion.",
   "later_source_required": "This item is no longer in Later. Refresh the list and try again.",

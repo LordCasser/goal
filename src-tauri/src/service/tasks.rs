@@ -37,6 +37,35 @@ pub struct TaskContinuity {
     pub episodes: Vec<TaskEpisode>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DirectLinkedChild {
+    pub id: String,
+    pub title: String,
+    pub cycle_type: String,
+    pub starts_on: Option<String>,
+    pub completed: bool,
+}
+
+/// All committed first-level cross-plan links, including off-screen dates.
+pub fn get_direct_linked_children(db: &Db, task_id: &str) -> AppResult<Vec<DirectLinkedChild>> {
+    let conn = db.pool().get()?;
+    let parent = repo::require(&conn, task_id)?;
+    let cycle = cycles_repo::require(&conn, &parent.cycle_id)?;
+    if cycle.id == LATER_CYCLE_ID || !matches!(cycle.cycle_type, CycleType::Month | CycleType::Week) {
+        return Ok(Vec::new());
+    }
+    Ok(repo::list_direct_linked_children(&conn, task_id, cycle.cycle_type)?
+        .into_iter()
+        .map(|(task, cycle_type, starts_on)| DirectLinkedChild {
+            id: task.id,
+            title: task.title,
+            cycle_type,
+            starts_on,
+            completed: task.completed,
+        })
+        .collect())
+}
+
 /// Read-only projection of all episodes sharing the selected daily root's
 /// current title and direct goal link. Completion closes a whole date bucket.
 pub fn get_task_continuity(db: &Db, task_id: &str) -> AppResult<Option<TaskContinuity>> {
@@ -394,7 +423,12 @@ pub fn get_task_deletion_preview(db: &Db, task_id: &str) -> AppResult<TaskDeleti
 }
 
 pub fn delete_task(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
-    delete_task_inner(db, task_id, None, false)
+    delete_task_inner(db, task_id, None, false, false)
+}
+
+/// Trusted user action, such as an approved Coach deletion.
+pub fn trash_task(db: &Db, task_id: &str) -> AppResult<Mutation<()>> {
+    delete_task_inner(db, task_id, None, false, true)
 }
 
 /// GUI deletion entry point.  A leaf can be removed directly; a task with
@@ -405,7 +439,7 @@ pub fn delete_task_confirmed(
     task_id: &str,
     confirmation_token: Option<&str>,
 ) -> AppResult<Mutation<()>> {
-    delete_task_inner(db, task_id, confirmation_token, true)
+    delete_task_inner(db, task_id, confirmation_token, true, true)
 }
 
 fn delete_task_inner(
@@ -413,6 +447,7 @@ fn delete_task_inner(
     task_id: &str,
     confirmation_token: Option<&str>,
     gui_confirmation: bool,
+    archive: bool,
 ) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
     let tx = conn
@@ -428,6 +463,9 @@ fn delete_task_inner(
         gui_confirmation && has_dependents,
     )?;
     let cycle = crate::service::cycles::ensure_content_mutable(&tx, &existing.cycle_id)?;
+    if archive {
+        crate::service::trash::archive_in_tx(&tx, "task", task_id, &existing.title, &cycle.title, &impact)?;
+    }
     let mut mutation = crate::service::deletion::prepare_deletion(&tx, &impact)?;
     // Task descendants and linked focus blocks follow through FK cascades.
     repo::delete(&tx, task_id)?;
@@ -435,6 +473,7 @@ fn delete_task_inner(
     // Keep the target cycle in the invalidation set even if a future schema
     // permits a malformed task row without an owning cycle.
     mutation.tasks.push(cycle.id);
+    mutation.trash_changed = archive;
     Ok(mutation)
 }
 

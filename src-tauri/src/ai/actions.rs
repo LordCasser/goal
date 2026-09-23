@@ -377,18 +377,19 @@ impl Action {
                 let custom_bounds = starts_on.is_some() || ends_on.is_some();
                 if cycle_type == "month" {
                     if custom_bounds {
-                        let (Some(start), Some(end)) = (starts_on.as_deref(), ends_on.as_deref())
-                        else {
+                        let Some(start) = starts_on.as_deref() else {
                             return Err(invalid(
-                                "Custom long-term cycles require both starts_on and ends_on",
+                                "Custom long-term cycles require starts_on; ends_on may be null for no fixed end",
                             ));
                         };
                         let start_date = parse_date(start)
                             .ok_or_else(|| invalid("starts_on must be YYYY-MM-DD"))?;
-                        let end_date =
-                            parse_date(end).ok_or_else(|| invalid("ends_on must be YYYY-MM-DD"))?;
-                        if end_date <= start_date {
-                            return Err(invalid("ends_on must be later than starts_on"));
+                        if let Some(end) = ends_on.as_deref() {
+                            let end_date = parse_date(end)
+                                .ok_or_else(|| invalid("ends_on must be YYYY-MM-DD or null"))?;
+                            if end_date <= start_date {
+                                return Err(invalid("ends_on must be later than starts_on"));
+                            }
                         }
                         if duration_months.is_some() {
                             return Err(invalid(
@@ -406,12 +407,13 @@ impl Action {
                                 let check_date = parse_date(date).ok_or_else(|| {
                                     invalid("Progress check date must be YYYY-MM-DD")
                                 })?;
-                                if let (Some(start), Some(end)) =
-                                    (starts_on.as_deref(), ends_on.as_deref())
-                                {
+                                if let Some(start) = starts_on.as_deref() {
                                     let start = parse_date(start).expect("validated custom start");
-                                    let end = parse_date(end).expect("validated custom end");
-                                    if check_date < start || check_date >= end {
+                                    let before_end = ends_on
+                                        .as_deref()
+                                        .map(|end| parse_date(end).expect("validated custom end"))
+                                        .is_none_or(|end| check_date < end);
+                                    if check_date < start || !before_end {
                                         return Err(invalid(
                                             "Progress check date must be within the cycle",
                                         ));
@@ -521,8 +523,11 @@ impl Action {
                         }),
                     ),
                 ];
-                if let (Some(start), Some(end)) = (starts_on, ends_on) {
-                    details.push(m("cycle.create.range", json!({"start": start, "end": end})));
+                if let Some(start) = starts_on {
+                    details.push(m(
+                        "cycle.create.range",
+                        json!({"start": start, "end": ends_on.as_deref().unwrap_or("∞")}),
+                    ));
                 }
                 if let Some(check) = progress_check {
                     details.push(match check {
@@ -1129,7 +1134,7 @@ pub async fn apply(db: &Db, ai: &AiSettingsState, action: &Action) -> AppResult<
                 service::cycles::finish_cycle(db, cycle_id, now)?;
             }
             CycleAction::Delete { cycle_id } => {
-                service::cycles::delete_cycle(db, cycle_id)?;
+                service::cycles::trash_cycle(db, cycle_id)?;
             }
             CycleAction::CopyUncompleted { cycle_id } => {
                 service::cycles::copy_uncompleted_from_previous(db, cycle_id, now)?;
@@ -1445,6 +1450,62 @@ mod tests {
         .value;
         (dir, db, ai, day.id)
     }
+
+    #[test]
+    fn long_term_action_allows_end_and_progress_check_to_vary_independently() {
+        let create = |starts_on: Option<&str>, ends_on: Option<&str>, progress_check| {
+            Action::Cycle(CycleAction::Create {
+                cycle_type: "month".into(),
+                date: None,
+                title: None,
+                duration_months: None,
+                parent_id: None,
+                starts_on: starts_on.map(str::to_owned),
+                ends_on: ends_on.map(str::to_owned),
+                progress_check,
+            })
+        };
+
+        assert!(create(Some("2026-10-01"), Some("2026-10-31"), None)
+            .validate()
+            .is_ok());
+        assert!(create(
+            Some("2026-10-01"),
+            Some("2026-10-31"),
+            Some(ProgressCheck::Repeat { every_days: 7 })
+        )
+        .validate()
+        .is_ok());
+        assert!(create(Some("2026-10-01"), None, None).validate().is_ok());
+        assert!(create(
+            Some("2026-10-01"),
+            None,
+            Some(ProgressCheck::Repeat { every_days: 7 })
+        )
+        .validate()
+        .is_ok());
+
+        assert!(create(None, Some("2026-10-31"), None).validate().is_err());
+        assert!(create(
+            Some("2026-10-01"),
+            Some("2026-10-31"),
+            Some(ProgressCheck::Once {
+                date: "2026-10-31".into()
+            })
+        )
+        .validate()
+        .is_err());
+        assert!(create(
+            Some("2026-10-01"),
+            None,
+            Some(ProgressCheck::Once {
+                date: "2026-09-30".into()
+            })
+        )
+        .validate()
+        .is_err());
+    }
+
     async fn approve(db: &Db, ai: &AiSettingsState, cycle: &str, action: Action) {
         let result = stage(db, cycle, action, "用户要求").unwrap();
         let id = result["action_id"].as_str().unwrap();

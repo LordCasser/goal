@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const planning = vi.hoisted(() => vi.fn());
+const exitPollReady = vi.hoisted(() => vi.fn(async () => ({ show: false })));
 vi.mock("./lib/ipc", () => ({
   LATER_CYCLE_ID: "later",
   getPlannerState: async () => ({ cycles: ["month", "week", "day"].map((type) => ({ type, id: `${type}-plan` })) }),
@@ -54,7 +55,13 @@ vi.mock("./features/desktop/useDesktopWindow", () => ({
     act: vi.fn(),
   }),
 }));
-vi.mock("./features/onboarding/api", () => ({ markExitPollListenerReady: async () => ({ show: false }) }));
+vi.mock("./features/onboarding/api", () => ({ markExitPollListenerReady: exitPollReady }));
+vi.mock("./features/onboarding/GettingStartedGuide", () => ({
+  GettingStartedGuide: () => <section aria-label="Getting started guide" />,
+}));
+vi.mock("./features/onboarding/FeedbackDialog", () => ({
+  FeedbackDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Send feedback" /> : null,
+}));
 let nextCoachInstance = 0;
 vi.mock("./features/agent/AgentPanel", () => ({ AgentPanel: ({ cycleId,initialDraft,focusedTaskId }: { cycleId:string|null;initialDraft?:string;focusedTaskId?:string }) => {
   const instance = useRef(++nextCoachInstance).current;
@@ -66,12 +73,15 @@ vi.mock("./features/agent/IssuePanel", () => ({ IssuePanel: ({onDiscuss,onLocate
 vi.mock("./features/later/LaterPanel", () => ({
   LaterPanel: () => <section role="region" aria-label="Later drawer" />,
 }));
+vi.mock("./features/trash/TrashPanel", () => ({
+  TrashPanel: () => <section role="region" aria-label="Trash drawer" />,
+}));
 vi.mock("./features/proposals/ProposalsBar", () => ({ ProposalsBar: () => null }));
 vi.mock("./features/reminders/MissedSummary", () => ({ MissedSummary: () => null }));
 vi.mock("./features/settings/SettingsDialog", () => ({
-  SettingsDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-modal="true" /> : null,
+  SettingsDialog: ({ open, onOpenFeedback, onPreviewExitPoll }: { open: boolean; onOpenFeedback?: () => void; onPreviewExitPoll?: () => void }) => open ? <div role="dialog" aria-modal="true"><button onClick={onOpenFeedback}>Give feedback</button><button onClick={onPreviewExitPoll}>Exit survey</button></div> : null,
 }));
-vi.mock("./features/onboarding/ExitPollDialog", () => ({ ExitPollDialog: () => null }));
+vi.mock("./features/onboarding/ExitPollDialog", () => ({ ExitPollDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Exit survey" /> : null }));
 vi.mock("./features/planner/PlannerWorkspace", () => ({
   PlannerWorkspace: ({ active, onPlanWithAI, onPageContextChange }: { active: boolean; onPlanWithAI: (id: string) => void; onPageContextChange?: (context: { view: "workspace"; long_term_cycle_id: string|null; week_cycle_id: string|null; day_cycle_id: string|null; week_starts_on: string|null; selected_date: string|null }) => void }) => {
     const [draft, setDraft] = useState("");
@@ -90,12 +100,33 @@ vi.mock("./features/calendar/CalendarView", () => ({
 import App from "./App";
 import { applyLocale } from "./lib/i18n";
 
-beforeEach(() => { applyLocale("en"); localStorage.clear(); planning.mockReset().mockResolvedValue({}); });
+beforeEach(() => { applyLocale("en"); localStorage.clear(); planning.mockReset().mockResolvedValue({}); exitPollReady.mockReset().mockResolvedValue({ show: false }); });
 function mount() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
 }
 
 describe("workspace / calendar transitions", () => {
+  it("mounts the getting-started guide in the application shell", () => {
+    mount();
+    expect(screen.getByRole("region", { name: "Getting started guide" })).toBeTruthy();
+  });
+
+  it("opens the feedback dialog from the settings feedback entry", () => {
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Give feedback" }));
+    expect(screen.getByRole("dialog", { name: "Send feedback" })).toBeTruthy();
+  });
+
+  it("opens the exit survey through the settings manual entry", async () => {
+    exitPollReady.mockResolvedValueOnce({ show: false }).mockResolvedValueOnce({ show: true });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Exit survey" }));
+    await waitFor(() => expect(exitPollReady).toHaveBeenCalledWith(true));
+    expect(screen.getByRole("dialog", { name: "Exit survey" })).toBeTruthy();
+  });
+
   it.each(["month", "week", "day"])("opens Coach for the exact %s plan and starts it once", async (type) => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: `Plan ${type}` }));

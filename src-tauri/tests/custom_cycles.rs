@@ -73,7 +73,7 @@ fn custom_cycle_persists_arbitrary_range_and_progress_schedule_after_reload() {
 }
 
 #[test]
-fn preset_cycles_default_to_a_midpoint_once_check_including_leap_days() {
+fn preset_cycles_allow_no_progress_check_including_leap_days() {
     let db = TestDb::open();
     let cycle = cycles::create_planning_cycle(
         &db.db,
@@ -89,26 +89,76 @@ fn preset_cycles_default_to_a_midpoint_once_check_including_leap_days() {
     .value;
 
     assert_eq!(cycle.ends_on.as_deref(), Some("2028-03-27"));
-    assert_eq!(
-        cycle.progress_check,
-        Some(ProgressCheck::Once {
-            date: "2028-03-13".into()
-        })
-    );
+    assert_eq!(cycle.progress_check, None);
+}
+
+#[test]
+fn open_ended_cycles_support_independent_checks_and_lifecycle() {
+    let db = TestDb::open();
+    let without_check = cycles::create_planning_cycle(
+        &db.db,
+        &CreateCycleArgs {
+            cycle_type: "month".into(),
+            starts_on: Some(TODAY.into()),
+            ..Default::default()
+        },
+        common::today(),
+        NOW,
+    ).unwrap().value;
+    assert_eq!(without_check.ends_on, None);
+    assert_eq!(without_check.duration, None);
+    assert_eq!(without_check.progress_check, None);
+    assert_eq!(without_check.calendar_key.as_deref(), Some("long-term:2026-09-16:open"));
+
+    let with_check = cycles::create_planning_cycle(
+        &db.db,
+        &CreateCycleArgs {
+            cycle_type: "month".into(),
+            starts_on: Some("2026-09-17".into()),
+            progress_check: Some(ProgressCheck::Repeat { every_days: 14 }),
+            ..Default::default()
+        },
+        common::today(),
+        NOW + 1,
+    ).unwrap().value;
+    assert_eq!(with_check.ends_on, None);
+    assert_eq!(with_check.progress_check, Some(ProgressCheck::Repeat { every_days: 14 }));
+
+    let bounded_without_check = cycles::create_planning_cycle(
+        &db.db,
+        &custom_args("2026-09-18", "2026-10-18", None),
+        common::today(),
+        NOW + 2,
+    ).unwrap().value;
+    assert_eq!(bounded_without_check.progress_check, None);
+
+    let duplicate = cycles::create_planning_cycle(
+        &db.db,
+        &CreateCycleArgs {
+            cycle_type: "month".into(),
+            starts_on: Some(TODAY.into()),
+            ..Default::default()
+        },
+        common::today(),
+        NOW + 3,
+    ).unwrap_err();
+    assert_eq!(err_code(&duplicate), "calendar_key_taken");
+
+    let started = cycles::start_cycle(&db.db, &without_check.id, NOW + 4).unwrap().value;
+    assert!(started.started);
+    let finished = cycles::finish_cycle(&db.db, &without_check.id, NOW + 5).unwrap().value;
+    assert!(finished.finished);
 }
 
 #[test]
 fn custom_cycle_rejects_invalid_ranges_and_mutually_exclusive_presets() {
     let db = TestDb::open();
     let cases = [
-        (
-            CreateCycleArgs {
-                cycle_type: "month".into(),
-                starts_on: Some("2028-02-28".into()),
-                ..Default::default()
-            },
-            "invalid_cycle_range",
-        ),
+        (CreateCycleArgs {
+            cycle_type: "month".into(),
+            ends_on: Some("2028-03-09".into()),
+            ..Default::default()
+        }, "invalid_cycle_range"),
         (
             custom_args("2028-02-30", "2028-03-09", None),
             "invalid_date",

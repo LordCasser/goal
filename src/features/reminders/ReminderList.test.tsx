@@ -32,6 +32,7 @@ function reminderFixture(
     id,
     target_kind: "task",
     target_id: id,
+    title: id,
     fire_at,
     quiet_ok: false,
     fired_at: null,
@@ -111,13 +112,23 @@ describe("ReminderList", () => {
     expect(await screen.findByText("暂无提醒")).toBeTruthy();
   });
 
+  it("shows the target title rather than its internal id", async () => {
+    mockLists([reminderFixture("r1", T1, { target_id: "private-uuid", title: "Write proposal" })]);
+    renderList();
+    expect(await screen.findByText("Write proposal")).toBeTruthy();
+    expect(screen.queryByText("private-uuid")).toBeNull();
+  });
+
   it("reschedules via update_reminder and drops the old time from the list", async () => {
     const lists = mockLists([reminderFixture("r1", T1)]);
     const client = renderList();
 
     fireEvent.click(await screen.findByLabelText("修改提醒时间 r1"));
-    fireEvent.change(screen.getByLabelText("提醒时间"), {
-      target: { value: "2026-09-16T10:00" },
+    fireEvent.change(screen.getByRole("textbox", { name: "提醒时间 · 日期" }), {
+      target: { value: "2026-09-16" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "提醒时间 · 时间" }), {
+      target: { value: "10:00" },
     });
     fireEvent.click(screen.getByRole("checkbox", { name: "免打扰时段内静音" }));
     fireEvent.click(screen.getByRole("button", { name: "保存提醒" }));

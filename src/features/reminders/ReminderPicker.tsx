@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { Button, Checkbox, Input, cn } from "../../ui";
+import { Button, Checkbox, DatePicker, TimePicker, cn } from "../../ui";
 import { errorMessage, useTranslation } from "../../lib/i18n";
 import {
   fromLocalInputValue,
@@ -43,13 +43,18 @@ export function ReminderPicker({
   onCancel,
 }: ReminderPickerProps): JSX.Element {
   const { t } = useTranslation("shell");
+  const { t: common } = useTranslation("common");
   const queryClient = useQueryClient();
   const [value, setValue] = useState(() =>
     toLocalInputValue(initialFireAt ?? Date.now() + 60 * 60 * 1000),
   );
   const [quietOk, setQuietOk] = useState(initialQuietOk);
+  const [date = "", time = ""] = value.split("T");
 
   const fireAt = fromLocalInputValue(value);
+  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(new Date(`${date}T12:00:00`).getTime())
+    && toLocalInputValue(new Date(`${date}T12:00:00`).getTime()).slice(0, 10) === date;
+  const validTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
   const save = useMutation({
     mutationFn: () => {
       if (fireAt === null) return Promise.reject(new Error("invalid time"));
@@ -65,16 +70,15 @@ export function ReminderPicker({
 
   return (
     <div className="flex flex-col gap-2 rounded-sm border border-light bg-content p-2">
-      <label className="flex flex-col gap-1 text-caption text-secondary">
-        {t("reminders.picker.time")}
-        <Input
-          type="datetime-local"
-          value={value}
-          onChange={(event) => setValue(event.currentTarget.value)}
-          aria-label={t("reminders.picker.time")}
-          className="w-auto"
-        />
-      </label>
+      <div className="flex flex-col gap-1 text-caption text-secondary">
+        <span>{t("reminders.picker.time")}</span>
+        <div className="flex flex-wrap gap-2">
+          <DatePicker value={date} onChange={(next) => setValue(`${next}T${time}`)} aria-invalid={!validDate}
+            aria-label={`${t("reminders.picker.time")} · ${common("picker.date")}`} className="w-42" />
+          <TimePicker value={time} onChange={(next) => setValue(`${date}T${next}`)} aria-invalid={!validTime}
+            aria-label={`${t("reminders.picker.time")} · ${common("picker.time")}`} className="w-28" />
+        </div>
+      </div>
       <Checkbox checked={quietOk} onChange={setQuietOk}>
         <span className="text-caption text-secondary">{t("reminders.picker.quiet")}</span>
       </Checkbox>

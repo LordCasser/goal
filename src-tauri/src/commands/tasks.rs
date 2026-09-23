@@ -56,6 +56,14 @@ pub fn get_task_continuity(
 }
 
 #[tauri::command]
+pub fn get_direct_linked_children(
+    db: State<'_, Db>,
+    task_id: String,
+) -> AppResult<Vec<tasks::DirectLinkedChild>> {
+    tasks::get_direct_linked_children(&db, &task_id)
+}
+
+#[tauri::command]
 pub fn delete_task(
     app: tauri::AppHandle<tauri::Wry>,
     db: State<'_, Db>,

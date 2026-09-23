@@ -67,7 +67,7 @@ impl reminders::ReminderNotifier for SystemNotifier {
 /// let scheduler = commands::reminders::start_scheduler(app.handle().clone(), state.clone());
 /// app.manage(scheduler);
 /// ```
-pub fn start_scheduler(app: tauri::AppHandle<tauri::Wry>, db: Db) -> Scheduler {
+pub fn start_scheduler(app: tauri::AppHandle<tauri::Wry>, db: Db) -> AppResult<Scheduler> {
     let notifier: Arc<dyn reminders::ReminderNotifier> = Arc::new(SystemNotifier::new());
     let emit_app = app;
     Scheduler::new(db, notifier, Some(Box::new(move || emit_event(&emit_app)))).spawn()
@@ -103,9 +103,9 @@ pub fn list_reminders(
     db: State<'_, Db>,
     cycle_id: Option<String>,
     status: Option<String>,
-) -> AppResult<Vec<repo::Reminder>> {
+) -> AppResult<Vec<reminders::ReminderDisplay>> {
     let filter = parse_status(status.as_deref())?;
-    reminders::list_reminders(&db, cycle_id.as_deref(), filter)
+    reminders::list_reminders_with_titles(&db, cycle_id.as_deref(), filter)
 }
 
 #[tauri::command]

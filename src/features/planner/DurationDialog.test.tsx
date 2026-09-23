@@ -67,15 +67,16 @@ describe("DurationDialog", () => {
     expect(document.activeElement).toBe(sixMonths);
 
     fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+    const none = screen.getByRole("radio", { name: "No reminder" }) as HTMLButtonElement;
     const repeat = screen.getByRole("radio", { name: "Repeat" }) as HTMLButtonElement;
     const once = screen.getByRole("radio", { name: "Once" }) as HTMLButtonElement;
-    expect(repeat.tabIndex).toBe(0);
-    expect(once.tabIndex).toBe(-1);
-    fireEvent.keyDown(repeat, { key: "ArrowRight" });
-    expect(once.getAttribute("aria-checked")).toBe("true");
+    expect(none.tabIndex).toBe(0);
     expect(repeat.tabIndex).toBe(-1);
-    expect(once.tabIndex).toBe(0);
-    expect(document.activeElement).toBe(once);
+    expect(once.tabIndex).toBe(-1);
+    fireEvent.keyDown(none, { key: "ArrowRight" });
+    expect(repeat.getAttribute("aria-checked")).toBe("true");
+    expect(repeat.tabIndex).toBe(0);
+    expect(document.activeElement).toBe(repeat);
   });
 
   it("localizes every duration preview and follows locale changes while open", () => {
@@ -101,12 +102,14 @@ describe("DurationDialog", () => {
       cycle_type: "month",
       duration_months: 6,
       parent_id: null,
+      progress_check: null,
     });
   });
 
   it("configures a custom date range and submits a repeating check", async () => {
     render(<DurationDialog open onClose={() => {}} />);
     fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+    fireEvent.click(screen.getByRole("radio", { name: "Repeat" }));
 
     expect(screen.getByLabelText("Start date")).toBeTruthy();
     expect(screen.getByLabelText("End date")).toBeTruthy();
@@ -127,9 +130,59 @@ describe("DurationDialog", () => {
     });
   });
 
+  it("uses a bounded app calendar for the end and once-check dates", () => {
+    render(<DurationDialog open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+    fireEvent.click(screen.getByRole("button", { name: "End date: Open calendar" }));
+    for (let index = 0; index < 3; index++) fireEvent.click(screen.getByRole("button", { name: "Previous month" }));
+    expect(document.querySelector<HTMLButtonElement>('[data-picker-date="2026-09-14"]')?.disabled).toBe(true);
+    fireEvent.click(document.querySelector('[data-picker-date="2026-09-30"]')!);
+    expect((screen.getByRole("textbox", { name: "End date" }) as HTMLInputElement).value).toBe("2026-09-30");
+    fireEvent.click(screen.getByRole("radio", { name: "Once" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Check date" }), { target: { value: "2026-09-20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check date: Open calendar" }));
+    expect(document.querySelector<HTMLButtonElement>('[data-picker-date="2026-09-30"]')?.disabled).toBe(true);
+    fireEvent.click(document.querySelector('[data-picker-date="2026-09-21"]')!);
+    expect((screen.getByRole("textbox", { name: "Check date" }) as HTMLInputElement).value).toBe("2026-09-21");
+  });
+
+  it("creates an open cycle without a check", async () => {
+    render(<DurationDialog open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: "No fixed end" }));
+    expect(screen.queryByLabelText("End date")).toBeNull();
+    expect(screen.getByRole("radio", { name: "No reminder" }).getAttribute("aria-checked")).toBe("true");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create cycle" })));
+    expect(createPlanningCycleMock).toHaveBeenCalledWith({
+      cycle_type: "month", parent_id: null, starts_on: "2026-09-15", ends_on: null, progress_check: null,
+    });
+  });
+
+  it("creates an open cycle with a bounded repeat preview", async () => {
+    render(<DurationDialog open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: "No fixed end" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Repeat" }));
+    expect(screen.queryByText(/progress checks/)).toBeNull();
+    expect(screen.getByText("Sep 29")).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create cycle" })));
+    expect(createPlanningCycleMock).toHaveBeenCalledWith({
+      cycle_type: "month", parent_id: null, starts_on: "2026-09-15", ends_on: null,
+      progress_check: { kind: "repeat", every_days: 14 },
+    });
+  });
+
+  it("creates a bounded custom cycle without a check", async () => {
+    render(<DurationDialog open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create cycle" })));
+    expect(createPlanningCycleMock).toHaveBeenCalledWith({
+      cycle_type: "month", parent_id: null, starts_on: "2026-09-15", ends_on: "2026-12-08", progress_check: null,
+    });
+  });
+
   it("keeps custom drafts when switching between repeat and once checks", () => {
     render(<DurationDialog open onClose={() => {}} />);
     fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+    fireEvent.click(screen.getByRole("radio", { name: "Repeat" }));
     fireEvent.change(screen.getByLabelText("Check interval"), { target: { value: "3" } });
 
     fireEvent.click(screen.getByRole("radio", { name: "Once" }));

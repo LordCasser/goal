@@ -4,6 +4,35 @@ use common::{add_task, create_day, create_long_term, create_week, TestDb, NOW, T
 use planner_lib::service::tasks::{self, TaskPatch};
 
 #[test]
+fn detail_links_include_only_direct_cross_plan_children_across_dates() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let week_one = create_week(&db.db, &month.id, "2026-09-16");
+    let week_two = create_week(&db.db, &month.id, "2026-09-23");
+    let day_one = create_day(&db.db, &week_one.id, "2026-09-16", NOW);
+    let day_two = create_day(&db.db, &week_two.id, "2026-09-23", NOW + 1);
+    let goal = add_task(&db.db, &month.id, "Long-term goal", NOW);
+    let same_cycle_step = add_task(&db.db, &month.id, "Internal step", NOW + 1);
+    tasks::set_task_parent_link(&db.db, &same_cycle_step.id, Some(&goal.id)).unwrap();
+    let weekly = add_task(&db.db, &week_one.id, "Weekly item", NOW + 2);
+    tasks::set_task_parent_link(&db.db, &weekly.id, Some(&goal.id)).unwrap();
+    let direct_daily = add_task(&db.db, &day_two.id, "Direct daily item", NOW + 3);
+    tasks::set_task_parent_link(&db.db, &direct_daily.id, Some(&goal.id)).unwrap();
+    let indirect_daily = add_task(&db.db, &day_one.id, "Indirect daily item", NOW + 4);
+    tasks::set_task_parent_link(&db.db, &indirect_daily.id, Some(&weekly.id)).unwrap();
+
+    let goal_children = tasks::get_direct_linked_children(&db.db, &goal.id).unwrap();
+    assert_eq!(goal_children.iter().map(|child| child.id.as_str()).collect::<Vec<_>>(),
+        [weekly.id.as_str(), direct_daily.id.as_str()]);
+    assert_eq!(goal_children.iter().map(|child| child.cycle_type.as_str()).collect::<Vec<_>>(),
+        ["week", "day"]);
+    let week_children = tasks::get_direct_linked_children(&db.db, &weekly.id).unwrap();
+    assert_eq!(week_children.iter().map(|child| child.id.as_str()).collect::<Vec<_>>(),
+        [indirect_daily.id.as_str()]);
+    assert!(tasks::get_direct_linked_children(&db.db, &direct_daily.id).unwrap().is_empty());
+}
+
+#[test]
 fn same_title_is_partitioned_by_direct_goal_identity() {
     let db = TestDb::open();
     let month = create_long_term(&db.db, TODAY, 1);

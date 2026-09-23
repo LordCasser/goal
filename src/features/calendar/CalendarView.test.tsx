@@ -504,6 +504,21 @@ describe("CalendarView explicit plan and focus controls", () => {
     await waitFor(() => expect(moveDayCycleMock).toHaveBeenCalledWith("day-2026-09-16", "2026-10-02", null));
   });
 
+  it("selects a local start time without closing the schedule editor", async () => {
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sep 16, 2026" }));
+    fireEvent.click(screen.getByRole("tab", { name: "schedule" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit schedule for Review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start time for Review: Choose time" }));
+    fireEvent.mouseDown(document.querySelector('[data-time-hour="10"]')!);
+    fireEvent.click(document.querySelector('[data-time-hour="10"]')!);
+    expect(screen.getByRole("button", { name: "Save schedule for Review" })).toBeTruthy();
+    fireEvent.click(document.querySelector('[data-time-minute="30"]')!);
+    expect((screen.getByRole("textbox", { name: "Start time for Review" }) as HTMLInputElement).value).toBe("10:30");
+    fireEvent.click(screen.getByRole("button", { name: "Save schedule for Review" }));
+    await waitFor(() => expect(setSessionScheduleMock).toHaveBeenCalledWith("s-run", new Date(2026, 8, 16, 10, 30).getTime(), 30 * 60_000));
+  });
+
   it("uses one tab stop in the date grid and arrow keys to move focus", async () => {
     renderView();
     const dialog = await openMoveDialog();

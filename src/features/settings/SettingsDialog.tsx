@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { ReminderSettingsSection } from "../reminders/ReminderSettingsSection";
+import { ReminderList } from "../reminders/ReminderList";
 import { AiSettingsPage } from "../ai-settings/AiSettingsPage";
 import { Button, Checkbox, Dialog, Select, SelectItem, cn } from "../../ui";
 import { qk } from "../../lib/events";
@@ -72,10 +73,12 @@ function InlineError({ error }: { error: unknown }) {
 export function SettingsDialog({
   open,
   onClose,
+  onOpenFeedback,
   onPreviewExitPoll,
 }: {
   open: boolean;
   onClose: () => void;
+  onOpenFeedback?: () => void;
   /** 主动触发退出调查（onboarding §3.6 菜单入口的设置页形态）。 */
   onPreviewExitPoll?: () => void;
 }): JSX.Element | null {
@@ -389,15 +392,18 @@ export function SettingsDialog({
               </div>
               <InlineError error={laterCountMutation.error} />
             </section>
-            {onPreviewExitPoll && <section className="flex items-center justify-between gap-4 border-t border-light pt-5">
-              <div><h3 className="text-body font-medium text-primary">{t("settings.feedback.title")}</h3><p className="mt-1 text-caption text-secondary">{t("settings.feedback.description")}</p></div>
-              <Button size="compact" onClick={onPreviewExitPoll}>{t("settings.feedback.action")}</Button>
+            {(onOpenFeedback || onPreviewExitPoll) && <section className="flex items-center justify-between gap-4 border-t border-light pt-5">
+              <h3 className="text-body font-medium text-primary">{t("settings.feedback.title")}</h3>
+              <div className="flex items-center gap-2">
+                {onOpenFeedback && <Button size="compact" onClick={onOpenFeedback}>{t("settings.feedback.action")}</Button>}
+                {onPreviewExitPoll && <Button variant="ghost" size="compact" onClick={onPreviewExitPoll}>{t("settings.feedback.exitPoll")}</Button>}
+              </div>
             </section>}
             <InlineError error={settingsQuery.error} />
             <p className="text-caption text-hint" role="status">{themeMutation.isPending || weekStartMutation.isPending || relationLinesMutation.isPending || autoCarryMutation.isPending || laterCountMutation.isPending || localeMutation.isPending ? t("settings.saveStatus.saving") : t("settings.saveStatus.auto")}</p>
           </div>}
           {section === "ai" && <AiSettingsPage />}
-          {section === "reminders" && <div className="flex flex-col gap-6"><div><h3 className="text-section-title font-semibold text-primary">{t("settings.reminders.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.reminders.description")}</p></div><ReminderSettingsSection /></div>}
+          {section === "reminders" && <div className="flex flex-col gap-6"><h3 className="text-section-title font-semibold text-primary">{t("settings.reminders.title")}</h3><ReminderSettingsSection /><div className="border-t border-light pt-5"><ReminderList /></div></div>}
           {section === "diagnostics" && <div className="flex flex-col gap-6">
             <div><h3 className="text-section-title font-semibold text-primary">{t("settings.diagnostics.title")}</h3><p className="mt-1 text-body text-secondary">{t("settings.diagnostics.description")}</p></div>
             <section className="border-t border-light pt-5">

@@ -60,8 +60,8 @@ beforeEach(() => {
 describe("ReminderPicker", () => {
   it("creates through set_reminder with the chosen local time", async () => {
     const onSaved = renderPicker();
-    fireEvent.change(screen.getByLabelText("提醒时间"), {
-      target: { value: "2026-09-16T09:30" },
+    fireEvent.change(screen.getByRole("textbox", { name: "提醒时间 · 时间" }), {
+      target: { value: "09:30" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存提醒" }));
 
@@ -95,8 +95,11 @@ describe("ReminderPicker", () => {
       reminderId: "r-existing",
       initialQuietOk: true,
     });
-    fireEvent.change(screen.getByLabelText("提醒时间"), {
-      target: { value: "2026-09-17T18:00" },
+    fireEvent.change(screen.getByRole("textbox", { name: "提醒时间 · 日期" }), {
+      target: { value: "2026-09-17" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "提醒时间 · 时间" }), {
+      target: { value: "18:00" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存提醒" }));
 
@@ -113,10 +116,17 @@ describe("ReminderPicker", () => {
 
   it("disables saving while the time is invalid", () => {
     renderPicker();
-    fireEvent.change(screen.getByLabelText("提醒时间"), { target: { value: "" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "提醒时间 · 时间" }), { target: { value: "" } });
     const saveButton = screen.getByRole("button", {
       name: "保存提醒",
     }) as HTMLButtonElement;
     expect(saveButton.disabled).toBe(true);
+  });
+
+  it("rejects a typed day that does not exist", () => {
+    renderPicker();
+    fireEvent.change(screen.getByRole("textbox", { name: "提醒时间 · 日期" }), { target: { value: "2026-02-30" } });
+    expect((screen.getByRole("button", { name: "保存提醒" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("textbox", { name: "提醒时间 · 日期" }).getAttribute("aria-invalid")).toBe("true");
   });
 });

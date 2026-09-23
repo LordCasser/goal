@@ -47,6 +47,7 @@ export const qk = {
   plannerState: () => ["planner-state"] as const,
   editorWorkspace: (cycleId: string) => ["editor-workspace", cycleId] as const,
   taskContinuity: (taskId: string) => ["task-continuity", taskId] as const,
+  directLinkedChildren: (taskId: string) => ["direct-linked-children", taskId] as const,
   editorWorkspaces: (cycleIds: string[]) => ["editor-workspaces", cycleIds] as const,
   previewSummary: (cycleId: string) => ["preview-summary", cycleId] as const,
   sessions: (dayCycleId: string) => ["sessions", dayCycleId] as const,
@@ -55,6 +56,7 @@ export const qk = {
   settings: () => ["settings"] as const,
   agentActions: () => ["agent-actions"] as const,
   agentDecision: () => ["agent-decision"] as const,
+  trash: () => ["trash"] as const,
   pendingTaskCycles: () => ["preview-summary", "pending-cycles"] as const,
 };
 
@@ -81,6 +83,9 @@ export async function initEventInvalidation(queryClient: QueryClient): Promise<(
   const unlisteners: UnlistenFn[] = [];
   try {
     unlisteners.push(await listen("agent:actions_changed", () => invalidateAgentEffects(queryClient)));
+    unlisteners.push(await listen("trash:changed", () => {
+      queryClient.invalidateQueries({ queryKey: qk.trash() });
+    }));
     unlisteners.push(
       await listen<CycleIdsPayload>("cycles:changed", (event) => {
         invalidateCycles(queryClient, event.payload.cycle_ids, { taskWrites: false });
@@ -121,7 +126,7 @@ export async function initEventInvalidation(queryClient: QueryClient): Promise<(
 /** A tool turn may stage edits in another cycle, including before an error.
  * Invalidate existing projections after every settled turn; no second state store. */
 export function invalidateAgentEffects(queryClient: QueryClient): void {
-  for (const root of ["planner-state", "editor-workspace", "editor-workspaces", "task-continuity", "preview-summary", "issue-report", "agent-actions", "settings", "app-flag", "ai-settings", "ai-availability", "agent-conversation", "sessions", "calendar", "calendar-range", "schedule-overlaps", "reminders", "repeats", "time-budget", "daily-capacity"]) {
+  for (const root of ["planner-state", "editor-workspace", "editor-workspaces", "task-continuity", "direct-linked-children", "preview-summary", "issue-report", "agent-actions", "settings", "app-flag", "ai-settings", "ai-availability", "agent-conversation", "sessions", "calendar", "calendar-range", "schedule-overlaps", "reminders", "repeats", "time-budget", "daily-capacity", "trash"]) {
     void queryClient.invalidateQueries({ queryKey: [root] });
   }
 }
@@ -137,6 +142,7 @@ function invalidateCycles(
   queryClient.invalidateQueries({ queryKey: ["issue-report"] });
   // Length-1 root prefix-matches every batch key built by qk.editorWorkspaces.
   queryClient.invalidateQueries({ queryKey: ["editor-workspaces"] });
+  queryClient.invalidateQueries({ queryKey: ["direct-linked-children"] });
   if (opts.taskWrites) queryClient.invalidateQueries({ queryKey: ["editor-workspace"] });
   if (opts.taskWrites) queryClient.invalidateQueries({ queryKey: ["task-continuity"] });
   for (const cycleId of cycleIds) {

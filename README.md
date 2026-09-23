@@ -6,19 +6,22 @@
 
 Goal is a local-first personal planning app that keeps long-term goals, weekly plans, daily plans, and focus blocks on one continuous path. Tasks can exist independently or be linked to weekly and long-term goals; long-term goal colors carry through those relationships in Workspace and Calendar.
 
-The current target release is `v0.1.7`. The desktop app, window, system menus, and installers consistently use **Goal**.
+The current target release is `v0.1.8`. The desktop app, window, system menus, and installers consistently use **Goal**.
 
 ## Features
 
 - Build plans at the long-term, weekly, and daily levels. Tasks may remain independent or be linked to a parent goal.
+- Move deleted plans and tasks to the Recycle Bin, then restore them or permanently remove them after confirmation.
 - Edit tasks, reorder them, update completion state, manage Later items, and see long-term goal colors in Workspace.
+- Create long-term goals with or without a fixed end date, and choose progress checks independently.
+- See directly linked child tasks and their plan dates in task details; use consistent in-app date and time pickers.
 - View daily plans in Calendar month/week views, then arrange focus blocks in the one-day Plan and Schedule views.
 - Configure your own cloud or local models (BYOK), with support for Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses API formats.
 - Use Coach for planning, goal clarification, prioritization, retrospectives, and time-block analysis. Operations that change local data go through a preview and confirmation flow first.
 - Review rule-based planning Issues; after configuring and testing a model, run AI checks and dismiss or locate issues one at a time.
 - Switch between Simplified Chinese and English, and configure the light theme, week start day, log level, and Coach context retention in Settings.
 
-Voice input, cloud sync, and automatic updates are not available in `v0.1.7`. The app has no account system or telemetry; AI requests are made only when a user configures and invokes a provider.
+Voice input, cloud sync, and automatic updates are not available in `v0.1.8`. The app has no account system or telemetry; AI requests are made only when a user configures and invokes a provider.
 
 ## Downloads
 

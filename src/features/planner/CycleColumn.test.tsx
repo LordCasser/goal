@@ -77,10 +77,17 @@ describe("CycleColumn progress check entry", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("uses the historical midpoint for cycles without a saved rule", () => {
+  it("does not invent a check for cycles without a saved rule", () => {
     renderColumn(makeCycle(null));
-    fireEvent.click(screen.getByRole("button", { name: "Progress check: Once on Oct 27" }));
+    expect(screen.queryByRole("button", { name: /Progress check:/ })).toBeNull();
+  });
 
-    expect(screen.getByRole("dialog", { name: "Progress check" }).textContent).toContain("Oct 27, 2026");
+  it("shows an open cycle without an invented end or check count", () => {
+    renderColumn({ ...makeCycle({ kind: "repeat", every_days: 14 }), ends_on: null, duration: null });
+    expect(screen.getByText(/No fixed end/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Progress check: Every 2 weeks" }));
+    const text = screen.getByRole("dialog", { name: "Progress check" }).textContent;
+    expect(text).toContain("Sep 29");
+    expect(text).not.toContain("progress checks");
   });
 });

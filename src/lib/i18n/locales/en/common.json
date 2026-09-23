@@ -5,5 +5,19 @@
   "duration.hours_other": "{{count}} h",
   "duration.hoursMinutes": "{{hours}} h {{minutes}} min",
   "error.generic": "Something went wrong. Please try again.",
-  "error.detail": "Could not complete the operation: {{detail}}"
+  "error.detail": "Could not complete the operation: {{detail}}",
+  "picker.chooseDate": "Choose date",
+  "picker.chooseMonth": "Choose month",
+  "picker.previousMonth": "Previous month",
+  "picker.nextMonth": "Next month",
+  "picker.previousYear": "Previous year",
+  "picker.nextYear": "Next year",
+  "picker.openCalendar": "Open calendar",
+  "picker.openTime": "Choose time",
+  "picker.date": "Date",
+  "picker.time": "Time",
+  "picker.hour": "Hour",
+  "picker.minute": "Minute",
+  "picker.dateFormat": "YYYY-MM-DD",
+  "picker.timeFormat": "HH:mm"
 }

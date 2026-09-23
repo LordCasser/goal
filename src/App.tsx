@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgentPanel } from "./features/agent/AgentPanel";
 import { AI_TURN_MUTATION_KEY } from "./features/agent/PlanWithAI";
 import { ExitPollDialog, type ExitPollResolution } from "./features/onboarding/ExitPollDialog";
+import { GettingStartedGuide } from "./features/onboarding/GettingStartedGuide";
+import { FeedbackDialog } from "./features/onboarding/FeedbackDialog";
 import { markExitPollListenerReady } from "./features/onboarding/api";
 import CalendarView from "./features/calendar/CalendarView";
 import { MissedSummary } from "./features/reminders/MissedSummary";
 import { IssuePanel } from "./features/agent/IssuePanel";
 import { LaterPanel } from "./features/later/LaterPanel";
+import { TrashPanel } from "./features/trash/TrashPanel";
 import { PlannerWorkspace } from "./features/planner/PlannerWorkspace";
 import { WindowBar } from "./features/desktop/WindowBar";
 import { matchesPrimaryShortcut } from "./lib/platform";
@@ -28,7 +31,7 @@ import { applyLocale, isLocale } from "./lib/i18n";
  */
 export default function App() {
   const queryClient = useQueryClient();
-  const [laterOpen, setLaterOpen] = useState(false);
+  const [leftPanel, setLeftPanel] = useState<"later" | "trash" | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [coachSeed, setCoachSeed] = useState<{prompt:string;taskId:string|null}|null>(null);
   const [revealTask,setRevealTask] = useState<{cycleId:string;taskId:string;requestId:number}|null>(null);
@@ -36,9 +39,9 @@ export default function App() {
   // planning-issue report, both scoped to the cycle the workspace targets.
   const [rightPanel, setRightPanel] = useState<"agent" | "issues" | null>(null);
   // Exit survey (onboarding §3): the backend only answers once the frontend
-  // signals readiness, so late-arriving decisions are never lost. A manual
-  // trigger can force the survey for feedback purposes.
+  // signals readiness, so late-arriving decisions are never lost.
   const [exitPollOpen, setExitPollOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   useEffect(() => {
     let cancelled = false;
     markExitPollListenerReady()
@@ -131,7 +134,7 @@ export default function App() {
       if (matchesPrimaryShortcut(event, "L", true)
         && !document.querySelector('[role="dialog"][aria-modal="true"]')) {
         event.preventDefault();
-        setLaterOpen((open) => !open);
+        setLeftPanel((panel) => panel === "later" ? null : "later");
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -142,10 +145,12 @@ export default function App() {
     <div className="flex h-full flex-col bg-canvas">
       <WindowBar
         hasCycle={activeCycleId !== null}
-        laterActive={laterOpen}
+        laterActive={leftPanel === "later"}
+        trashActive={leftPanel === "trash"}
         agentActive={rightPanel === "agent"}
         issuesActive={rightPanel === "issues"}
-        onToggleLater={() => setLaterOpen((open) => !open)}
+        onToggleLater={() => setLeftPanel((panel) => panel === "later" ? null : "later")}
+        onToggleTrash={() => setLeftPanel((panel) => panel === "trash" ? null : "trash")}
         onReviewChanges={(id) => { setCoachSeed(null); selectActiveCycle(id); setRightPanel("agent"); }}
         onToggleAgent={() => { setCoachSeed(null); setRightPanel((p) => (p === "agent" ? null : "agent")); }}
         onToggleIssues={() => setRightPanel((p) => (p === "issues" ? null : "issues"))}
@@ -153,8 +158,11 @@ export default function App() {
         onSwitchView={switchView}
         onOpenSettings={() => setSettingsOpen(true)}
       />
+      <GettingStartedGuide />
       <div className="flex min-h-0 flex-1">
-        <PanelMotion open={laterOpen} side="left"><LaterPanel onClose={() => setLaterOpen(false)} /></PanelMotion>
+        <PanelMotion open={leftPanel !== null} side="left">
+          {leftPanel === "trash" ? <TrashPanel onClose={() => setLeftPanel(null)} /> : <LaterPanel onClose={() => setLeftPanel(null)} />}
+        </PanelMotion>
         <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           {/* Retain visited pages so a round trip preserves navigation and scroll.
               The outgoing page becomes inert immediately, independent of motion. */}
@@ -188,8 +196,15 @@ export default function App() {
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onPreviewExitPoll={() => setExitPollOpen(true)}
+        onOpenFeedback={() => { setSettingsOpen(false); setFeedbackOpen(true); }}
+        onPreviewExitPoll={() => {
+          setSettingsOpen(false);
+          void markExitPollListenerReady(true)
+            .then((presentation) => { if (presentation.show) setExitPollOpen(true); })
+            .catch(() => undefined);
+        }}
       />
+      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       <ExitPollDialog
         open={exitPollOpen}
         onClose={(resolution: ExitPollResolution) => {

@@ -42,6 +42,7 @@ export function useActionError(): {
 /** 任务写入后的补充失效（事件矩阵见 lib/events.ts）。 */
 export function invalidateTasks(qc: QueryClient, cycleId: string): void {
   void qc.invalidateQueries({ queryKey: ["task-continuity"] });
+  void qc.invalidateQueries({ queryKey: ["direct-linked-children"] });
   void qc.invalidateQueries({ queryKey: qk.editorWorkspace(cycleId) });
   // A parent goal link changes the work mix of its descendants too.
   void qc.invalidateQueries({ queryKey: ["editor-workspace"] });
@@ -53,6 +54,7 @@ export function invalidateTasks(qc: QueryClient, cycleId: string): void {
 /** 周期写入影响整棵周期树，从根失效全部编辑视图（粗但正确，见 events.ts）。 */
 export function invalidateCycles(qc: QueryClient): void {
   void qc.invalidateQueries({ queryKey: qk.plannerState() });
+  void qc.invalidateQueries({ queryKey: ["direct-linked-children"] });
   void qc.invalidateQueries({ queryKey: ["editor-workspace"] });
   void qc.invalidateQueries({ queryKey: ["editor-workspaces"] });
 }

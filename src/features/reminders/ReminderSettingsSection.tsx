@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, Checkbox, Input } from "../../ui";
+import { Button, Checkbox, TimePicker } from "../../ui";
 import { errorMessage, useTranslation } from "../../lib/i18n";
 import {
   getNotificationPermission,
@@ -68,6 +68,10 @@ export function ReminderSettingsSection(): JSX.Element {
 
   const permission = permissionQuery.data?.permission ?? null;
   const lastError = permissionQuery.data?.last_error ?? null;
+  const validTime = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  const quietStartValid = validTime(quietStart);
+  const quietEndValid = validTime(quietEnd);
+  const dailyTimeValid = validTime(dailyTime);
 
   return (
     <section aria-label={t("reminders.settings.sectionLabel")} className="flex flex-col gap-6">
@@ -77,20 +81,20 @@ export function ReminderSettingsSection(): JSX.Element {
         </Checkbox>
         {quietEnabled && (
           <div className="flex items-center gap-2">
-            <Input
-              type="time"
+            <TimePicker
               aria-label={t("reminders.settings.quietStart")}
+              aria-invalid={!quietStartValid}
               value={quietStart}
-              onChange={(event) => setQuietStart(event.currentTarget.value)}
-              className="w-auto"
+              onChange={setQuietStart}
+              className="w-28"
             />
             <span className="text-caption text-secondary">{t("reminders.settings.to")}</span>
-            <Input
-              type="time"
+            <TimePicker
               aria-label={t("reminders.settings.quietEnd")}
+              aria-invalid={!quietEndValid}
               value={quietEnd}
-              onChange={(event) => setQuietEnd(event.currentTarget.value)}
-              className="w-auto"
+              onChange={setQuietEnd}
+              className="w-28"
             />
           </div>
         )}
@@ -104,12 +108,12 @@ export function ReminderSettingsSection(): JSX.Element {
           <span className="text-body font-medium text-primary">{t("reminders.settings.dailyPlan")}</span>
         </Checkbox>
         {dailyEnabled && (
-          <Input
-            type="time"
+          <TimePicker
             aria-label={t("reminders.settings.dailyPlanTime")}
+            aria-invalid={!dailyTimeValid}
             value={dailyTime}
-            onChange={(event) => setDailyTime(event.currentTarget.value)}
-            className="w-auto"
+            onChange={setDailyTime}
+            className="w-28"
           />
         )}
       </div>
@@ -119,7 +123,7 @@ export function ReminderSettingsSection(): JSX.Element {
           variant="secondary"
           size="compact"
           loading={save.isPending}
-          disabled={settingsQuery.isPending}
+          disabled={settingsQuery.isPending || (quietEnabled && (!quietStartValid || !quietEndValid)) || (dailyEnabled && !dailyTimeValid)}
           onClick={() => save.mutate({
             quiet_hours: quietEnabled ? { start: quietStart, end: quietEnd } : null,
             daily_plan_time: dailyEnabled ? dailyTime : null,

@@ -16,6 +16,7 @@ pub mod repeats;
 pub mod reviews;
 pub mod settings;
 pub mod tasks;
+pub mod trash;
 
 use crate::events::CycleIdSet;
 
@@ -39,6 +40,7 @@ pub struct Mutation<T> {
     pub tasks: CycleIdSet,
     /// The single cycle whose pending-proposal count changed, if any.
     pub proposal_cycle: Option<String>,
+    pub trash_changed: bool,
 }
 
 impl<T> Mutation<T> {
@@ -48,6 +50,7 @@ impl<T> Mutation<T> {
             cycles: CycleIdSet::new(),
             tasks: CycleIdSet::new(),
             proposal_cycle: None,
+            trash_changed: false,
         }
     }
     pub fn touching_cycle(mut self, cycle_id: impl Into<String>) -> Self {
@@ -75,5 +78,6 @@ impl<T> Mutation<T> {
         if self.proposal_cycle.is_none() {
             self.proposal_cycle = other.proposal_cycle;
         }
+        self.trash_changed |= other.trash_changed;
     }
 }

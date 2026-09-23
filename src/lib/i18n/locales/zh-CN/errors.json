@@ -121,6 +121,8 @@
   "unknown_issue_type": "无法识别此计划问题类型。",
   "unknown_tool": "无法识别此助理工具。",
   "deletion_impact_changed": "关联内容已变化，请查看更新后的影响范围，再次确认删除。",
+  "trash_restore_conflict": "原位置不存在或已被占用。请先恢复上级计划，或处理位置冲突。",
+  "trash_selection_changed": "所选回收站项目已变化，请刷新后重试。",
   "day_content_changed": "当日内容已变化，请检查后重试。",
   "deletion_confirmation_required": "请先查看关联内容，再确认删除。",
   "later_source_required": "此项已移出稍后列表，请刷新后重试。",

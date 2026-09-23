@@ -91,6 +91,20 @@ describe("deriveTimeline input defense", () => {
 });
 
 describe("deriveCustomTimeline", () => {
+  it("accepts no check for fixed and open ends", () => {
+    expect(deriveCustomTimeline("2026-09-15", "2026-09-25", null)).toMatchObject({ days: 10, totalChecks: 0, error: null });
+    expect(deriveCustomTimeline("2026-09-15", null, null)).toMatchObject({ days: null, totalChecks: 0, error: null });
+  });
+
+  it("limits open repeating previews without inventing a total", () => {
+    expect(deriveCustomTimeline("2026-09-15", null, { kind: "repeat", every_days: 7 })).toMatchObject({
+      days: null,
+      totalChecks: null,
+      checkDates: ["2026-09-22", "2026-09-29", "2026-10-06", "2026-10-13"],
+      error: null,
+    });
+  });
+
   it("uses date-only differences for non-week custom ranges", () => {
     expect(deriveCustomTimeline("2026-09-15", "2026-09-25", { kind: "repeat", every_days: 3 })).toMatchObject({
       days: 10,

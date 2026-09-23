@@ -18,7 +18,7 @@ import { useTranslation, formatDate } from "../../lib/i18n";
 
 function currentCycle(cycles: Cycle[], selected: string | null, today: string): Cycle | null {
   return cycles.find((c) => c.id === selected)
-    ?? cycles.find((c) => !c.finished && c.starts_on !== null && c.ends_on !== null && c.starts_on <= today && today < c.ends_on)
+    ?? cycles.find((c) => !c.finished && c.starts_on !== null && c.starts_on <= today && (c.ends_on === null || today < c.ends_on))
     ?? cycles.at(-1) ?? null;
 }
 

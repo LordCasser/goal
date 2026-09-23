@@ -161,7 +161,7 @@ export function DayCell({
                       !isWeek && relations.highlighted.has(task.id) && "bg-focus-surface", task.completed ? "text-hint" : "text-primary")}
                     onClick={(event) => { event.stopPropagation(); onOpenTask(day.date, task.id); }}>
                     <span className={cn("task-color-slot shrink-0", density === "week" && "mt-0.5")} style={{ backgroundColor: taskColor(task, relations.tasks) ?? "transparent", borderColor: taskColor(task, relations.tasks) ?? undefined }} aria-hidden="true" />
-                    <span className={cn("min-w-0", density === "week" ? "break-words" : "truncate", (task.completed || task.proposal === "delete") && "line-through")}>{task.title}{task.proposal && <span className="ml-2 inline-block text-[11px] text-secondary no-underline">{task.proposal === "delete" ? t("task.proposalDelete") : t("task.proposalPreview")}</span>}</span>
+                    <span className={cn("min-w-0 truncate", (task.completed || task.proposal === "delete") && "line-through")}>{task.title}{task.proposal && <span className="ml-2 inline-block text-[11px] text-secondary no-underline">{task.proposal === "delete" ? t("task.proposalDelete") : t("task.proposalPreview")}</span>}</span>
                   </button>
                 </li>
               ))}

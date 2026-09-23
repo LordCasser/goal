@@ -21,6 +21,7 @@ import type {
   CreateCycleArgs,
   Cycle,
   CycleDeletionPreview,
+  DirectLinkedChild,
   TaskDeletionPreview,
   Dismissal,
   EditorWorkspace,
@@ -42,6 +43,29 @@ import type {
 export * from "./types";
 
 export type AppError = { code: string; message: string };
+
+export type TrashEntry = {
+  id: string;
+  kind: "task" | "cycle";
+  target_id: string;
+  title: string;
+  origin: string;
+  deleted_at: number;
+  task_count: number;
+  cycle_count: number;
+};
+
+export function listTrash(): Promise<TrashEntry[]> {
+  return invoke<TrashEntry[]>(commands.listTrash);
+}
+
+export function restoreTrashEntry(entryId: string): Promise<void> {
+  return invoke<void>(commands.restoreTrashEntry, { entryId });
+}
+
+export function deleteTrashEntries(entryIds: string[]): Promise<number> {
+  return invoke<number>(commands.deleteTrashEntries, { entryIds });
+}
 
 export function isAppError(e: unknown): e is AppError {
   return (
@@ -76,7 +100,11 @@ export const commands = {
   updateTask: "update_task",
   patchTask: "patch_task",
   getTaskContinuity: "get_task_continuity",
+  getDirectLinkedChildren: "get_direct_linked_children",
   deleteTask: "delete_task",
+  listTrash: "list_trash",
+  restoreTrashEntry: "restore_trash_entry",
+  deleteTrashEntries: "delete_trash_entries",
   getTaskDeletionPreview: "get_task_deletion_preview",
   moveTask: "move_task",
   reorderTasks: "reorder_tasks",
@@ -237,6 +265,10 @@ export function patchTask(task_id: string, patch: TaskPatch): Promise<Task> {
 
 export function getTaskContinuity(task_id: string): Promise<TaskContinuity | null> {
   return invoke<TaskContinuity | null>(commands.getTaskContinuity, { taskId: task_id });
+}
+
+export function getDirectLinkedChildren(task_id: string): Promise<DirectLinkedChild[]> {
+  return invoke<DirectLinkedChild[]>(commands.getDirectLinkedChildren, { taskId: task_id });
 }
 
 export function getTaskDeletionPreview(task_id: string): Promise<TaskDeletionPreview> {

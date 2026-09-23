@@ -66,6 +66,40 @@ describe("task row actions", () => {
     expect(item.draggable).toBe(false);
     expect(item.querySelector("[data-task-actions]")).toBeNull();
   });
+  it("shortens an unfocused title with an ellipsis and expands it for editing", async () => {
+    const title = "A long plan title that needs more than one line in the panel";
+    mocks.getEditorWorkspace.mockResolvedValue({ tasks: [task(title), empty] });
+    mount();
+    const field = await screen.findByDisplayValue(title) as HTMLTextAreaElement;
+    Object.defineProperty(field, "scrollHeight", { configurable: true, value: 56 });
+    const preview = field.nextElementSibling as HTMLElement;
+    expect(field.style.height).toBe("28px");
+    expect(preview.textContent).toBe(title);
+    expect(preview.classList.contains("truncate")).toBe(true);
+    expect(row(title).querySelector("[role=checkbox]")?.classList.contains("justify-center")).toBe(true);
+    act(() => field.focus());
+    expect(field.style.height).toBe("56px");
+    act(() => field.blur());
+    expect(field.style.height).toBe("28px");
+  });
+  it("renders a note as a full-width card section without a label or icon", async () => {
+    const item = { ...task("Has note"), note: "A concise note for this task." };
+    mocks.getEditorWorkspace.mockResolvedValue({ tasks: [item, task("No note"), empty] });
+    mount();
+    const noted = (await screen.findByDisplayValue("Has note")).closest("[data-task-id]") as HTMLElement;
+    const note = noted.querySelector('[role="note"]') as HTMLElement;
+    expect(note).toBeTruthy();
+    expect(note.parentElement).toBe(noted);
+    expect(note.className).toContain("w-full");
+    expect(note.className).toContain("px-3");
+    expect(note.querySelector("svg")).toBeNull();
+    expect(note.textContent).toBe("A concise note for this task.");
+    expect(note.querySelector("p")?.className).toContain("text-[12px]");
+    expect(noted.querySelector('[role="checkbox"]')).toBeTruthy();
+    expect(noted.querySelector("[data-task-drag-handle]")).toBeTruthy();
+    const compact = (await screen.findByDisplayValue("No note")).closest("[data-task-id]") as HTMLElement;
+    expect(compact.querySelector('[role="note"]')).toBeNull();
+  });
   it("hides the drag handle until the row is hovered while keeping it keyboard accessible", async () => {
     mocks.getEditorWorkspace.mockImplementation((cycleId: string) => Promise.resolve(cycleId === "preview"
       ? { tasks: [{ ...task("Preview", "preview"), proposal: "upsert" }, { ...empty, id: "preview-empty", cycle_id: "preview" }] }
@@ -170,8 +204,8 @@ describe("task row actions", () => {
     expect(mocks.setTaskParentLink).not.toHaveBeenCalled();
   });
 
-  it("opens the task note and continuity details on double-click", async () => {
-    mocks.getEditorWorkspace.mockResolvedValue({ tasks: [task("Daily task"), empty] });
+  it("opens the current task note without repeating its continuity record", async () => {
+    mocks.getEditorWorkspace.mockResolvedValue({ tasks: [{ ...task("Daily task"), note: "First note" }, empty] });
     mocks.getTaskContinuity.mockResolvedValue({
       title: "Daily task", parent_goal_id: null, selected_episode_index: 0,
       episodes: [{ started_on: "2026-09-21", last_recorded_on: "2026-09-21", completed: false,
@@ -180,8 +214,8 @@ describe("task row actions", () => {
     mount();
     fireEvent.doubleClick(await screen.findByDisplayValue("Daily task"));
     expect(await screen.findByRole("heading", { name: "Daily task" })).toBeTruthy();
-    expect(await screen.findByRole("textbox", { name: "Note" })).toBeTruthy();
-    expect(await screen.findByText("First note")).toBeTruthy();
+    expect((await screen.findByRole("textbox", { name: "Note" }) as HTMLTextAreaElement).value).toBe("First note");
+    expect(screen.queryByRole("region", { name: "Daily history" })).toBeNull();
   });
 
   it("clears the double-click text selection before returning focus after saving details", async () => {

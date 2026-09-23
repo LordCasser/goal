@@ -102,6 +102,19 @@ describe("ReminderSettingsSection", () => {
     );
   });
 
+  it("does not save an invalid typed time", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === commands.getReminderSettings) return Promise.resolve(SETTINGS);
+      if (cmd === commands.getNotificationPermission) return Promise.resolve({ permission: "granted", last_error: null, last_delivery_at: null });
+      return Promise.resolve(null);
+    });
+    renderSection();
+    const start = await screen.findByRole("textbox", { name: "免打扰开始" });
+    fireEvent.change(start, { target: { value: "25:00" } });
+    expect(start.getAttribute("aria-invalid")).toBe("true");
+    expect((screen.getByRole("button", { name: "保存提醒设置" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("shows the denied permission state with recovery guidance", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === commands.getReminderSettings) return Promise.resolve(SETTINGS);

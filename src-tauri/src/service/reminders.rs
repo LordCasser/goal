@@ -348,6 +348,28 @@ pub fn list_reminders(
     repo::list(&conn, cycle_id, status)
 }
 
+#[derive(serde::Serialize)]
+pub struct ReminderDisplay {
+    #[serde(flatten)]
+    pub reminder: repo::Reminder,
+    pub title: Option<String>,
+}
+
+pub fn list_reminders_with_titles(
+    db: &Db,
+    cycle_id: Option<&str>,
+    status: repo::StatusFilter,
+) -> AppResult<Vec<ReminderDisplay>> {
+    let conn = db.pool().get()?;
+    repo::list(&conn, cycle_id, status)?
+        .into_iter()
+        .map(|reminder| {
+            let title = resolve_target(&conn, reminder.target_kind, &reminder.target_id)?.title;
+            Ok(ReminderDisplay { reminder, title })
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Deletion cleanup (tasks §1.3) — wired into the service delete paths.
 // ---------------------------------------------------------------------------
@@ -778,8 +800,10 @@ impl Scheduler {
         }
     }
 
-    /// Starts the timer thread. Detached: it lives as long as the process.
-    pub fn spawn(self) -> Self {
+    /// Collects reminders missed while the app was closed before the timer
+    /// thread can claim them as live deliveries. Detached after startup.
+    pub fn spawn(self) -> AppResult<Self> {
+        self.collect_missed(now_ms())?;
         let core = self.core.clone();
         let spawned = std::thread::Builder::new()
             .name("reminders-scheduler".into())
@@ -790,7 +814,7 @@ impl Scheduler {
                 &format!("scheduler thread failed to start: {err}"),
             );
         }
-        self
+        Ok(self)
     }
 
     /// Reconcile entry (tasks §2.2): wakes the thread so a pass runs now.

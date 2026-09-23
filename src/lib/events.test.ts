@@ -48,3 +48,15 @@ it("proposal events discover a newly affected cycle without remounting Coach", a
   expect(client.getQueryState(qk.pendingTaskCycles())?.isInvalidated).toBe(true);
   unlisten();
 });
+
+it("refreshes linked details when a child task or its plan changes", async () => {
+  const client = new QueryClient();
+  const key = qk.directLinkedChildren("goal");
+  const unlisten = await initEventInvalidation(client);
+  for (const eventName of ["tasks:changed", "cycles:changed"]) {
+    client.setQueryData(key, []);
+    handlers.get(eventName)!({ payload: { cycle_ids: ["week"] } });
+    expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+  }
+  unlisten();
+});

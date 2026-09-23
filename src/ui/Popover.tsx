@@ -23,6 +23,8 @@ export type PopoverProps = {
   role?: "menu" | "dialog";
   children?: ReactNode;
   className?: string;
+  /** Preferred first focus target inside a non-modal editor. */
+  initialFocus?: string;
 };
 
 export type PopoverItemProps = Omit<
@@ -46,12 +48,15 @@ export function Popover({
   label,
   role = "menu",
   className,
+  initialFocus,
   children,
 }: PopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   // onClose 保持 ref 订阅稳定，避免调用方传内联函数导致打开态重复订阅。
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const initialFocusRef = useRef(initialFocus);
+  initialFocusRef.current = initialFocus;
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
   useLayoutEffect(() => {
@@ -89,14 +94,19 @@ export function Popover({
   useEffect(() => {
     if (!open) return;
     const anchor = anchorRef.current;
-    const first = panelRef.current?.querySelector<HTMLElement>(role === "menu"
-      ? '[role="menuitem"]:not([disabled])'
-      : 'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
+    const first = (initialFocusRef.current ? panelRef.current?.querySelector<HTMLElement>(initialFocusRef.current) : null)
+      ?? panelRef.current?.querySelector<HTMLElement>(role === "menu"
+        ? '[role="menuitem"]:not([disabled])'
+        : 'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
     (first ?? panelRef.current)?.focus();
 
     // 捕获阶段处理 Escape：先于外层 Dialog 的冒泡监听，内层菜单优先关闭。
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.isComposing) return;
+      // A nested popover is portalled beside this one. Let the innermost
+      // panel consume Escape before its parent editor closes.
+      const owner = e.target instanceof Element ? e.target.closest('[data-popover-content="true"]') : null;
+      if (owner && owner !== panelRef.current) return;
       e.preventDefault();
       e.stopPropagation();
       onCloseRef.current();
@@ -106,6 +116,7 @@ export function Popover({
       if (!target) return;
       if (panelRef.current?.contains(target)) return;
       if (anchor?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-popover-content="true"]')) return;
       onCloseRef.current();
     };
     document.addEventListener("keydown", onKeyDown, true);
@@ -153,6 +164,7 @@ export function Popover({
   return createPortal(
     <div
       ref={panelRef}
+      data-popover-content="true"
       role={role}
       tabIndex={-1}
       aria-label={label}

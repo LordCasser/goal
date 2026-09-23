@@ -83,7 +83,7 @@ describe("CycleOptionsMenu deletion", () => {
     const invalidateQueries = vi.spyOn(client, "invalidateQueries");
 
     await openDelete(target);
-    const confirm = await screen.findByRole("button", { name: "Delete focus block" });
+    const confirm = await screen.findByRole("button", { name: "Move focus block to Trash" });
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(confirm);
@@ -103,7 +103,7 @@ describe("CycleOptionsMenu deletion", () => {
     mount(target);
 
     await openDelete(target);
-    const confirm = screen.getByRole("button", { name: "Delete focus block" });
+    const confirm = screen.getByRole("button", { name: "Move focus block to Trash" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(confirm);
     expect(mocks.deletePlanningCycle).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describe("CycleOptionsMenu deletion", () => {
     await openDelete(target);
     expect((await screen.findByRole("alert")).textContent).toContain("This planning container cannot be deleted.");
     expect(screen.getByRole("alert").textContent).not.toContain("This planning container is protected.");
-    const confirm = screen.getByRole("button", { name: "Delete day plan" });
+    const confirm = screen.getByRole("button", { name: "Move day plan to Trash" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(confirm);
     expect(mocks.deletePlanningCycle).not.toHaveBeenCalled();
@@ -147,11 +147,11 @@ describe("CycleOptionsMenu deletion", () => {
     await openDelete(target);
     await screen.findByText("3 focus blocks");
     expect(screen.getByText("1 nested plan")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Delete week plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move week plan to Trash" }));
     await screen.findByText("4 focus blocks");
     expect(mocks.deletePlanningCycle).toHaveBeenCalledTimes(1);
     expect((await screen.findByRole("alert")).textContent).toContain("Review the updated impact");
-    fireEvent.click(screen.getByRole("button", { name: "Delete week plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move week plan to Trash" }));
     await waitFor(() => expect(mocks.deletePlanningCycle).toHaveBeenLastCalledWith(target.id, "impact-2"));
   });
 });

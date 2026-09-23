@@ -18,6 +18,7 @@ import { invalidateCycles, useActionError } from "./actions";
 import { CycleOptionsMenu } from "./CycleOptionsMenu";
 import { useTranslation, formatDuration as formatLocalizedDuration } from "../../lib/i18n";
 import { qk } from "../../lib/events";
+import { ReminderPicker } from "../reminders/ReminderPicker";
 
 const DURATION_PRESETS: ReadonlyArray<{ label: string; ms: number | null }> = [
   { label: "No duration", ms: null },
@@ -52,6 +53,7 @@ export function FocusArea({
   const qc = useQueryClient();
   const locked = day.finished;
   const [adding, setAdding] = useState(false);
+  const [reminderFor, setReminderFor] = useState<string | null>(null);
   const { error, run } = useActionError();
 
   const sorted = useMemo(
@@ -104,7 +106,7 @@ export function FocusArea({
             <div
               key={session.id}
               data-session-id={session.id}
-              className="flex items-center gap-2 rounded-lg border border-light bg-content px-3 py-3 transition-colors duration-100 hover:bg-hover"
+              className="flex flex-wrap items-center gap-2 rounded-lg border border-light bg-content px-3 py-3 transition-colors duration-100 hover:bg-hover"
             >
               <ProgressDot
                 tone={running ? "active" : session.finished ? "done" : "idle"}
@@ -158,10 +160,17 @@ export function FocusArea({
                   </Button>
                 )
               )}
+              {!session.finished && <Button size="compact" variant="ghost"
+                aria-label={`${t("focus.reminder")} · ${session.title}`}
+                onClick={() => setReminderFor(reminderFor === session.id ? null : session.id)}>{t("focus.reminder")}</Button>}
               <CycleOptionsMenu
                 cycle={session}
                 runningElsewhere={hasRunning && session.id !== runningSessionId}
               />
+              {reminderFor === session.id && <div className="w-full">
+                <ReminderPicker target_kind="session" target_id={session.id}
+                  onSaved={() => setReminderFor(null)} onCancel={() => setReminderFor(null)} />
+              </div>}
             </div>
           );
         })}

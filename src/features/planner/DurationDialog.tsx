@@ -1,14 +1,14 @@
 /** Long-term cycle duration and custom progress-check configuration. */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Button, Dialog, Select, SelectItem } from "../../ui";
+import { Button, DatePicker, Dialog, Select, SelectItem } from "../../ui";
 import { createPlanningCycle, type Cycle, type ProgressCheck } from "../../lib/ipc";
 import { errorMessage, formatDate, useTranslation } from "../../lib/i18n";
 import { todayISO, addDaysISO } from "./dates";
 import { deriveCustomTimeline, deriveTimeline, type TimelineMonths } from "./timeline";
 import { useActionError } from "./actions";
 
-type DurationChoice = TimelineMonths | "custom";
-type CheckMode = "repeat" | "once";
+type DurationChoice = TimelineMonths | "custom" | "open";
+type CheckMode = "none" | "repeat" | "once";
 type RepeatUnit = "days" | "weeks";
 
 const OPTIONS: ReadonlyArray<TimelineMonths> = [1, 3, 6];
@@ -34,7 +34,7 @@ export function DurationDialog({
   const [today, setToday] = useState(() => todayISO());
   const [customStart, setCustomStart] = useState(() => todayISO());
   const [customEnd, setCustomEnd] = useState(() => addDaysISO(todayISO(), CUSTOM_DEFAULT_DAYS));
-  const [checkMode, setCheckMode] = useState<CheckMode>("repeat");
+  const [checkMode, setCheckMode] = useState<CheckMode>("none");
   const [repeatAmount, setRepeatAmount] = useState("2");
   const [repeatUnit, setRepeatUnit] = useState<RepeatUnit>("weeks");
   const [onceDate, setOnceDate] = useState(() => addDaysISO(todayISO(), CUSTOM_DEFAULT_DAYS / 2));
@@ -49,26 +49,28 @@ export function DurationDialog({
     setToday(now);
     setCustomStart(now);
     setCustomEnd(addDaysISO(now, CUSTOM_DEFAULT_DAYS));
-    setCheckMode("repeat");
+    setCheckMode("none");
     setRepeatAmount("2");
     setRepeatUnit("weeks");
     setOnceDate(addDaysISO(now, CUSTOM_DEFAULT_DAYS / 2));
     dismiss();
   }, [open, dismiss]);
 
-  const customCheck = useMemo<ProgressCheck>(() => (
-    checkMode === "once"
+  const customCheck = useMemo<ProgressCheck | null>(() => (
+    checkMode === "none" ? null : checkMode === "once"
       ? { kind: "once", date: onceDate }
       : { kind: "repeat", every_days: intervalDays(repeatAmount, repeatUnit) }
   ), [checkMode, onceDate, repeatAmount, repeatUnit]);
+  const start = choice === "custom" || choice === "open" ? customStart : today;
+  const end = choice === "open" ? null : choice === "custom" ? customEnd : deriveTimeline(today, choice).nodes[2].date;
   const customTimeline = useMemo(
-    () => deriveCustomTimeline(customStart, customEnd, customCheck),
-    [customStart, customEnd, customCheck],
+    () => deriveCustomTimeline(start, end, customCheck),
+    [start, end, customCheck],
   );
   const customError = customTimeline.error
     ? errorMessage({ code: customTimeline.error, message: customTimeline.error })
     : null;
-  const canCreate = choice !== "custom" || customTimeline.error === null;
+  const canCreate = customTimeline.error === null;
   const durationChoiceRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const moveDurationChoice = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const direction = event.key === "ArrowDown" || event.key === "ArrowRight"
@@ -78,8 +80,8 @@ export function DurationDialog({
         : 0;
     if (direction === 0) return;
     event.preventDefault();
-    const next = (index + direction + 4) % 4;
-    const nextChoice: DurationChoice = next === 3 ? "custom" : OPTIONS[next]!;
+    const next = (index + direction + 5) % 5;
+    const nextChoice: DurationChoice = next === 3 ? "custom" : next === 4 ? "open" : OPTIONS[next]!;
     setChoice(nextChoice);
     dismiss();
     durationChoiceRefs.current[next]?.focus();
@@ -98,18 +100,19 @@ export function DurationDialog({
     }
     creatingRef.current = true;
     setCreating(true);
-    const args = choice === "custom"
+    const args = choice === "custom" || choice === "open"
       ? {
         cycle_type: "month" as const,
         parent_id: null,
         starts_on: customStart,
-        ends_on: customEnd,
+        ends_on: choice === "open" ? null : customEnd,
         progress_check: customCheck,
       }
       : {
         cycle_type: "month" as const,
         duration_months: choice,
         parent_id: null,
+        progress_check: customCheck,
       };
     const created = await run(() => createPlanningCycle(args));
     creatingRef.current = false;
@@ -180,14 +183,30 @@ export function DurationDialog({
             <span className="text-body font-semibold text-primary">{t("duration.custom")}</span>
             <span className="text-caption text-hint">{t("duration.customHelp")}</span>
           </button>
+          <button
+            ref={(element) => { durationChoiceRefs.current[4] = element; }}
+            type="button"
+            role="radio"
+            aria-checked={choice === "open"}
+            tabIndex={choice === "open" ? 0 : -1}
+            onKeyDown={(event) => moveDurationChoice(event, 4)}
+            onClick={() => { dismiss(); setChoice("open"); }}
+            className={[
+              "flex cursor-pointer flex-col items-start gap-0.5 rounded-lg border px-4 py-3 text-left transition-colors duration-150",
+              choice === "open" ? "border-focus bg-focus-surface" : "border-light hover:bg-hover",
+            ].join(" ")}
+          >
+            <span className="text-body font-semibold text-primary">{t("duration.open")}</span>
+          </button>
         </div>
 
         <div className="min-w-0 flex-1 sm:border-l sm:border-light sm:pl-5">
-          {choice === "custom" ? (
-            <CustomCycleEditor
+          {typeof choice === "number" && <PresetTimeline today={today} months={choice} t={t} />}
+          <CustomCycleEditor
               t={t}
-              start={customStart}
-              end={customEnd}
+              start={start}
+              end={end}
+              dateFields={choice === "custom" ? "both" : choice === "open" ? "start" : "none"}
               checkMode={checkMode}
               repeatAmount={repeatAmount}
               repeatUnit={repeatUnit}
@@ -202,9 +221,6 @@ export function DurationDialog({
               onRepeatUnit={(value) => changeCustom(setRepeatUnit, value)}
               onOnceDate={(value) => changeCustom(setOnceDate, value)}
             />
-          ) : (
-            <PresetTimeline today={today} months={choice} t={t} />
-          )}
         </div>
       </div>
       {error && <p role="alert" className="mt-3 text-caption text-danger">{error}</p>}
@@ -225,7 +241,7 @@ function PresetTimeline({
   return (
     <>
       <ol className="flex flex-col gap-4">
-        {timeline.nodes.map((node) => (
+        {timeline.nodes.filter((node) => node.key !== "progress").map((node) => (
           <li key={node.key} data-timeline-node={node.key}>
             <p className="text-caption text-secondary">{t(`timeline.${node.key}`)}</p>
             <p className="text-body font-medium text-primary">
@@ -245,6 +261,7 @@ function CustomCycleEditor({
   t,
   start,
   end,
+  dateFields,
   checkMode,
   repeatAmount,
   repeatUnit,
@@ -261,7 +278,8 @@ function CustomCycleEditor({
 }: {
   t: (key: string, options?: Record<string, unknown>) => string;
   start: string;
-  end: string;
+  end: string | null;
+  dateFields: "both" | "start" | "none";
   checkMode: CheckMode;
   repeatAmount: string;
   repeatUnit: RepeatUnit;
@@ -276,7 +294,7 @@ function CustomCycleEditor({
   onRepeatUnit: (value: RepeatUnit) => void;
   onOnceDate: (value: string) => void;
 }) {
-  const checkModeLabel = (mode: CheckMode) => mode === "repeat" ? t("duration.repeat") : t("duration.once");
+  const checkModeLabel = (mode: CheckMode) => mode === "none" ? t("duration.noCheck") : mode === "repeat" ? t("duration.repeat") : t("duration.once");
   const errorId = "duration-custom-error";
   const rangeInvalid = errorCode === "invalid_cycle_range";
   const progressInvalid = errorCode === "invalid_progress_check";
@@ -289,35 +307,35 @@ function CustomCycleEditor({
         : 0;
     if (direction === 0) return;
     event.preventDefault();
-    const next = (index + direction + 2) % 2;
-    onCheckMode(next === 0 ? "repeat" : "once");
+    const next = (index + direction + 3) % 3;
+    onCheckMode(next === 0 ? "none" : next === 1 ? "repeat" : "once");
     checkModeRefs.current[next]?.focus();
   };
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid min-w-0 grid-cols-1 gap-2.5">
-        <label className="flex min-w-0 flex-col gap-1 text-caption text-secondary">
-          {t("duration.startsOn")}
-          <input aria-label={t("duration.startsOn")} aria-invalid={rangeInvalid} aria-describedby={rangeInvalid ? errorId : undefined} className="h-9 min-w-0 rounded-md border border-control bg-content px-3 text-body text-primary" type="date" value={start} onChange={(event) => onStart(event.currentTarget.value)} />
-        </label>
-        <label className="flex min-w-0 flex-col gap-1 text-caption text-secondary">
-          {t("duration.endsOn")}
-          <input aria-label={t("duration.endsOn")} aria-invalid={rangeInvalid} aria-describedby={rangeInvalid ? errorId : undefined} className="h-9 min-w-0 rounded-md border border-control bg-content px-3 text-body text-primary" type="date" min={start || undefined} value={end} onChange={(event) => onEnd(event.currentTarget.value)} />
-        </label>
-      </div>
+      {dateFields !== "none" && <div className="grid min-w-0 grid-cols-1 gap-2.5">
+        <div className="flex min-w-0 flex-col gap-1 text-caption text-secondary">
+          <span>{t("duration.startsOn")}</span>
+          <DatePicker aria-label={t("duration.startsOn")} aria-invalid={rangeInvalid} aria-describedby={rangeInvalid ? errorId : undefined} value={start} onChange={onStart} />
+        </div>
+        {dateFields === "both" && <div className="flex min-w-0 flex-col gap-1 text-caption text-secondary">
+          <span>{t("duration.endsOn")}</span>
+          <DatePicker aria-label={t("duration.endsOn")} aria-invalid={rangeInvalid} aria-describedby={rangeInvalid ? errorId : undefined} min={start || undefined} value={end ?? ""} onChange={onEnd} />
+        </div>}
+      </div>}
 
       <fieldset className="flex min-w-0 flex-col gap-2">
         <legend className="text-caption text-secondary">{t("duration.progressCheck")}</legend>
         <div role="radiogroup" aria-label={t("duration.progressCheck")} className="flex flex-wrap items-center gap-x-5 gap-y-1">
-          {(["repeat", "once"] as const).map((mode) => (
+          {(["none", "repeat", "once"] as const).map((mode, index) => (
             <button
               key={mode}
-              ref={(element) => { checkModeRefs.current[mode === "repeat" ? 0 : 1] = element; }}
+              ref={(element) => { checkModeRefs.current[index] = element; }}
               type="button"
               role="radio"
               aria-checked={checkMode === mode}
               tabIndex={checkMode === mode ? 0 : -1}
-              onKeyDown={(event) => moveCheckMode(event, mode === "repeat" ? 0 : 1)}
+              onKeyDown={(event) => moveCheckMode(event, index)}
               onClick={() => onCheckMode(mode)}
               className={[
                 "inline-flex h-8 cursor-pointer items-center gap-2 rounded-sm px-0.5 text-body transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-focus",
@@ -342,33 +360,31 @@ function CustomCycleEditor({
               </Select>
             </div>
           </div>
-        ) : (
-          <label className="flex min-w-0 flex-wrap items-center gap-2 text-body text-secondary">
+        ) : checkMode === "once" ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-body text-secondary">
             <span className="shrink-0">{t("duration.onceDate")}</span>
-            <input aria-label={t("duration.onceDate")} aria-invalid={progressInvalid} aria-describedby={progressInvalid ? errorId : undefined} className="h-8 w-40 min-w-0 max-w-full rounded-md border border-control bg-content px-2 text-body text-primary" type="date" min={start || undefined} max={addDaysISO(end, -1)} value={onceDate} onChange={(event) => onOnceDate(event.currentTarget.value)} />
-          </label>
-        )}
+            <DatePicker aria-label={t("duration.onceDate")} aria-invalid={progressInvalid} aria-describedby={progressInvalid ? errorId : undefined} compact className="w-40 max-w-full" min={start || undefined} max={end ? addDaysISO(end, -1) : undefined} value={onceDate} onChange={onOnceDate} />
+          </div>
+        ) : null}
       </fieldset>
 
       {error && <p id={errorId} role="alert" className="text-caption text-danger">{error}</p>}
-      <div className="pt-1">
+      {(dateFields !== "none" || checkMode !== "none") && <div className="pt-1">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <p className="text-body font-medium text-primary">
-            {timeline.days === null ? t("duration.rangeUnavailable") : t("duration.customDays", { count: timeline.days })}
-          </p>
-          <p className="text-caption text-secondary">{t("duration.checkCount", { count: timeline.totalChecks })}</p>
+          {dateFields !== "none" && <p className="text-body font-medium text-primary">
+            {end === null ? t("duration.open") : timeline.days === null ? t("duration.rangeUnavailable") : t("duration.customDays", { count: timeline.days })}
+          </p>}
+          {checkMode !== "none" && timeline.totalChecks !== null && <p className="text-caption text-secondary">{t("duration.checkCount", { count: timeline.totalChecks })}</p>}
         </div>
-        {timeline.totalChecks > 0 ? (
+        {timeline.checkDates.length > 0 ? (
           <>
             <ul className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-caption text-hint">
               {timeline.checkDates.map((date) => <li key={date}>{formatDate(date, { month: "short", day: "numeric" })}</li>)}
             </ul>
-            {timeline.totalChecks > timeline.checkDates.length && <p className="text-caption text-hint">{t("duration.moreChecks", { count: timeline.totalChecks - timeline.checkDates.length })}</p>}
+            {timeline.totalChecks !== null && timeline.totalChecks > timeline.checkDates.length && <p className="text-caption text-hint">{t("duration.moreChecks", { count: timeline.totalChecks - timeline.checkDates.length })}</p>}
           </>
-        ) : (
-          <p className="mt-1 text-caption text-hint">{t("duration.noChecks")}</p>
-        )}
-      </div>
+        ) : null}
+      </div>}
     </div>
   );
 }

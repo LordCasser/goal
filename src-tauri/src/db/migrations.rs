@@ -95,7 +95,59 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "task notes",
         sql: M0015_TASK_NOTES,
     },
+    Migration {
+        version: 16,
+        description: "recycle bin",
+        sql: M0016_TRASH,
+    },
+    Migration {
+        version: 17,
+        description: "open-ended long-term progress checks",
+        sql: M0017_OPEN_ENDED_LONG_TERM,
+    },
 ];
+
+const M0017_OPEN_ENDED_LONG_TERM: &str = r#"
+ALTER TABLE cycles ADD COLUMN progress_check_next TEXT CHECK (
+    progress_check_next IS NULL OR COALESCE((
+        type = 'month' AND starts_on IS NOT NULL
+        AND (ends_on IS NULL OR ends_on > starts_on)
+        AND json_valid(progress_check_next)
+        AND (
+            (json_extract(progress_check_next, '$.kind') = 'once'
+             AND json_type(progress_check_next, '$.date') = 'text'
+             AND length(json_extract(progress_check_next, '$.date')) = 10
+             AND date(json_extract(progress_check_next, '$.date'), '+0 days') = json_extract(progress_check_next, '$.date')
+             AND json_extract(progress_check_next, '$.date') >= starts_on
+             AND (ends_on IS NULL OR json_extract(progress_check_next, '$.date') < ends_on)
+             AND json_type(progress_check_next, '$.every_days') IS NULL)
+            OR
+            (json_extract(progress_check_next, '$.kind') = 'repeat'
+             AND json_type(progress_check_next, '$.every_days') = 'integer'
+             AND json_extract(progress_check_next, '$.every_days') > 0
+             AND json_type(progress_check_next, '$.date') IS NULL)
+        )
+    ), 0)
+);
+UPDATE cycles SET progress_check_next = progress_check WHERE progress_check IS NOT NULL;
+ALTER TABLE cycles DROP COLUMN progress_check;
+ALTER TABLE cycles RENAME COLUMN progress_check_next TO progress_check;
+"#;
+
+const M0016_TRASH: &str = r#"
+CREATE TABLE trash_entries (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('task', 'cycle')),
+    target_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    deleted_at INTEGER NOT NULL,
+    task_count INTEGER NOT NULL,
+    cycle_count INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL
+);
+CREATE INDEX ix_trash_deleted_at ON trash_entries(deleted_at DESC);
+"#;
 
 const M0015_TASK_NOTES: &str = r#"
 ALTER TABLE tasks ADD COLUMN note TEXT NOT NULL DEFAULT '';
@@ -498,6 +550,65 @@ CREATE INDEX ix_dismissals_cycle ON planning_issue_dismissals(cycle_id);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recycle_bin_schema_is_created_for_fresh_and_existing_databases() {
+        let mut fresh = Connection::open_in_memory().expect("open fresh");
+        apply(&mut fresh).expect("migrate fresh");
+        assert!(table_exists(&fresh, "trash_entries"));
+        assert!(columns(&fresh, "trash_entries").contains(&"snapshot_json".to_string()));
+        assert_eq!(fresh.query_row::<i64, _, _>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_trash_deleted_at'",
+            [], |row| row.get(0)).expect("index"), 1);
+        assert!(fresh.execute(
+            "INSERT INTO trash_entries (id, kind, target_id, title, origin, deleted_at, task_count, cycle_count, snapshot_json)
+             VALUES ('bad', 'other', 't', 'Title', 'Later', 1, 0, 0, '{}')", [],
+        ).is_err());
+
+        let mut existing = Connection::open_in_memory().expect("open existing");
+        apply_up_to(&mut existing, 15);
+        existing.execute("INSERT INTO cycles (id, title, type) VALUES ('d1', 'Day', 'day')", [])
+            .expect("existing cycle");
+        existing.execute("INSERT INTO tasks (id, cycle_id, title) VALUES ('t1', 'd1', 'Existing')", [])
+            .expect("existing task");
+        apply(&mut existing).expect("upgrade");
+        assert!(table_exists(&existing, "trash_entries"));
+        assert_eq!(existing.query_row::<String, _, _>(
+            "SELECT title FROM tasks WHERE id = 't1'", [], |row| row.get(0)).expect("preserved task"), "Existing");
+    }
+
+    #[test]
+    fn open_ended_progress_check_migration_preserves_existing_rules() {
+        let mut conn = Connection::open_in_memory().expect("open");
+        apply_up_to(&mut conn, 16);
+        conn.execute(
+            "INSERT INTO cycles (id, title, type, starts_on, ends_on, duration, progress_check)
+             VALUES ('fixed', 'Fixed', 'month', '2026-09-23', '2026-12-16', 7257600000,
+                     '{\"kind\":\"once\",\"date\":\"2026-11-04\"}')",
+            [],
+        ).expect("existing rule");
+
+        apply(&mut conn).expect("upgrade");
+        let saved: String = conn.query_row(
+            "SELECT progress_check FROM cycles WHERE id='fixed'", [], |row| row.get(0),
+        ).expect("saved rule");
+        assert_eq!(saved, r#"{"kind":"once","date":"2026-11-04"}"#);
+
+        conn.execute(
+            "INSERT INTO cycles (id, title, type, starts_on, progress_check)
+             VALUES ('open', 'Open', 'month', '2026-09-23', '{\"kind\":\"repeat\",\"every_days\":14}')",
+            [],
+        ).expect("open repeat");
+        assert!(conn.execute(
+            "UPDATE cycles SET progress_check='{\"kind\":\"once\",\"date\":\"2026-09-22\"}' WHERE id='open'", [],
+        ).is_err());
+        assert!(conn.execute(
+            "UPDATE cycles SET progress_check='{\"kind\":\"repeat\",\"every_days\":0}' WHERE id='open'", [],
+        ).is_err());
+        assert!(conn.execute(
+            "UPDATE cycles SET progress_check='{\"kind\":\"once\",\"date\":\"2026-12-16\"}' WHERE id='fixed'", [],
+        ).is_err());
+    }
 
     #[test]
     fn existing_tasks_gain_empty_notes() {

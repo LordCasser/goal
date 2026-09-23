@@ -10,6 +10,11 @@ use tauri::{Emitter, Runtime};
 pub const CYCLES_CHANGED: &str = "cycles:changed";
 pub const TASKS_CHANGED: &str = "tasks:changed";
 pub const PROPOSALS_CHANGED: &str = "proposals:changed";
+pub const TRASH_CHANGED: &str = "trash:changed";
+
+pub fn emit_trash_changed<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let _ = app.emit(TRASH_CHANGED, ());
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CycleIdsPayload {

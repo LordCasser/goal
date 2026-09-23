@@ -11,7 +11,7 @@ use crate::repository::settings as repo;
 /// Monday; the first UI that needs the value persists it once
 /// (spec: 首次确定周起始日 — 之后不再变更).
 pub const DEFAULT_WEEK_START_DAY: i64 = 1;
-pub const DEFAULT_SHOW_RELATION_LINES: bool = false;
+pub const DEFAULT_SHOW_RELATION_LINES: bool = true;
 pub const DEFAULT_AUTO_CARRY_UNFINISHED: bool = false;
 pub const DEFAULT_SHOW_LATER_COUNT: bool = true;
 
@@ -23,7 +23,7 @@ pub struct Settings {
     /// Preferred surface theme: `"white"` or `"gray"`; `None` until first
     /// chosen (design.md §4.4 — the default white is a client-side fallback).
     pub theme: Option<String>,
-    /// Whether relationship lines are shown in the planner; disabled by default.
+    /// Whether relationship lines are shown in the planner; enabled by default.
     pub show_relation_lines: bool,
     /// Whether new planning cycles import unfinished items from the adjacent cycle.
     pub auto_carry_unfinished: bool,

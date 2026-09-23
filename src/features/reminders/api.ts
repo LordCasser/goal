@@ -25,6 +25,8 @@ export interface Reminder {
   id: string;
   target_kind: TargetKind;
   target_id: string;
+  /** Resolved display title in list responses; unset for mutation responses. */
+  title?: string | null;
   /** 毫秒时间戳（Unix epoch）——计划触发点。 */
   fire_at: number;
   /** 是否允许在免打扰时段静音系统通知（true = 软提醒）。 */
@@ -235,9 +237,9 @@ export function toLocalInputValue(fireAt: number): string {
 
 /** datetime-local 值 → ms；无效（含空串）返回 null。 */
 export function fromLocalInputValue(value: string): number | null {
-  if (!value) return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
   const ms = new Date(value).getTime();
-  return Number.isNaN(ms) ? null : ms;
+  return Number.isNaN(ms) || toLocalInputValue(ms) !== value ? null : ms;
 }
 
 export function formatFireAt(fireAt: number): string {

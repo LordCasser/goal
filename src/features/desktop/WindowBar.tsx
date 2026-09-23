@@ -14,9 +14,11 @@ import { useDesktopWindow } from "./useDesktopWindow";
 export function WindowBar({
   hasCycle,
   laterActive,
+  trashActive,
   agentActive,
   issuesActive,
   onToggleLater,
+  onToggleTrash,
   onToggleAgent,
   onReviewChanges,
   onToggleIssues,
@@ -26,9 +28,11 @@ export function WindowBar({
 }: {
   hasCycle: boolean;
   laterActive: boolean;
+  trashActive: boolean;
   agentActive: boolean;
   issuesActive: boolean;
   onToggleLater: () => void;
+  onToggleTrash: () => void;
   onToggleAgent: () => void;
   onReviewChanges: (cycleId:string|null) => void;
   onToggleIssues: () => void;
@@ -78,6 +82,11 @@ export function WindowBar({
           className="rounded-full bg-subtle px-1.5 text-[11px] leading-4 tabular-nums text-secondary">
           {visibleCount}
         </span>}
+      </button>
+      <button type="button" aria-pressed={trashActive} aria-label={t("desktop.trash")}
+        title={t("desktop.trash")} className={`${buttonBase} ${trashActive ? active : hover}`}
+        onClick={onToggleTrash}>
+        <TrashIcon />{t("desktop.trash")}
       </button>
       {/* The spacer keeps dragging and double-click zoom native to the window. */}
       <div ref={dragRef} className="window-drag-area" data-tauri-drag-region={platform === "macos" ? true : undefined} />
@@ -149,6 +158,12 @@ function ClockIcon() {
       <path d="M12 7v5l3.5 2" />
     </svg>
   );
+}
+
+function TrashIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4.5 7h15M9 7V4.5h6V7m3 0-.8 12.5H6.8L6 7M10 10.5v5.5m4-5.5v5.5" />
+  </svg>;
 }
 
 function CoachIcon() {

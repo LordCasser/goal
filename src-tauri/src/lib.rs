@@ -35,7 +35,7 @@ pub fn run() {
             let initial_level = persisted_log_level(&state);
             // The reminder scheduler owns one thread and its own Db handle;
             // started before manage so commands can reach it.
-            let scheduler = commands::reminders::start_scheduler(handle.clone(), state.clone());
+            let scheduler = commands::reminders::start_scheduler(handle.clone(), state.clone())?;
             app.manage(scheduler);
             app.manage(state);
 
@@ -88,12 +88,17 @@ pub fn run() {
             commands::tasks::update_task,
             commands::tasks::patch_task,
             commands::tasks::get_task_continuity,
+            commands::tasks::get_direct_linked_children,
             commands::tasks::get_task_deletion_preview,
             commands::tasks::delete_task,
             commands::tasks::move_task,
             commands::tasks::reorder_tasks,
             commands::tasks::set_task_parent_link,
             commands::tasks::set_task_root_color,
+            // recycle bin
+            commands::trash::list_trash,
+            commands::trash::restore_trash_entry,
+            commands::trash::delete_trash_entries,
             // editor workspaces
             commands::editor::get_editor_workspace,
             commands::editor::get_editor_workspaces_by_cycle_ids,

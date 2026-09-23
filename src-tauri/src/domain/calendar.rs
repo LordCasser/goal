@@ -9,7 +9,8 @@
 //! * `week`  -> `week:{YYYY-MM-DD}`           (the week's first day, which
 //!   follows the `week_start_day` setting; cycles created after a setting
 //!   change use the new first day, existing cycles keep theirs)
-//! * `month` -> `long-term:{starts_on}:{ends_on}`
+//! * bounded `month` -> `long-term:{starts_on}:{ends_on}`
+//! * open-ended `month` -> `long-term:{starts_on}:open`
 //! * `session` / the Later container -> no calendar key
 //!
 //! Dates are local dates (`YYYY-MM-DD`), never UTC conversions, so "which
@@ -68,11 +69,11 @@ pub fn custom_long_term_bounds(
 pub fn validate_progress_check(
     check: &super::cycle::ProgressCheck,
     start: NaiveDate,
-    end: NaiveDate,
+    end: Option<NaiveDate>,
 ) -> crate::error::AppResult<()> {
     let valid = match check {
         super::cycle::ProgressCheck::Once { date } => parse_date(date)
-            .is_some_and(|d| date.len() == 10 && format_date(d) == *date && d >= start && d < end),
+            .is_some_and(|d| date.len() == 10 && format_date(d) == *date && d >= start && end.is_none_or(|limit| d < limit)),
         super::cycle::ProgressCheck::Repeat { every_days } => *every_days > 0,
     };
     if !valid {
@@ -108,6 +109,12 @@ pub fn long_term_key(starts_on: NaiveDate, ends_on: NaiveDate) -> String {
         format_date(starts_on),
         format_date(ends_on)
     )
+}
+
+/// Identity for an open-ended long-term cycle. Its start date distinguishes it
+/// from other open cycles while remaining separate from bounded cycles.
+pub fn open_long_term_key(starts_on: NaiveDate) -> String {
+    format!("{}{}:open", LONG_TERM_KEY_PREFIX, format_date(starts_on))
 }
 
 /// First day of the week containing `date`, given `week_start_day`
@@ -331,6 +338,17 @@ mod tests {
         let mon_start = start_of_week(day, 1);
         let sun_start = start_of_week(day, 7);
         assert_ne!(week_key(mon_start), week_key(sun_start));
+    }
+
+    #[test]
+    fn open_long_term_key_is_stable_and_distinct_from_bounded_identity() {
+        let start = d("2026-09-14");
+        let open = open_long_term_key(start);
+
+        assert_eq!(open, "long-term:2026-09-14:open");
+        assert_eq!(open_long_term_key(start), open);
+        assert_ne!(open, open_long_term_key(d("2026-09-15")));
+        assert_ne!(open, long_term_key(start, d("2026-12-07")));
     }
 
     #[test]

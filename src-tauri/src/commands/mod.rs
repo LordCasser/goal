@@ -18,6 +18,7 @@ pub mod repeats;
 pub mod reviews;
 pub mod settings;
 pub mod tasks;
+pub mod trash;
 
 use tauri::{Manager, Runtime};
 
@@ -31,6 +32,9 @@ fn emit_mutation<R: Runtime, T>(app: &tauri::AppHandle<R>, mutation: &Mutation<T
     events::emit_tasks_changed(app, &mutation.tasks);
     if let Some(cycle_id) = &mutation.proposal_cycle {
         events::emit_proposals_changed(app, cycle_id);
+    }
+    if mutation.trash_changed {
+        events::emit_trash_changed(app);
     }
     // Mutations can create or remove focus-block reminders in the same
     // transaction. Wake the managed scheduler after the mutation events so a

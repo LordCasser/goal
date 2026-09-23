@@ -353,6 +353,7 @@ export function TaskList({
             active={active}
             row={row}
             cycleLabel={workspace.data?.cycle?.title}
+            cycleType={cycleType}
             locked={locked || row.node.proposal != null}
             allowColor={allowColor}
             relations={relations}
@@ -459,6 +460,7 @@ function TaskRow({
   active,
   row,
   cycleLabel,
+  cycleType,
   locked,
   allowColor,
   relations,
@@ -485,6 +487,7 @@ function TaskRow({
   active: boolean;
   row: VisibleRow;
   cycleLabel?: string;
+  cycleType: CycleType;
   locked: boolean;
   allowColor: boolean;
   relations?: RelationView;
@@ -512,18 +515,37 @@ function TaskRow({
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [noteExpanded, setNoteExpanded] = useState(false);
+  const [noteCanExpand, setNoteCanExpand] = useState(false);
+  const noteRef = useRef<HTMLParagraphElement>(null);
   const goalTooltip = useDailyGoalTooltip(row.node, relations, goalHintEnabled, rowRef);
   useLayoutEffect(() => {
     const field = titleRef.current;
     if (!field) return;
-    field.style.height = "0px";
-    field.style.height = `${Math.max(28, field.scrollHeight)}px`;
+    if (document.activeElement === field) {
+      field.style.height = "0px";
+      field.style.height = `${Math.max(28, field.scrollHeight)}px`;
+    } else field.style.height = "28px";
   }, [draft, active]);
   const node = row.node;
+  const note = node.note ?? "";
+  const hasNote = note.trim().length > 0;
+  useLayoutEffect(() => {
+    setNoteExpanded(false);
+    const element = noteRef.current;
+    if (!element) { setNoteCanExpand(false); return; }
+    const measure = () => setNoteCanExpand(element.scrollHeight > 37);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [note]);
   const empty = isEmptyRow(node);
   const color = relations ? taskColor(node, relations.tasks) : null;
   const highlighted = relations?.highlighted.has(node.id) ?? false;
   const hints = [node.needs_refinement === true ? t("task.clarify") : null, node.needs_breakdown === true ? t("task.breakdown") : null].filter(Boolean).join(" · ");
+  const titleTone = node.proposal === "delete" ? "text-secondary line-through decoration-current/40" : node.completed ? "text-hint line-through" : "text-primary";
   return (<>
     <div
       ref={rowRef}
@@ -549,7 +571,8 @@ function TaskRow({
         setDetailOpen(true);
       }}
       className={[
-        "task-row group relative flex items-start gap-1 rounded-md py-1 pr-1",
+        "task-row group relative flex flex-col rounded-md",
+        hasNote ? "overflow-hidden border border-light bg-content" : "items-start gap-0.5 py-1 pr-1",
         "transition-colors duration-150",
         dragging ? "opacity-45" : "",
         node.proposal ? "bg-focus-surface/60 ring-1 ring-inset ring-focus/15" : "hover:bg-hover",
@@ -557,6 +580,7 @@ function TaskRow({
       style={{ marginLeft: row.depth * 20, "--task-color": color ?? "var(--color-focus)" } as CSSProperties}
     >
       {dropBefore !== null && <span aria-hidden="true" className={`pointer-events-none absolute left-1 right-1 z-10 h-0.5 rounded-full bg-focus ${dropBefore ? "top-0" : "bottom-0"}`} />}
+      <div className={`flex min-w-0 w-full items-start gap-0.5 ${hasNote ? "py-1 pr-1" : ""}`}>
       {!empty && !locked ? (
         <span
           role="button"
@@ -588,28 +612,36 @@ function TaskRow({
         onChange={onToggle}
         aria-label={empty ? undefined : t("task.markComplete", { title: node.title })}
         aria-describedby={goalTooltip.descriptionId}
-        className="task-check shrink-0"
+        className="task-check shrink-0 justify-center"
       />
       {!empty && allowColor && row.depth === 0 ? <ColorSlotButton task={node} disabled={locked} onPick={onPickColor} relations={relations} /> :
         !empty && relations && (!allowColor || row.depth > 0) ? <ParentGoalPicker task={node} relations={relations} locked={locked} nested={row.depth > 0} descriptionId={goalTooltip.descriptionId} /> :
         <span className="task-color-control" aria-hidden="true" />}
-      <textarea
-        rows={1}
-        ref={(element) => { titleRef.current = element; onInputRef(element); }}
-        value={draft}
-        readOnly={locked}
-        placeholder={placeholder}
-        aria-label={empty ? placeholder : undefined}
-        aria-describedby={goalTooltip.descriptionId}
-        onChange={(e) => onDraftChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        onBlur={onBlur}
-        className={[
-          "min-w-0 flex-1 resize-none overflow-hidden rounded-sm bg-transparent px-1 py-0 text-body !leading-7 outline-none",
-          /* 完成态：删除线 + 提示色——弱化是有意的可读性取舍（spec: 弱化文本）。 */
-          node.proposal === "delete" ? "text-secondary line-through decoration-current/40" : node.completed ? "text-hint line-through" : "text-primary",
-        ].join(" ")}
-      />
+      <div className="relative min-w-0 flex-1">
+        <textarea
+          rows={1}
+          ref={(element) => { titleRef.current = element; onInputRef(element); }}
+          value={draft}
+          readOnly={locked}
+          placeholder={placeholder}
+          aria-label={empty ? placeholder : undefined}
+          aria-describedby={goalTooltip.descriptionId}
+          onFocus={(event) => {
+            event.currentTarget.style.height = "0px";
+            event.currentTarget.style.height = `${Math.max(28, event.currentTarget.scrollHeight)}px`;
+          }}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={(event) => { event.currentTarget.style.height = "28px"; onBlur(); }}
+          className={[
+            "block min-w-0 w-full resize-none overflow-hidden rounded-sm bg-transparent px-1 py-0 text-body !leading-7 outline-none",
+            draft && "task-title-preview",
+            /* 完成态：删除线 + 提示色——弱化是有意的可读性取舍（spec: 弱化文本）。 */
+            titleTone,
+          ].join(" ")}
+        />
+        {draft && <span aria-hidden="true" className={`pointer-events-none absolute inset-x-0 top-0 block h-7 truncate rounded-sm px-1 text-body !leading-7 ${titleTone}`}>{draft}</span>}
+      </div>
       {node.proposal && <span className="mr-1 flex h-7 shrink-0 items-center gap-1 text-[11px] text-secondary">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
         {node.proposal === "delete" ? t("task.proposalDelete") : t("task.proposalPreview")}
@@ -635,9 +667,17 @@ function TaskRow({
         </span>
       )}
       {goalTooltip.tooltip}
+      </div>
+      {hasNote && <div role="note" className="w-full border-t border-light bg-subtle px-3 py-2">
+        <p ref={noteRef} className={`m-0 whitespace-pre-wrap break-words text-[12px] leading-[18px] text-secondary ${noteExpanded ? "" : "line-clamp-2"}`}>{note}</p>
+        {noteCanExpand && <button type="button" className="mt-1 text-[11px] leading-[17px] text-focus hover:underline"
+          aria-expanded={noteExpanded} onClick={() => setNoteExpanded((expanded) => !expanded)}>
+          {t(noteExpanded ? "task.noteCollapse" : "task.noteExpand")}
+        </button>}
+      </div>}
     </div>
     {detailOpen && <TaskDetailDialog task={node} locked={locked} onClose={() => setDetailOpen(false)}
-      returnFocusTo={titleRef} cycleLabel={cycleLabel}
+      returnFocusTo={titleRef} cycleLabel={cycleLabel} cycleType={cycleType}
       parentGoalTitle={node.parent_id && relations?.tasks.get(node.parent_id)?.cycle_id !== node.cycle_id
         ? relations?.tasks.get(node.parent_id)?.title : undefined} />}
   </>);

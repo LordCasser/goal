@@ -117,6 +117,37 @@ pub fn list_with_proposals_by_cycle(conn: &Connection, cycle_id: &str) -> AppRes
     list_by_cycle_filtered(conn, cycle_id, "")
 }
 
+/// Direct cross-level children of a goal or weekly item, across all dates.
+/// Same-cycle substeps and indirect descendants are intentionally excluded.
+pub fn list_direct_linked_children(
+    conn: &Connection,
+    parent_id: &str,
+    parent_type: CycleType,
+) -> AppResult<Vec<(Task, String, Option<String>)>> {
+    let mut statement = conn.prepare(
+        "SELECT t.*, c.type AS linked_cycle_type, c.starts_on AS linked_starts_on
+         FROM tasks t JOIN cycles c ON c.id = t.cycle_id
+         WHERE t.parent_id = ?1 AND t.proposal IS NULL AND TRIM(t.title) <> ''
+           AND ((?2 = 'month' AND c.type IN ('week', 'day'))
+             OR (?2 = 'week' AND c.type = 'day'))
+         ORDER BY c.starts_on, CASE c.type WHEN 'week' THEN 0 ELSE 1 END,
+                  t.position, t.created_at, t.id"
+    )
+    .map_err(from_rusqlite)?;
+    let rows = statement
+        .query_map(params![parent_id, parent_type.as_str()], |row| {
+            Ok((
+                row_to_task(row)?,
+                row.get("linked_cycle_type")?,
+                row.get("linked_starts_on")?,
+            ))
+        })
+        .map_err(from_rusqlite)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(from_rusqlite)?;
+    Ok(rows)
+}
+
 fn list_by_cycle_filtered(conn: &Connection, cycle_id: &str, extra: &str) -> AppResult<Vec<Task>> {
     let mut stmt = conn
         .prepare(&format!(

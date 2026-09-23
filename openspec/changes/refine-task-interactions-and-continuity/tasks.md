@@ -29,4 +29,4 @@
 
 - [x] 4.1 同步 `docs/design.md`、`docs/desktop-build.md`、主规范和活跃 `add-calendar-time-view` 的冲突拖拽描述；明确计划空输入行始终显示在最后，Later 恢复项持久排序在其前，并保留行内输入交互。
 - [x] 4.2 运行 `openspec validate refine-task-interactions-and-continuity --strict`、Rust 与前端相关测试，记录仍受平台条件限制的验收项。
-- [ ] 4.3 手工检查 macOS、Windows、Linux 的右键剪贴板、键盘焦点和窗口拖动；可用平台逐项记录结果，不可用平台记录待验收原因。
+- [ ] 4.3 手工检查 macOS、Windows、Linux 的右键剪贴板、键盘焦点和窗口拖动；可用平台逐项记录结果，不可用平台记录待验收原因。（独立 macOS 预览中确认任务编辑框右键菜单可打开、Escape 可关闭；剪贴板内容与窗口拖动尚未完整核对；Windows/Linux 原生验收按用户要求跳过）

@@ -127,6 +127,19 @@ fn cycle_preview_counts_focus_blocks_and_cascades_cross_cycle_task_children() {
 }
 
 #[test]
+fn cycle_preview_excludes_blank_input_rows_but_counts_blank_structural_parents() {
+    let db = TestDb::open();
+    let month = create_long_term(&db.db, TODAY, 1);
+    let blank_parent = add_task(&db.db, &month.id, "", NOW);
+    let child = add_task(&db.db, &month.id, "Meaningful child", NOW + 1);
+    tasks::set_task_parent_link(&db.db, &child.id, Some(&blank_parent.id)).unwrap();
+    add_task(&db.db, &month.id, "   ", NOW + 2);
+
+    let preview = cycles::get_cycle_deletion_preview(&db.db, &month.id).unwrap();
+    assert_eq!(preview.tasks, 2);
+}
+
+#[test]
 fn deleting_a_task_preserves_an_independent_focus_block() {
     let db = TestDb::open();
     let month = create_long_term(&db.db, TODAY, 1);

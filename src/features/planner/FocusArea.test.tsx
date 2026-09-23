@@ -3,12 +3,18 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { applyLocale } from "../../lib/i18n";
 import { qk } from "../../lib/events";
-import type { EditorWorkspace, TaskNode } from "../../lib/ipc";
+import type { Cycle, EditorWorkspace, TaskNode } from "../../lib/ipc";
 
 const mocks = vi.hoisted(() => ({
   addSession: vi.fn(),
   getEditorWorkspace: vi.fn(),
 }));
+const reminderMocks = vi.hoisted(() => ({ setReminder: vi.fn() }));
+vi.mock("../reminders/api", async (original) => ({
+  ...(await original<typeof import("../reminders/api")>()),
+  setReminder: reminderMocks.setReminder,
+}));
+vi.mock("./CycleOptionsMenu", () => ({ CycleOptionsMenu: () => null }));
 
 vi.mock("../../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/ipc")>()),
@@ -16,7 +22,14 @@ vi.mock("../../lib/ipc", async (importOriginal) => ({
   getEditorWorkspace: mocks.getEditorWorkspace,
 }));
 
-import { AddFocusBlockForm } from "./FocusArea";
+import { AddFocusBlockForm, FocusArea } from "./FocusArea";
+
+function cycle(id: string, type: Cycle["type"], parent_id: string | null): Cycle {
+  return { id, type, parent_id, title: id, task_id: null, position: 0, archived: false,
+    started: false, finished: false, started_at: null, finished_at: null,
+    duration: 25 * 60_000, focused_time: 0, starts_on: null, ends_on: null,
+    calendar_key: null, repeat_id: null, created_at: 0 };
+}
 
 function task(id: string, title: string, cycle_id: string, over: Partial<TaskNode> = {}): TaskNode {
   return {
@@ -140,4 +153,19 @@ describe("AddFocusBlockForm task association", () => {
     });
     resolve?.();
   });
+});
+
+it("sets a reminder for the selected focus block", async () => {
+  applyLocale("en");
+  reminderMocks.setReminder.mockResolvedValue({ id: "r1" });
+  render(<QueryClientProvider client={new QueryClient()}>
+    <FocusArea day={cycle("day-a", "day", null)} sessions={[cycle("session-a", "session", "day-a")]} runningSessionId={null} />
+  </QueryClientProvider>);
+  fireEvent.click(screen.getByRole("button", { name: "Reminder · session-a" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Reminder time · Date" }), { target: { value: "2026-09-24" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Reminder time · Time" }), { target: { value: "09:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save reminder" }));
+  await waitFor(() => expect(reminderMocks.setReminder).toHaveBeenCalledWith({
+    target_kind: "session", target_id: "session-a", fire_at: new Date("2026-09-24T09:00").getTime(), quiet_ok: false,
+  }));
 });

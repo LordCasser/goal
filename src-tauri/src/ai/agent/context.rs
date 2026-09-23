@@ -279,6 +279,9 @@ fn cycle_key(cycle: &Cycle) -> String {
                 calendar::parse_date(start).unwrap_or_default(),
                 calendar::parse_date(end).unwrap_or_default(),
             ),
+            (Some(start), None) => calendar::open_long_term_key(
+                calendar::parse_date(start).unwrap_or_default(),
+            ),
             _ => cycle.id.clone(),
         },
         CycleType::Week => match &cycle.starts_on {

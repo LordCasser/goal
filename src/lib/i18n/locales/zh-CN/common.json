@@ -5,5 +5,19 @@
   "duration.hours_other": "{{count}} 小时",
   "duration.hoursMinutes": "{{hours}} 小时 {{minutes}} 分钟",
   "error.generic": "操作失败，请重试。",
-  "error.detail": "操作未完成：{{detail}}"
+  "error.detail": "操作未完成：{{detail}}",
+  "picker.chooseDate": "选择日期",
+  "picker.chooseMonth": "选择月份",
+  "picker.previousMonth": "上个月",
+  "picker.nextMonth": "下个月",
+  "picker.previousYear": "上一年",
+  "picker.nextYear": "下一年",
+  "picker.openCalendar": "打开日历",
+  "picker.openTime": "选择时间",
+  "picker.date": "日期",
+  "picker.time": "时间",
+  "picker.hour": "小时",
+  "picker.minute": "分钟",
+  "picker.dateFormat": "YYYY-MM-DD",
+  "picker.timeFormat": "HH:mm"
 }

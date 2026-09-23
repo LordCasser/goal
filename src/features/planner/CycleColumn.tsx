@@ -9,8 +9,6 @@ import { useRef, useState } from "react";
 import { type Cycle, type ProgressCheck, lifecycleOf, listSessions } from "../../lib/ipc";
 import { qk } from "../../lib/events";
 import {
-  addDaysISO,
-  daysBetween,
   formatDateRange,
   isoWeekNumber,
   remainingWeeks,
@@ -105,12 +103,7 @@ export function CycleColumn({
 }
 
 function progressCheckForCycle(cycle: Cycle): ProgressCheck | null {
-  if (cycle.type !== "month" || !cycle.starts_on || !cycle.ends_on) return null;
-  if (cycle.progress_check) return cycle.progress_check;
-  const days = daysBetween(cycle.ends_on, cycle.starts_on);
-  if (days === null || days <= 1) return null;
-  // Keep old null rows aligned with the backend's historical midpoint rule.
-  return { kind: "once", date: addDaysISO(cycle.starts_on, Math.floor(days / 2)) };
+  return cycle.type === "month" ? cycle.progress_check ?? null : null;
 }
 
 function ProgressCheckDisclosure({
@@ -123,7 +116,7 @@ function ProgressCheckDisclosure({
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const check = progressCheckForCycle(cycle);
-  if (!check || !cycle.starts_on || !cycle.ends_on) return null;
+  if (!check || !cycle.starts_on) return null;
   const preview = deriveCustomTimeline(cycle.starts_on, cycle.ends_on, check);
   const shortRule = check.kind === "once"
     ? t("cycle.progressOnce", { date: formatDate(check.date, { month: "short", day: "numeric" }) })
@@ -166,14 +159,14 @@ function ProgressCheckDisclosure({
         </div>
         <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-caption text-secondary">
           {preview.days !== null && <span>{t("duration.customDays", { count: preview.days })}</span>}
-          <span>{t("duration.checkCount", { count: preview.totalChecks })}</span>
+          {preview.totalChecks !== null && <span>{t("duration.checkCount", { count: preview.totalChecks })}</span>}
         </div>
-        {preview.totalChecks > 0 ? (
+        {preview.checkDates.length > 0 ? (
           <>
             <ul className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-caption text-hint">
               {preview.checkDates.map((date) => <li key={date}>{formatDate(date, { month: "short", day: "numeric" })}</li>)}
             </ul>
-            {preview.totalChecks > preview.checkDates.length && <p className="mt-1 text-caption text-hint">{t("cycle.progressMore", { count: preview.totalChecks - preview.checkDates.length })}</p>}
+            {preview.totalChecks !== null && preview.totalChecks > preview.checkDates.length && <p className="mt-1 text-caption text-hint">{t("cycle.progressMore", { count: preview.totalChecks - preview.checkDates.length })}</p>}
           </>
         ) : (
           <p className="mt-2 text-caption text-hint">{t("cycle.progressNone")}</p>
@@ -205,10 +198,14 @@ function titleText(cycle: Cycle, t: (key: string, options?: Record<string, unkno
 function metaLine(cycle: Cycle, today: string, t: (key: string, options?: Record<string, unknown>) => string): string | null {
   const parts: string[] = [];
   if (cycle.type === "month") {
-    const range = formatDateRange(cycle.starts_on, cycle.ends_on);
-    if (range) parts.push(range);
-    const weeks = remainingWeeks(cycle.ends_on, today);
-    if (weeks !== null) parts.push(weeks > 0 ? t("cycle.weeksLeft", { count: weeks }) : t("cycle.endedLabel"));
+    if (cycle.starts_on && !cycle.ends_on) {
+      parts.push(`${formatDate(cycle.starts_on, { year: "numeric", month: "short", day: "numeric" })} · ${t("duration.open")}`);
+    } else {
+      const range = formatDateRange(cycle.starts_on, cycle.ends_on);
+      if (range) parts.push(range);
+      const weeks = remainingWeeks(cycle.ends_on, today);
+      if (weeks !== null) parts.push(weeks > 0 ? t("cycle.weeksLeft", { count: weeks }) : t("cycle.endedLabel"));
+    }
   } else if (cycle.type === "week") {
     const range = formatDateRange(cycle.starts_on, cycle.ends_on);
     if (range) parts.push(range);

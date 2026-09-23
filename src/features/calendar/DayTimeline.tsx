@@ -9,7 +9,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 
-import { Button, EmptyState, Popover, cn } from "../../ui";
+import { Button, EmptyState, Popover, TimePicker, cn } from "../../ui";
 import { todayISO } from "../planner/dates";
 import { useTranslation, formatDuration, formatDate } from "../../lib/i18n";
 import type { CalendarDay, TimeBudget } from "./api";
@@ -246,10 +246,9 @@ export function DayTimeline({
           <form onSubmit={(event) => { event.preventDefault(); finishTimeEdit(editingItem.session.id); }}>
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
               <div>
-                <label className="mb-1 block text-caption text-secondary" htmlFor="focus-start">{t("calendar.startTime")}</label>
-                <input id="focus-start" aria-label={t("calendar.startTimeFor", { title: editingItem.session.title })} type="time" step={60}
-                  required value={editingStart} disabled={saving} onChange={(event) => setEditingStart(event.target.value)}
-                  className="h-10 w-full min-w-0 rounded-md border border-control bg-content px-2 py-2 text-menu text-primary outline-none focus:border-focus" />
+                <span className="mb-1 block text-caption text-secondary">{t("calendar.startTime")}</span>
+                <TimePicker aria-label={t("calendar.startTimeFor", { title: editingItem.session.title })}
+                  value={editingStart} disabled={saving} onChange={setEditingStart} className="w-full" />
               </div>
               <div>
                 <label className="mb-1 block text-caption text-secondary" htmlFor="focus-duration">{t("calendar.durationMinutes")}</label>

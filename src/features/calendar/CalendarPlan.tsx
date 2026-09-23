@@ -50,7 +50,7 @@ export function CalendarPlan({ active = true, date, day, cycles, workspaces, rel
     className={cn("task-row flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-menu hover:bg-hover focus-visible:outline-2 focus-visible:outline-focus",
       task.completed && "text-hint line-through")}>
     <span className="task-color-slot mt-0.5 shrink-0" aria-hidden="true" style={{ backgroundColor: taskColor(task, relations.tasks) ?? "transparent", borderColor: taskColor(task, relations.tasks) ?? undefined }} />
-    <span>{task.title}</span>
+    <span className="min-w-0 flex-1 truncate">{task.title}</span>
   </button>;
 
   return <div className="min-h-0 flex-1 overflow-y-auto" aria-label={t("calendar.dayPlan", { date: displayDate })}

@@ -42,7 +42,7 @@ function relationTask(id: string, cycle_id: string, parent_id: string | null = n
 }
 const cycles = [cycle("m1", "month", null, "2026-09-01", "2026-12-01"), cycle("m2", "month", null, "2026-12-01", "2027-03-01"), cycle("w1", "week", "m1", "2026-09-14", "2026-09-21"), cycle("w2", "week", "m1", "2026-09-21", "2026-09-28"), cycle("d1", "day", "w1", "2026-09-15", "2026-09-16"), cycle("d2", "day", "w2", "2026-09-22", "2026-09-23")];
 afterEach(() => vi.useRealTimers());
-beforeEach(() => { mocks.getEditorWorkspace.mockResolvedValue({ tasks: [], work_mix: null }); mocks.listSessions.mockResolvedValue([]); mocks.getSettings.mockResolvedValue({ week_start_day: 1, locale: "en", theme: "white", show_relation_lines: false }); mocks.getPlannerState.mockResolvedValue({ cycles }); mocks.getEditorWorkspacesByCycleIds.mockResolvedValue({}); });
+beforeEach(() => { mocks.getEditorWorkspace.mockResolvedValue({ tasks: [], work_mix: null }); mocks.listSessions.mockResolvedValue([]); mocks.getSettings.mockResolvedValue({ week_start_day: 1, locale: "en", theme: "white", show_relation_lines: true }); mocks.getPlannerState.mockResolvedValue({ cycles }); mocks.getEditorWorkspacesByCycleIds.mockResolvedValue({}); });
 function workspaceElement(props: Partial<import("react").ComponentProps<typeof PlannerWorkspace>> = {}, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return <QueryClientProvider client={client}><PlannerWorkspace {...props} /></QueryClientProvider>;
 }
@@ -67,14 +67,14 @@ function dispatchMouseDown(target: HTMLElement, init: Partial<MouseEventInit> = 
   return event;
 }
 describe("time navigation", () => {
-  it("keeps relation lines off by default and responds to the shared settings preference", async () => {
+  it("shows relation lines by default and responds to the shared settings preference", async () => {
     const { client, container } = mount();
     await screen.findByText("d1");
-    expect(container.querySelector("[data-relation-layer]")).toBeNull();
-    act(() => client.setQueryData(qk.settings(), { week_start_day: 1, locale: "en", theme: "white", show_relation_lines: true }));
     await waitFor(() => expect(container.querySelector("[data-relation-layer]")).toBeTruthy());
     act(() => client.setQueryData(qk.settings(), { week_start_day: 1, locale: "en", theme: "white", show_relation_lines: false }));
     await waitFor(() => expect(container.querySelector("[data-relation-layer]")).toBeNull());
+    act(() => client.setQueryData(qk.settings(), { week_start_day: 1, locale: "en", theme: "white", show_relation_lines: true }));
+    await waitFor(() => expect(container.querySelector("[data-relation-layer]")).toBeTruthy());
   });
   const weekList = () => screen.getByRole("listbox", { name: "Weeks" });
   const dayList = () => screen.getByRole("listbox", { name: "Days" });
@@ -133,6 +133,16 @@ describe("time navigation", () => {
     await screen.findByText("w1");
     expect(articles()).toEqual(["w1", "d1"]);
     expect(within(weekList()).getAllByRole("option").filter((row) => row.hasAttribute("aria-current"))).toHaveLength(1);
+  });
+  it("selects an open long-term cycle after its start date", async () => {
+    mocks.getPlannerState.mockResolvedValue({ cycles: [
+      { ...cycles[0], id: "open", starts_on: "2026-09-01", ends_on: null, duration: null },
+      { ...cycles[1], starts_on: "2026-10-01", ends_on: "2026-12-01" },
+      ...cycles.slice(2),
+    ] });
+    mount();
+    await screen.findByTestId("header-open");
+    expect(articles()[0]).toBe("open");
   });
   it("clicking a week opens its first date, without creating an empty day", async () => {
     mount();
@@ -392,6 +402,29 @@ describe("workspace mouse-wheel routing", () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(workspace.scrollLeft).toBe(48);
+  });
+
+  it("normalizes line and page wheel units for workspace and active-pane routing", async () => {
+    mount();
+    const workspace = await screen.findByLabelText("Planning workspace");
+    const pane = screen.getByTestId("pane-m1");
+    defineScrollMetrics(workspace, { scrollWidth: 1600, clientWidth: 500, clientHeight: 360 });
+    defineScrollMetrics(pane, { scrollHeight: 1200, clientHeight: 240 });
+
+    dispatchWheel(workspace, { deltaY: 2, deltaMode: WheelEvent.DOM_DELTA_LINE });
+    expect(workspace.scrollLeft).toBe(32);
+    dispatchWheel(workspace, { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE });
+    expect(workspace.scrollLeft).toBe(392);
+
+    dispatchMouseDown(pane);
+    const activePageWheel = dispatchWheel(pane, {
+      deltaX: 0.5,
+      deltaY: 1,
+      deltaMode: WheelEvent.DOM_DELTA_PAGE,
+    });
+    expect(activePageWheel.defaultPrevented).toBe(true);
+    expect(pane.scrollTop).toBe(240);
+    expect(workspace.scrollLeft).toBe(392);
   });
 
   it("keeps native vertical scrolling after a primary click on a plan scrollport", async () => {

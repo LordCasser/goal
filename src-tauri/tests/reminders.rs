@@ -672,17 +672,30 @@ fn scheduler_caches_the_summary_until_acknowledged() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn scheduler_collects_away_reminders_before_live_delivery_starts() {
+    let db = TestDb::open();
+    let day = day_fixture(&db);
+    let task = add_task(&db.db, &day.id, "missed while away", NOW);
+    let missed = set_reminder(&db.db, "task", &task.id, NOW - 1_000, false);
+    let notifier = notifier_granted();
+
+    let scheduler = Scheduler::new(db.db.clone(), notifier.clone(), None).spawn().unwrap();
+    let summary = scheduler.collect_missed(planner_lib::service::now_ms()).unwrap();
+    assert_eq!(summary.ids, vec![missed.id]);
+    assert_eq!(scheduler.run_pass(planner_lib::service::now_ms()).unwrap().notified, 0);
+    assert!(notifier.notifications().is_empty());
+}
+
+#[test]
 fn scheduler_thread_delivers_when_the_trigger_time_reaches() {
     let db = TestDb::open();
     let day = day_fixture(&db);
     let task = add_task(&db.db, &day.id, "soon", NOW);
     let notifier = notifier_granted();
-    let scheduler = Scheduler::new(db.db.clone(), notifier.clone(), None).spawn();
+    let scheduler = Scheduler::new(db.db.clone(), notifier.clone(), None).spawn().unwrap();
 
-    // Establish that the newly spawned thread completed its first empty-queue
-    // pass and is now allowed to take the long idle wait. The command layer
-    // must wake it after committing a new reminder; extending this deadline
-    // would only hide the production race.
+    // Startup collection establishes the heartbeat before spawning; the
+    // command layer must still wake the timer after committing a reminder.
     let empty_pass_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while settings_repo::get(&db.conn(), reminders::KEY_LAST_SEEN_AT)
         .expect("read scheduler heartbeat")

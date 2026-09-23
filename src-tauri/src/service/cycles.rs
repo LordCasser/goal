@@ -3,14 +3,15 @@
 //!
 //! Behaviour contract: `openspec/specs/planning-cycles/spec.md`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDate;
 use rusqlite::Connection;
 
 use crate::db::Db;
 use crate::domain::calendar::{
-    self, calculate_ends_on, dated_cycle_bounds, day_key, format_date, long_term_key, parse_date,
+    self, calculate_ends_on, dated_cycle_bounds, day_key, format_date, long_term_key,
+    open_long_term_key, parse_date,
     week_key,
 };
 use crate::domain::cycle::{
@@ -105,9 +106,18 @@ pub fn create_planning_cycle(
             }
             let (starts_on, ends_on) = match (&args.starts_on, &args.ends_on, args.duration_months)
             {
-                (Some(start), Some(end), None) => calendar::custom_long_term_bounds(start, end)?,
+                (Some(start), Some(end), None) => {
+                    let (start, end) = calendar::custom_long_term_bounds(start, end)?;
+                    (start, Some(end))
+                }
+                (Some(start), None, None) => {
+                    let start = parse_date(start)
+                        .filter(|date| start.len() == 10 && format_date(*date) == start.as_str())
+                        .ok_or_else(|| AppError::validation("invalid_date", "Choose a valid start date."))?;
+                    (start, None)
+                }
                 (None, None, Some(months)) if LONG_TERM_DURATIONS_MONTHS.contains(&months) => {
-                    (today, calculate_ends_on(today, months))
+                    (today, Some(calculate_ends_on(today, months)))
                 }
                 (None, None, Some(_)) => {
                     return Err(AppError::validation(
@@ -128,15 +138,15 @@ pub fn create_planning_cycle(
                     ))
                 }
             };
-            let duration = (ends_on - starts_on).num_days() * crate::domain::cycle::MS_PER_DAY;
-            let key = long_term_key(starts_on, ends_on);
+            let duration = ends_on.map(|end| (end - starts_on).num_days() * crate::domain::cycle::MS_PER_DAY);
+            let key = ends_on.map_or_else(|| open_long_term_key(starts_on), |end| long_term_key(starts_on, end));
             let position = next_cycle_position(&tx, None)?;
             (
                 None,
                 position,
                 Some(starts_on),
-                Some(ends_on),
-                Some(duration),
+                ends_on,
+                duration,
                 Some(key),
                 args.title.clone().unwrap_or_else(|| "Long-term".into()),
             )
@@ -214,16 +224,10 @@ pub fn create_planning_cycle(
         created_at: now,
     };
     repo::insert(&tx, &new)?;
-    if kind == CycleType::Month {
+    if let Some(check) = args.progress_check.as_ref().filter(|_| kind == CycleType::Month) {
         let start = starts_on.expect("long-term start validated");
-        let end = ends_on.expect("long-term end validated");
-        let check = args.progress_check.clone().unwrap_or_else(|| {
-            crate::domain::cycle::ProgressCheck::Once {
-                date: format_date(calendar::add_days(start, (end - start).num_days() / 2)),
-            }
-        });
-        calendar::validate_progress_check(&check, start, end)?;
-        let json = serde_json::to_string(&check).map_err(|e| AppError::Internal(e.to_string()))?;
+        calendar::validate_progress_check(check, start, ends_on)?;
+        let json = serde_json::to_string(check).map_err(|e| AppError::Internal(e.to_string()))?;
         tx.execute(
             "UPDATE cycles SET progress_check = ?1 WHERE id = ?2",
             rusqlite::params![json, new.id],
@@ -541,6 +545,7 @@ fn find_covering_cycle(conn: &Connection, kind: CycleType, date: &str) -> AppRes
         .filter(|c| c.cycle_type == kind && !c.finished)
         .filter(|c| match (c.starts_on.as_deref(), c.ends_on.as_deref()) {
             (Some(s), Some(e)) => s <= date && date < e,
+            (Some(s), None) if kind == CycleType::Month => s <= date,
             _ => false,
         })
         .min_by_key(|c| c.created_at))
@@ -675,7 +680,9 @@ pub fn start_cycle(db: &Db, cycle_id: &str, now: i64) -> AppResult<Mutation<Cycl
     // A cycle without a set duration cannot enter the lifecycle at all
     // (spec: 启动周期前必须有时长). The Later container's duration of 0
     // counts as "not set".
-    if target.duration.map(|d| d <= 0).unwrap_or(true) {
+    let open_long_term = target.cycle_type == CycleType::Month
+        && target.starts_on.is_some() && target.ends_on.is_none() && target.duration.is_none();
+    if !open_long_term && target.duration.map(|d| d <= 0).unwrap_or(true) {
         return Err(AppError::validation(
             "cycle_duration_required",
             "Cycle duration must be set before starting",
@@ -824,12 +831,28 @@ pub fn get_cycle_deletion_preview(db: &Db, cycle_id: &str) -> AppResult<CycleDel
     let target = repo::require(&conn, cycle_id)?;
     let guard = deletion_guard(&conn, &target)?;
     let impact = crate::service::deletion::cycle_impact(&conn, cycle_id)?;
+    let impacted_tasks = impact
+        .task_ids
+        .iter()
+        .map(|id| tasks_repo::require(&conn, id))
+        .collect::<AppResult<Vec<_>>>()?;
+    let parent_ids: HashSet<&str> = impacted_tasks
+        .iter()
+        .filter_map(|task| task.parent_id.as_deref())
+        .collect();
+    let tasks = impacted_tasks
+        .iter()
+        .filter(|task| {
+            task.proposal.is_none()
+                && (!is_empty_input_row(task) || parent_ids.contains(task.id.as_str()))
+        })
+        .count() as i64;
     Ok(CycleDeletionPreview {
         cycle_id: cycle_id.to_string(),
         guard_code: guard.as_ref().map(|(code, _)| code.clone()),
         guard_message: guard.map(|(_, message)| message),
         descendant_cycles: impact.descendant_cycles,
-        tasks: impact.task_ids.len() as i64,
+        tasks,
         started_sessions: impact.started_focus_count,
         total_focus_blocks: impact.total_focus_blocks,
         confirmation_token: impact.token,
@@ -837,7 +860,12 @@ pub fn get_cycle_deletion_preview(db: &Db, cycle_id: &str) -> AppResult<CycleDel
 }
 
 pub fn delete_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
-    delete_cycle_inner(db, cycle_id, None, false)
+    delete_cycle_inner(db, cycle_id, None, false, false)
+}
+
+/// Trusted user action, such as an approved Coach deletion.
+pub fn trash_cycle(db: &Db, cycle_id: &str) -> AppResult<Mutation<()>> {
+    delete_cycle_inner(db, cycle_id, None, false, true)
 }
 
 /// GUI deletion entry point.  The impact is recomputed inside the same
@@ -848,7 +876,7 @@ pub fn delete_cycle_confirmed(
     cycle_id: &str,
     confirmation_token: Option<&str>,
 ) -> AppResult<Mutation<()>> {
-    delete_cycle_inner(db, cycle_id, confirmation_token, true)
+    delete_cycle_inner(db, cycle_id, confirmation_token, true, true)
 }
 
 /// Remove the focus blocks currently shown on one day as one transaction.
@@ -873,17 +901,41 @@ pub fn delete_day_focus_blocks(
         return Err(AppError::conflict("day_content_changed", "The day's focus blocks changed; review the day and try again"));
     }
     let mut mutation = Mutation::new(sessions.len()).touching_cycle(day_cycle_id);
-    for session in sessions {
+    let mut impacts = Vec::with_capacity(sessions.len());
+    for session in &sessions {
         crate::service::proposals::ensure_cycle_tree_unlocked(&tx, &session.id)?;
         let impact = crate::service::deletion::cycle_impact(&tx, &session.id)?;
         for task_id in &impact.task_ids {
             crate::service::tasks::ensure_task_editable(&tx, task_id, true)?;
         }
-        let changes = crate::service::deletion::prepare_deletion(&tx, &impact)?;
+        impacts.push(impact);
+    }
+    if let Some(mut impact) = impacts.into_iter().reduce(|mut combined, next| {
+        combined.cycle_ids.extend(next.cycle_ids);
+        combined.task_ids.extend(next.task_ids);
+        combined.task_cycle_ids.extend(next.task_cycle_ids);
+        combined.descendant_cycles += next.descendant_cycles;
+        combined.total_focus_blocks += next.total_focus_blocks;
+        combined.started_focus_count += next.started_focus_count;
+        combined
+    }) {
+        for ids in [&mut impact.cycle_ids, &mut impact.task_ids, &mut impact.task_cycle_ids] {
+            ids.sort();
+            ids.dedup();
+        }
+        let title = if sessions.len() == 1 {
+            sessions[0].title.clone()
+        } else {
+            format!("{} ({})", day.title, sessions.len())
+        };
+        crate::service::trash::archive_in_tx(&tx, "cycle", day_cycle_id, &title, &day.title, &impact)?;
+        mutation.merge(crate::service::deletion::prepare_deletion(&tx, &impact)?);
+    }
+    for session in sessions {
         repo::delete(&tx, &session.id)?;
-        mutation.merge(changes);
     }
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
+    mutation.trash_changed = mutation.value > 0;
     Ok(mutation)
 }
 
@@ -892,6 +944,7 @@ fn delete_cycle_inner(
     cycle_id: &str,
     confirmation_token: Option<&str>,
     require_confirmation: bool,
+    archive: bool,
 ) -> AppResult<Mutation<()>> {
     let mut conn = db.pool().get()?;
     let tx = conn
@@ -913,10 +966,18 @@ fn delete_cycle_inner(
     for task_id in &impact.task_ids {
         crate::service::tasks::ensure_task_editable(&tx, task_id, true)?;
     }
-    let mutation = crate::service::deletion::prepare_deletion(&tx, &impact)?;
+    if archive {
+        let origin = match target.parent_id.as_deref() {
+            Some(parent) => repo::require(&tx, parent)?.title,
+            None => "Workspace".to_string(),
+        };
+        crate::service::trash::archive_in_tx(&tx, "cycle", cycle_id, &target.title, &origin, &impact)?;
+    }
+    let mut mutation = crate::service::deletion::prepare_deletion(&tx, &impact)?;
     repo::delete(&tx, cycle_id)?;
     tx.commit().map_err(|e| AppError::Db(e.to_string()))?;
 
+    mutation.trash_changed = archive;
     Ok(mutation)
 }
 

@@ -105,9 +105,11 @@ function props() {
   return {
     hasCycle: true,
     laterActive: false,
+    trashActive: false,
     agentActive: false,
     issuesActive: false,
     onToggleLater: vi.fn(),
+    onToggleTrash: vi.fn(),
     onToggleAgent: vi.fn(),
     onReviewChanges: vi.fn(),
     onToggleIssues: vi.fn(),
